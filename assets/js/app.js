@@ -305,7 +305,7 @@ createApp({
             isUpdateScrolledToBottom.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < 10;
         };
         const latestUpdate = reactive({
-            id: 10158, // 确保这是一个五位数ID，每次更新内容时增加这个数字
+            id: 10159, // 确保这是一个五位数ID，每次更新内容时增加这个数字
             date: new Date().toISOString().split('T')[0],
             title: '网站公告',
             content: `
@@ -313,6 +313,7 @@ createApp({
 
 - 新增总结模式精简、均衡、详细三档总结程度
 - 新增总结记忆单条重试功能
+- 新增时间戳默认预设
 - 新增网页存储空间管理
 - 优化总结提示词，提高记忆的信息密度
 - 优化 UI 模板指令顺序、变量分析流程与副模型生成参数
@@ -649,7 +650,7 @@ createApp({
         const normalizeFontFamily = (value) => ['modern', 'serif', 'system'].includes(value) ? value : 'modern';
         const normalizeFontSize = (value) => {
             const size = Number(value);
-            return Number.isFinite(size) ? Math.max(14, Math.min(18, Math.round(size))) : 16;
+            return Number.isFinite(size) ? Math.max(12, Math.min(18, Math.round(size))) : 16;
         };
         const applyFontFamily = (value) => {
             document.documentElement.dataset.appFont = normalizeFontFamily(value);
@@ -874,7 +875,7 @@ createApp({
             { value: 'serif', label: '衬线字体' },
             { value: 'system', label: '系统字体' }
         ];
-        const fontSizeOptions = [14, 15, 16, 17, 18].map(size => ({
+        const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18].map(size => ({
             value: size,
             label: `${size}px`
         }));
@@ -1465,6 +1466,35 @@ createApp({
             return `${safeUuid}:vector`;
         };
 
+        const STORY_TIME_VALUE_PATTERN = /^(\d{1,6})年(\d{1,2})月(\d{1,2})日[ \t]+(\d{1,2})时$/;
+        const STORY_TIME_LINE_PATTERN = /^[ \t]*【(\d{1,6})年(\d{1,2})月(\d{1,2})日[ \t]+(\d{1,2})时】[ \t]*(?=\r?\n|$)/;
+
+        const formatStoryTimeMatch = (match) => {
+            if (!match) return '';
+            const month = Number(match[2]);
+            const day = Number(match[3]);
+            const hour = Number(match[4]);
+            const year = Number(match[1]);
+            const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+            const maxDay = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] || 0;
+            if (year <= 0 || day < 1 || day > maxDay || hour < 0 || hour > 23) return '';
+            return `${match[1]}年${String(month).padStart(2, '0')}月${String(day).padStart(2, '0')}日 ${String(hour).padStart(2, '0')}时`;
+        };
+
+        const normalizeStoryTime = (value) => formatStoryTimeMatch(
+            String(value || '').trim().match(STORY_TIME_VALUE_PATTERN)
+        );
+
+        const extractStoryTime = (text) => formatStoryTimeMatch(
+            String(text || '').match(STORY_TIME_LINE_PATTERN)
+        );
+
+        const stripStoryTimeLine = (text) => {
+            const source = String(text || '');
+            if (!extractStoryTime(source)) return source;
+            return source.replace(STORY_TIME_LINE_PATTERN, '').replace(/^\r?\n/, '').trimStart();
+        };
+
         const isEmbeddingLike = (value) => Array.isArray(value) || ArrayBuffer.isView(value);
 
         const hasVectorEmbedding = (memory) => (
@@ -1536,6 +1566,10 @@ createApp({
             if (Object.prototype.hasOwnProperty.call(memory, 'depth')) {
                 delete memory.depth;
             }
+            const storyTime = normalizeStoryTime(memory.storyTime)
+                || extractStoryTime(memory.paragraph || memory.sourceText || memory.summary);
+            if (storyTime) memory.storyTime = storyTime;
+            else delete memory.storyTime;
             if (typeof memory.embeddingQ === 'string' && memory.embeddingQ.length > 0) {
                 try {
                     memory.embedding = markRuntimeRaw(base64ToInt8Array(memory.embeddingQ));
@@ -1565,13 +1599,16 @@ createApp({
             if (!Array.isArray(items)) return [];
             return items
                 .filter(memory => memory?.classicMemory === true && String(memory.summary || '').trim())
-                .map(memory => markRuntimeRaw({
-                    ...memory,
-                    turn: Math.max(1, Number(memory.turn) || 1),
-                    summary: String(memory.summary || '').trim(),
-                    sourceUserIds: Array.isArray(memory.sourceUserIds) ? memory.sourceUserIds.filter(Boolean) : [],
-                    sourceAssistantIds: Array.isArray(memory.sourceAssistantIds) ? memory.sourceAssistantIds.filter(Boolean) : []
-                }));
+                .map(memory => {
+                    const { storyTime: _storedStoryTime, ...memoryData } = memory;
+                    return markRuntimeRaw({
+                        ...memoryData,
+                        turn: Math.max(1, Number(memory.turn) || 1),
+                        summary: String(memory.summary || '').trim(),
+                        sourceUserIds: Array.isArray(memory.sourceUserIds) ? memory.sourceUserIds.filter(Boolean) : [],
+                        sourceAssistantIds: Array.isArray(memory.sourceAssistantIds) ? memory.sourceAssistantIds.filter(Boolean) : []
+                    });
+                });
         };
 
         const compactMemoryForStorage = (memory) => {
@@ -5744,8 +5781,9 @@ ${content}
                             const scoreValue = escapeXmlAttribute(Number.isFinite(m.vectorScore)
                                 ? `${(m.vectorScore * 100).toFixed(1)}%`
                                 : 'unknown');
+                            const storyTimeValue = escapeXmlAttribute(m.storyTime || '');
                             const fragmentText = indentXmlText(m.paragraph || m.summary || '', 4);
-                            const fragmentTag = `<memory_fragment turn="${turnValue}" similarity="${scoreValue}">`;
+                            const fragmentTag = `<memory_fragment turn="${turnValue}" similarity="${scoreValue}" story_time="${storyTimeValue}">`;
                             return [
                                 `  ${fragmentTag}`,
                                 fragmentText,
@@ -6655,6 +6693,7 @@ ${content}
                     '完整保留剧情推进、人物行动与对象、他人反应、关键话语的说话人和核心含义，以及关系、立场、态度和情绪的变化与原因。只有原句措辞本身具有承诺、拒绝、威胁、暗号、身份确认等意义时才保留必要原话。',
                     '完整保留最新对话中明确出现的人物心理活动，包括真实想法、欲望、动机、判断、犹豫、戒备、期待、恐惧、自我欺骗、未说出口的意图及其触发原因。严格区分角色的内心想法、外在表现和他人对此的猜测，不得把猜测写成事实。',
                     '完整保留时间、地点、场景转移、事件先后，以及会影响后续剧情的设定、身体与精神状态、物品状态与归属、能力、身份、秘密、决定、承诺、冲突、计划和未解决事项。',
+                    '如果最新对话正文带有有效时间戳，必须将原有时间内容统一用一对全角方括号“【】”包裹，独占总结第一行，下一行立即写总结正文，中间不得留空行，例如“【2023年08月01日 07时36分】”；不得更改、补全或编造时间。如果正文没有有效时间戳，则忽略时间戳。',
                     '严格区分每个人知道、误解、隐瞒、猜测或尚未知晓的信息。发生变化的内容要写清变化前后、触发原因和结果；原文含糊或未确认的内容保持含糊，不得推测、补写或编造。',
                     '删除寒暄、修辞、气氛铺陈、重复动作、无新增信息的对白转述，以及无信息量的评价、过渡句和总结过程说明。禁止使用“双方进行了交流”“关系有所发展”“气氛发生变化”“剧情继续推进”“可以看出”等没有具体事实的空话。',
                     `总结正文以 ${summaryLengthRequirement} 为目标；信息较多时优先保留会影响后续剧情的事实与变化，信息不足时允许短于下限，不得重复事实、扩写修辞或补充评价来凑字数。`,
@@ -6875,7 +6914,9 @@ ${content}
                 if (message.role !== 'user' && message.role !== 'assistant') return;
                 const speaker = message.role === 'user' ? user.name : (message.name || currentCharacter.value?.name || 'AI');
                 const sourceLabel = message.role === 'user' ? '用户' : '角色卡';
-                const paragraphs = splitMemoryParagraphs(getCleanMemoryMessageText(message))
+                const cleanMessageText = getCleanMemoryMessageText(message);
+                const storyTime = message.role === 'assistant' ? extractStoryTime(cleanMessageText) : '';
+                const paragraphs = splitMemoryParagraphs(storyTime ? stripStoryTimeLine(cleanMessageText) : cleanMessageText)
                     .flatMap(paragraph => splitLongMemoryParagraph(paragraph, MEMORY_VECTOR_MERGE_MAX_LENGTH));
                 const paragraphGroups = mergeSmallMemoryParagraphs(paragraphs);
                 paragraphGroups.forEach((group) => {
@@ -6886,6 +6927,7 @@ ${content}
                         paragraphEndIndex: group.end,
                         speaker,
                         role: message.role,
+                        storyTime,
                         text: group.text
                     };
                     if (message.role === 'user') {
@@ -6912,7 +6954,11 @@ ${content}
 
             const fragments = sourceBlocks.map((block, index) => {
                 const includeUser = roleBlocks.length > 0 && userLine;
-                const paragraph = [includeUser ? userLine : '', block.text].filter(Boolean).join('\n');
+                const paragraph = [
+                    includeUser ? userLine : '',
+                    block.storyTime ? `剧情时间：${block.storyTime}` : '',
+                    block.text
+                ].filter(Boolean).join('\n');
                 const roles = includeUser ? ['user', block.role] : [block.role];
                 const idParts = [includeUser ? userIdPart : '', block.idPart].filter(Boolean).join('+');
                 return {
@@ -6924,6 +6970,7 @@ ${content}
                     speaker: includeUser ? [user.name, block.speaker].filter(Boolean).join(' + ') : block.speaker,
                     role: roles.length === 1 ? roles[0] : 'mixed',
                     paragraph,
+                    ...(block.storyTime ? { storyTime: block.storyTime } : {}),
                     sourceText: [`第 ${turn || '?'} 轮`, paragraph].filter(Boolean).join('\n'),
                     vectorChunkId: `${turn || 0}:${idParts}`
                 };
@@ -7047,7 +7094,8 @@ ${content}
                 contentFingerprint: getVectorFragmentFingerprint(fragment),
                 embeddingModel: getMemoryEmbeddingModel(),
                 embedding,
-                sourceText: fragment.sourceText
+                sourceText: fragment.sourceText,
+                ...(fragment.storyTime ? { storyTime: fragment.storyTime } : {})
             });
         };
 
@@ -8024,9 +8072,10 @@ ${content}
                 const scoreValue = escapeXmlAttribute(Number.isFinite(memory.vectorScore)
                     ? `${(memory.vectorScore * 100).toFixed(1)}%`
                     : 'unknown');
+                const storyTimeValue = escapeXmlAttribute(memory.storyTime || '');
                 const fragmentText = indentXmlText(memory.paragraph || memory.summary || memory.sourceText || '', 4);
                 return [
-                    `  <memory_fragment turn="${turnValue}" similarity="${scoreValue}">`,
+                    `  <memory_fragment turn="${turnValue}" similarity="${scoreValue}" story_time="${storyTimeValue}">`,
                     fragmentText,
                     '  </memory_fragment>'
                 ].join('\n');
@@ -10666,6 +10715,29 @@ image###生成的提示词###
                     existingAntiEightPartPreset.content = antiEightPartPresetContent;
                 }
             }
+
+            // 1.7.6 Enforce Default Preset (时间戳)
+            const timestampPresetName = '时间戳';
+            const timestampPresetContent = `<timestamp_rule>
+每次进入正文时，第一行必须单独输出当前剧情时间戳，格式示例：【2026年08月01日 14时】。
+
+1. 示例只用于展示格式，实际输出必须根据剧情时间填写明确的年、月、日和小时，并与上一轮时间连续。
+2. 年份必须写成具体数字，严禁使用“20xx年”“20XX年”“YYYY年”“某年”等任何占位或模糊写法。
+3. 时间必须精确到小时；正文没有明确时间时，也要结合世界观和上下文选定一个合理的具体时间，后续保持连续。
+4. 时间戳之后换行再写正文，时间戳必须并作为正文第一行。
+</timestamp_rule>`;
+            const existingTimestampIndex = presets.value.findIndex(p => p.name === timestampPresetName);
+            const timestampPreset = existingTimestampIndex === -1
+                ? { name: timestampPresetName, enabled: true }
+                : presets.value.splice(existingTimestampIndex, 1)[0];
+            timestampPreset.content = timestampPresetContent;
+            timestampPreset.role = 'system';
+            const writingStyleIndex = presets.value.findIndex(p => p.name === antiEightPartPresetName);
+            presets.value.splice(
+                writingStyleIndex === -1 ? presets.value.length : writingStyleIndex,
+                0,
+                normalizePreset(timestampPreset)
+            );
 
             // 1.8 Enforce Default Preset (第二人称)
             const secondPersonPresetName = '第二人称';
