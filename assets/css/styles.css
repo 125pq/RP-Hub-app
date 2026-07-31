@@ -728,6 +728,18 @@
             transform: translateX(calc(100% + 0.125rem));
         }
 
+        .segmented-switch--three .segmented-switch__indicator {
+            width: calc(33.333% - 0.166rem);
+        }
+
+        .segmented-switch--three .segmented-switch__indicator.is-position-2 {
+            transform: translateX(100%);
+        }
+
+        .segmented-switch--three .segmented-switch__indicator.is-position-3 {
+            transform: translateX(200%);
+        }
+
         .segmented-switch--four .segmented-switch__indicator {
             width: calc(25% - 0.125rem);
         }
@@ -776,6 +788,44 @@
 
         .segmented-switch--slim .segmented-switch__option {
             padding-block: 0.375rem;
+        }
+
+        .settings-fields {
+            display: grid;
+            border-top: 1px solid #f3f4f6;
+        }
+
+        .settings-field {
+            position: relative;
+            padding: 1rem 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .settings-field:last-child {
+            border-bottom: 0;
+            padding-bottom: 0.25rem;
+        }
+
+        .settings-model-button {
+            width: 100%;
+            padding: 0.75rem 0.875rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.75rem;
+            background: #fff;
+            color: #374151;
+            font-size: 0.875rem;
+            font-weight: 500;
+            line-height: 1.25rem;
+            text-align: left;
+            cursor: pointer;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .settings-model-button:hover,
+        .settings-model-button:focus-visible {
+            border-color: #93c5fd;
+            box-shadow: 0 0 0 3px rgba(219, 234, 254, 0.7);
+            outline: none;
         }
 
         .settings-icon-button {
@@ -850,7 +900,7 @@
 
         .message-action-bar {
             gap: 0.125rem;
-            padding: 0.1875rem;
+            padding: 0.0625rem 0.125rem;
             border-radius: 9999px;
             border: 1px solid rgba(255, 255, 255, 0.52);
             background: rgba(248, 250, 252, 0.56);
@@ -861,8 +911,8 @@
 
         .message-action-button {
             display: inline-flex;
-            width: 1.875rem;
-            height: 1.875rem;
+            width: 1.75rem;
+            height: 1.625rem;
             flex: none;
             align-items: center;
             justify-content: center;
@@ -1266,8 +1316,8 @@
 
         @media (min-width: 768px) {
             .message-action-button {
-                width: 2rem;
-                height: 2rem;
+                width: 1.875rem;
+                height: 1.75rem;
             }
 
             .app-sidebar {
