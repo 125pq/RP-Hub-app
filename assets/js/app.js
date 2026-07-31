@@ -309,7 +309,7 @@ createApp({
             date: new Date().toISOString().split('T')[0],
             title: '网站公告',
             content: `
-### RP-Hub 1.7.9
+### RP-Hub 1.7.8
 
 - 新增总结模式精简、均衡、详细三档总结程度
 - 新增总结记忆单条重试功能
