@@ -10719,7 +10719,7 @@ image###生成的提示词###
             // 1.7.6 Enforce Default Preset (时间戳)
             const timestampPresetName = '时间戳';
             const timestampPresetContent = `<timestamp_rule>
-每次进入正文时，第一行必须单独输出当前剧情时间戳，格式示例：【2026年08月01日 14时】。
+每次进入正文时，第一行必须单独输出当前剧情时间戳，格式示例：【xxxx年xx月xx日 xx时】。
 
 1. 示例只用于展示格式，实际输出必须根据剧情时间填写明确的年、月、日和小时，并与上一轮时间连续。
 2. 年份必须写成具体数字，严禁使用“20xx年”“20XX年”“YYYY年”“某年”等任何占位或模糊写法。
