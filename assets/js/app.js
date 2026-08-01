@@ -2255,15 +2255,22 @@ createApp({
             return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${unit}`;
         };
 
-        const readStorageEntries = (targetDb, source) => new Promise((resolve, reject) => {
+        const readStorageKeys = (targetDb) => new Promise((resolve, reject) => {
             if (!targetDb) return resolve([]);
-            const entries = [];
+            const transaction = targetDb.transaction(['store'], 'readonly');
+            const request = transaction.objectStore('store').getAllKeys();
+            request.onsuccess = () => resolve(request.result.map(key => String(key)));
+            request.onerror = () => reject(request.error);
+        });
+
+        const scanStorageEntries = (targetDb, source, inspect) => new Promise((resolve, reject) => {
+            if (!targetDb) return resolve();
             const transaction = targetDb.transaction(['store'], 'readonly');
             const request = transaction.objectStore('store').openCursor();
             request.onsuccess = () => {
                 const cursor = request.result;
-                if (!cursor) return resolve(entries);
-                entries.push({ source, key: String(cursor.key), value: cursor.value });
+                if (!cursor) return resolve();
+                inspect(source, String(cursor.key), cursor.value);
                 cursor.continue();
             };
             request.onerror = () => reject(request.error);
@@ -2302,15 +2309,31 @@ createApp({
             return 'other';
         };
 
-        const estimateStorageEntrySize = (key, value) => {
-            let serialized = '';
-            try {
-                serialized = JSON.stringify(unwrapForStorage(value)) || '';
-            } catch (_) {
-                serialized = String(value ?? '');
+        const estimateStorageValueSize = (value, seen = new WeakSet()) => {
+            if (value == null) return 0;
+            if (typeof value === 'string') return value.length * 2;
+            if (typeof value === 'number' || typeof value === 'bigint') return 8;
+            if (typeof value === 'boolean') return 4;
+            if (typeof value !== 'object') return 0;
+            if (value instanceof Blob) return value.size;
+            if (value instanceof ArrayBuffer) return value.byteLength;
+            if (ArrayBuffer.isView(value)) return value.byteLength;
+            if (seen.has(value)) return 0;
+            seen.add(value);
+
+            let bytes = 0;
+            if (Array.isArray(value)) {
+                if (value.length && typeof value[0] === 'number') return value.length * 8;
+                value.forEach(item => { bytes += estimateStorageValueSize(item, seen); });
+            } else {
+                Object.keys(value).forEach(key => {
+                    bytes += key.length * 2 + estimateStorageValueSize(value[key], seen);
+                });
             }
-            return new Blob([String(key), serialized]).size;
+            return bytes;
         };
+
+        const estimateStorageEntrySize = (key, value) => String(key).length * 2 + estimateStorageValueSize(value);
 
         const refreshStorageStats = async () => {
             if (storageStats.loading) return;
@@ -2318,30 +2341,40 @@ createApp({
             storageStats.error = '';
             try {
                 if (!db) await initDB();
-                const [mainEntries, legacyEntries, estimate] = await Promise.all([
-                    readStorageEntries(db, 'main'),
-                    readStorageEntries(legacyDb, 'legacy'),
+                const [mainKeys, legacyKeys, estimate] = await Promise.all([
+                    readStorageKeys(db),
+                    readStorageKeys(legacyDb),
                     navigator.storage?.estimate?.().catch(() => ({})) || Promise.resolve({})
                 ]);
-                const dbEntries = [...mainEntries, ...legacyEntries].map(entry => ({
-                    ...entry,
-                    logicalKey: getStorageLogicalKey(entry.key),
-                    bytes: estimateStorageEntrySize(entry.key, entry.value)
-                }));
-
-                const mainLogicalKeys = new Set(mainEntries.map(entry => getStorageLogicalKey(entry.key)));
-                const scopedLogicalKeys = new Set(dbEntries
-                    .filter(entry => getScopedStorageInfo(entry.logicalKey))
-                    .map(entry => entry.logicalKey));
+                const mainLogicalKeys = new Set(mainKeys.map(getStorageLogicalKey));
+                const scopedLogicalKeys = new Set([...mainKeys, ...legacyKeys]
+                    .map(getStorageLogicalKey)
+                    .filter(logicalKey => getScopedStorageInfo(logicalKey)));
                 const liveCharacterIds = new Set(characters.value.map(char => char?.uuid).filter(Boolean));
-                const orphanedEntries = dbEntries.filter(entry => {
-                    if (entry.source === 'legacy' && mainLogicalKeys.has(entry.logicalKey)) return true;
-                    const scoped = getScopedStorageInfo(entry.logicalKey);
+                const isOrphanedEntry = (source, logicalKey) => {
+                    if (source === 'legacy' && mainLogicalKeys.has(logicalKey)) return true;
+                    const scoped = getScopedStorageInfo(logicalKey);
                     if (!scoped || liveCharacterIds.has(scoped.id)) return false;
                     if (scoped.name !== 'chat' || !/^\d+$/.test(scoped.id)) return true;
                     const char = characters.value[Number(scoped.id)];
                     return !char || (char.uuid && scopedLogicalKeys.has(`chat_${char.uuid}`));
-                });
+                };
+
+                const categoryBytes = new Map(STORAGE_CATEGORIES.map(category => [category.key, 0]));
+                const orphanedKeys = { main: [], legacy: [] };
+                let orphanedEntryBytes = 0;
+                const inspectEntry = (source, key, value) => {
+                    const logicalKey = getStorageLogicalKey(key);
+                    const bytes = estimateStorageEntrySize(key, value);
+                    const category = getStorageCategory(logicalKey);
+                    categoryBytes.set(category, categoryBytes.get(category) + bytes);
+                    if (isOrphanedEntry(source, logicalKey)) {
+                        orphanedKeys[source].push(key);
+                        orphanedEntryBytes += bytes;
+                    }
+                };
+                await scanStorageEntries(db, 'main', inspectEntry);
+                await scanStorageEntries(legacyDb, 'legacy', inspectEntry);
 
                 const emptyTurnKeys = Object.keys(memorySettings.emptyTurns || {})
                     .filter(key => key.endsWith(':vector') && !liveCharacterIds.has(key.slice(0, -7)));
@@ -2360,34 +2393,31 @@ createApp({
                     )
                 ), 0);
 
-                const categoryBytes = new Map(STORAGE_CATEGORIES.map(category => [category.key, 0]));
-                dbEntries.forEach(entry => {
-                    const category = getStorageCategory(entry.logicalKey);
-                    categoryBytes.set(category, categoryBytes.get(category) + entry.bytes);
-                });
                 try {
                     for (let i = 0; i < localStorage.length; i++) {
                         const key = localStorage.key(i);
-                        const bytes = new Blob([key || '', localStorage.getItem(key) || '']).size;
+                        const bytes = estimateStorageEntrySize(key || '', localStorage.getItem(key) || '');
                         const category = getStorageCategory(key || '');
                         categoryBytes.set(category, categoryBytes.get(category) + bytes);
                     }
                 } catch (_) { }
 
                 const accountedBytes = [...categoryBytes.values()].reduce((total, bytes) => total + bytes, 0);
-                storageStats.usage = Number(estimate.usage) || accountedBytes;
+                const measuredUsage = Number(estimate.usage) || accountedBytes;
+                const sizeScale = accountedBytes > 0 ? measuredUsage / accountedBytes : 1;
+                storageStats.usage = measuredUsage;
                 storageStats.quota = Number(estimate.quota) || 0;
-                storageStats.orphanedBytes = orphanedEntries.reduce((total, entry) => total + entry.bytes, embeddedOrphanBytes);
-                storageStats.orphanedItems = orphanedEntries.length + emptyTurnKeys.length + templateRuntimeKeys.length;
+                storageStats.orphanedBytes = (orphanedEntryBytes + embeddedOrphanBytes) * sizeScale;
+                storageStats.orphanedItems = orphanedKeys.main.length + orphanedKeys.legacy.length + emptyTurnKeys.length + templateRuntimeKeys.length;
                 storageStats.categories = STORAGE_CATEGORIES
                     .map(category => {
-                        const bytes = categoryBytes.get(category.key) || 0;
+                        const bytes = (categoryBytes.get(category.key) || 0) * sizeScale;
                         return { ...category, bytes };
                     })
                     .filter(category => category.bytes > 0);
                 unusedStorageSnapshot = {
-                    mainKeys: orphanedEntries.filter(entry => entry.source === 'main').map(entry => entry.key),
-                    legacyKeys: orphanedEntries.filter(entry => entry.source === 'legacy').map(entry => entry.key),
+                    mainKeys: orphanedKeys.main,
+                    legacyKeys: orphanedKeys.legacy,
                     emptyTurnKeys,
                     templateRuntimeKeys
                 };
