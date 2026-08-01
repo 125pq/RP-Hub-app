@@ -1694,6 +1694,7 @@ createApp({
         const storageStats = reactive({
             loading: false,
             cleaning: false,
+            hasMeasured: false,
             error: '',
             usage: 0,
             quota: 0,
@@ -1796,7 +1797,6 @@ createApp({
                 isSquareLoading.value = true;
                 squareUrl.value = `https://rphforum.zeabur.app/?t=${Date.now()}`;
             } else {
-                if (newView === 'settings') refreshStorageStats();
                 const sortable = {
                     presets: ['presets-list', presets],
                     regex: ['regex-list', regexScripts],
@@ -2391,6 +2391,7 @@ createApp({
                     emptyTurnKeys,
                     templateRuntimeKeys
                 };
+                storageStats.hasMeasured = true;
             } catch (error) {
                 console.error('Failed to inspect storage:', error);
                 storageStats.error = '读取存储信息失败，请稍后重试';

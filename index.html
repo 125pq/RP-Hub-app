@@ -2224,7 +2224,7 @@
                                         <button type="button" @click="refreshStorageStats"
                                             :disabled="storageStats.loading || storageStats.cleaning"
                                             class="px-4 py-2.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-gray-50 hover:shadow-md active:scale-95 transition-all disabled:opacity-40 disabled:shadow-none">
-                                            {{ storageStats.loading ? '统计中...' : '重新统计' }}
+                                            {{ storageStats.loading ? '统计中...' : (storageStats.hasMeasured ? '重新统计' : '统计') }}
                                         </button>
                                         <button type="button" @click="cleanupUnusedStorage"
                                             :disabled="storageStats.loading || storageStats.cleaning || storageStats.orphanedItems === 0"
