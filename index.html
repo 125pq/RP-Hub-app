@@ -112,6 +112,11 @@
         <symbol id="icon-arrow-down" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14m0 0l-5-5m5 5l5-5"></path>
         </symbol>
+        <symbol id="icon-story-branch" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3 3V13.2C3 14.8802 3 15.7202 3.32698 16.362C3.6146 16.9265 4.07354 17.3854 4.63803 17.673C5.27976 18 6.11984 18 7.8 18H15M15 18C15 19.6569 16.3431 21 18 21C19.6569 21 21 19.6569 21 18C21 16.3431 19.6569 15 18 15C16.3431 15 15 16.3431 15 18ZM3 8L15 8M15 8C15 9.65686 16.3431 11 18 11C19.6569 11 21 9.65685 21 8C21 6.34315 19.6569 5 18 5C16.3431 5 15 6.34315 15 8Z">
+            </path>
+        </symbol>
     </svg>
     <div class="entry-transition" aria-hidden="true">
         <div class="entry-transition-brand">
@@ -901,6 +906,15 @@
                                                 </path>
                                             </svg>
                                         </button>
+                                        <button v-if="msg.role === 'assistant'" @click="createStoryBranch(index)"
+                                            :disabled="storyBranchSwitching"
+                                            class="message-action-button"
+                                            title="从这里分支" aria-label="从这里创建分支">
+                                            <svg class="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor"
+                                                viewBox="0 0 24 24" aria-hidden="true">
+                                                <use href="#icon-story-branch"></use>
+                                            </svg>
+                                        </button>
                                         <button @click="deleteMessage(index)"
                                             class="message-action-button message-action-button--danger"
                                             title="删除">
@@ -1029,6 +1043,13 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
                                         </path>
+                                    </svg>
+                                </button>
+                                <button @click="openStoryBranchModal"
+                                    class="relative rounded-full w-8 h-8 flex items-center justify-center border transition-all active:scale-95 bg-white text-gray-500 hover:text-blue-600 hover:bg-blue-50 border-gray-200 shadow-sm"
+                                    :title="'剧情分支：' + (currentStoryBranch?.name || '主线')">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <use href="#icon-story-branch"></use>
                                     </svg>
                                 </button>
                             </div>
@@ -1495,7 +1516,7 @@
 
             <!-- Settings View -->
             <div v-if="currentView === 'settings'" class="management-view">
-                <div class="max-w-3xl mx-auto flex items-center mb-4 md:mb-6">
+                <div class="max-w-3xl md:max-w-5xl mx-auto flex items-center mb-4 md:mb-6">
                     <button @click="toggleMobileMenu"
                             class="mobile-menu-button">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor"><use href="#icon-menu"></use></svg>
@@ -1505,7 +1526,7 @@
                         设置
                     </h2>
                 </div>
-                <div class="max-w-3xl mx-auto space-y-4 md:space-y-8">
+                <div class="max-w-3xl md:max-w-5xl mx-auto space-y-4 md:space-y-8">
 
 
                     <!-- User Settings - Optimized UI -->
@@ -2829,7 +2850,7 @@
                                 </span>
                             </div>
                             <div v-if="settingsHelpTopic === 'totalInputTokens'" class="settings-help-popover token-usage-help-popover">
-                                <span class="settings-help-popover-content">汇总当前类型和时间筛选范围内，API 实际返回的输入 Token。右侧灰色数字表示其中的缓存读取 Token，已经包含在输入总量内；接口未提供时按 0 统计。</span>
+                                <span class="settings-help-popover-content">汇总当前类型和时间筛选范围内，API 返回的输入 Token 减去缓存读取 Token。右侧灰色数字单独显示缓存读取 Token；接口未提供时按 0 统计。</span>
                             </div>
                         </div>
                         <div class="relative p-4 md:p-5">
@@ -2888,7 +2909,7 @@
                                     <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>输入
                                 </div>
                                 <div class="mt-1.5 flex items-end gap-1 font-mono leading-none">
-                                    <span class="text-base font-bold text-gray-800">{{ formatTokenCount(record.inputTokens) }}</span>
+                                    <span class="text-base font-bold text-gray-800">{{ formatTokenCount(getUncachedInputTokens(record)) }}</span>
                                     <span class="inline-flex items-center gap-0.5 text-sm font-normal text-gray-400">
                                         <svg class="h-3.5 w-3.5 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
                                         {{ formatTokenCount(record.cacheReadTokens) }}
@@ -3704,7 +3725,7 @@
         </div>
         <!-- Confirmation Modal -->
         <div v-if="showConfirmModal"
-            class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+            class="fixed inset-0 z-[160] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
             <div
                 class="bg-white rounded-xl border border-gray-200 w-full max-w-sm flex flex-col shadow-2xl transform transition-all scale-100">
                 <div class="p-6 text-center">
@@ -3859,7 +3880,7 @@
                             </div>
                             <div class="text-left flex-1">
                                 <div class="font-bold">导入聊天记录</div>
-                                <div class="text-xs text-gray-500">导入 .jsonl 格式的聊天数据</div>
+                                <div class="text-xs text-gray-500">支持全部分支与旧版 .jsonl 聊天数据</div>
                             </div>
                             <input type="file" accept=".jsonl"
                                 @change="importCharacter($event); showAddCharacterMenu = false" class="hidden">
@@ -4704,7 +4725,7 @@
                             </div>
                             <div class="flex-1">
                                 <div class="font-bold text-base mb-0.5">导出聊天记录</div>
-                                <div class="text-[11px] text-gray-500">单独导出当前角色的聊天记录 .jsonl</div>
+                                <div class="text-[11px] text-gray-500">一次性导出当前角色的全部分支聊天 .jsonl</div>
                             </div>
                         </button>
                     </div>
@@ -5052,6 +5073,101 @@
                                 </svg>
                                 <p>暂无上下文记录，请先执行一次生成请求。</p>
                             </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+        <!-- Story Branch Modal -->
+        <transition enter-active-class="transition-opacity duration-300 ease-out" enter-from-class="opacity-0"
+            enter-to-class="opacity-100" leave-active-class="transition-opacity duration-200 ease-in"
+            leave-from-class="opacity-100" leave-to-class="opacity-0">
+            <div v-if="showStoryBranchModal"
+                class="fixed inset-0 z-[120] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 sm:p-6"
+                @click.self="showStoryBranchModal = false">
+                <div
+                    class="w-full max-w-6xl h-[92vh] sm:h-[88vh] bg-white rounded-2xl shadow-2xl border border-gray-200/70 overflow-hidden flex flex-col">
+                    <div class="px-5 sm:px-6 py-4 border-b border-gray-100 bg-white flex items-center justify-between flex-shrink-0">
+                        <div class="min-w-0">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <use href="#icon-story-branch"></use>
+                                    </svg>
+                                </div>
+                                <div class="min-w-0">
+                                    <h3 class="text-lg font-bold text-gray-800">剧情分支</h3>
+                                    <p class="text-xs text-gray-500 mt-0.5 truncate">
+                                        当前分支：{{ currentStoryBranch?.name || '主线' }}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <button @click="showStoryBranchModal = false"
+                            class="w-9 h-9 rounded-full bg-gray-50 hover:bg-red-50 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors flex-shrink-0">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="story-route-modal-body custom-scrollbar">
+                        <section class="story-route-map-panel">
+                            <div class="story-route-map-scroll custom-scrollbar"
+                                :class="{ 'is-single-route': storyBranches.length === 1, 'is-dragging': storyRouteMapDragging }"
+                                @pointerdown="startStoryRouteDrag" @pointermove="moveStoryRouteDrag"
+                                @pointerup="endStoryRouteDrag" @pointercancel="endStoryRouteDrag"
+                                @lostpointercapture="endStoryRouteDrag" @dragstart.prevent>
+                                <div class="story-route-canvas"
+                                    :style="{ width: storyRouteMap.width + 'px', height: storyRouteMap.height + 'px' }">
+                                    <svg class="story-route-links" :width="storyRouteMap.width"
+                                        :height="storyRouteMap.height"
+                                        :viewBox="'0 0 ' + storyRouteMap.width + ' ' + storyRouteMap.height"
+                                        aria-hidden="true">
+                                        <path v-for="link in storyRouteMap.links" :key="link.id" :d="link.path"
+                                            class="story-route-link"
+                                            :class="{ 'is-active': link.isActive, 'is-selected': link.isSelected }">
+                                        </path>
+                                    </svg>
+                                    <button v-for="node in storyRouteMap.nodes" :key="node.id"
+                                        @click="handleStoryRouteNodeClick(node.id)"
+                                        class="story-route-node"
+                                        :class="{ 'is-current': node.isActive, 'is-selected': node.isSelected, 'is-on-route': node.isOnActiveRoute, 'is-on-selected-route': node.isOnSelectedRoute }"
+                                        :style="{ left: node.x + 'px', top: node.y + 'px' }"
+                                        :title="'选择分支：' + node.name">
+                                        <span class="story-route-node-checkpoint" aria-hidden="true"></span>
+                                        <span class="story-route-node-copy">
+                                            <span v-if="node.id === 'main'" class="story-route-node-type">起点</span>
+                                            <strong>{{ node.name }}</strong>
+                                            <small>{{ node.floorCount }} 楼 · {{ node.wordCountText }} 字</small>
+                                        </span>
+                                        <span v-if="node.isActive" class="story-route-node-current">当前</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <div class="story-route-actions">
+                            <button
+                                @click="switchStoryBranch(selectedStoryRouteNode.id)"
+                                :disabled="storyBranchSwitching || !selectedStoryRouteNode || selectedStoryRouteNode.isActive"
+                                class="story-route-enter-button"
+                                :title="selectedStoryRouteNode?.isActive ? '已在当前分支' : '进入当前选中的分支'">
+                                {{ storyBranchSwitching ? '切换中' : '进入' }}
+                            </button>
+                            <button @click="createStoryBranch" :disabled="storyBranchSwitching"
+                                class="story-route-create-button" title="从选中的分支创建新分支">
+                                新建
+                            </button>
+                            <button @click="deleteSelectedStoryBranch"
+                                :disabled="storyBranchSwitching || !selectedStoryRouteCanDelete"
+                                :title="selectedStoryRouteCanDelete ? '删除当前选中的分支' : '主线和当前分支所在路径不能删除'"
+                                class="story-route-delete-button">
+                                删除
+                            </button>
                         </div>
 
                     </div>
