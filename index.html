@@ -275,7 +275,7 @@
                     :class="{ 'is-open': isOnlineNavOpen && !isSidebarCollapsed }">
                     <button @click="toggleOnlineNav"
                         class="sidebar-nav-button advanced-nav-trigger flex items-center rounded-xl transition-all duration-200 font-medium"
-                        :class="[['generator', 'square'].includes(currentView) ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900', isSidebarCollapsed ? 'w-12 h-12 mx-auto justify-center p-0' : 'w-full px-3 py-2.5']"
+                        :class="[['generator', 'square', 'novel'].includes(currentView) ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900', isSidebarCollapsed ? 'w-12 h-12 mx-auto justify-center p-0' : 'w-full px-3 py-2.5']"
                         title="在线"
                         aria-controls="online-nav-panel"
                         :aria-expanded="isOnlineNavOpen && !isSidebarCollapsed">
@@ -318,6 +318,17 @@
                                         <rect x="14" y="14" width="7" height="7" rx="2" stroke-width="1.8"></rect>
                                     </svg>
                                     <span>万相广场</span>
+                                </button>
+                                <button @click="currentView = 'novel'; closeMobileMenu()"
+                                    class="sidebar-nav-button advanced-nav-item transition-all duration-200"
+                                    :class="currentView === 'novel' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                                    title="墨韵·造梦">
+                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M20 19V16H7C5.34315 16 4 17.3431 4 19M8.8 22H16.8C17.9201 22 18.4802 22 18.908 21.782C19.2843 21.5903 19.5903 21.2843 19.782 20.908C20 20.4802 20 19.9201 20 18.8V5.2C20 4.07989 20 3.51984 19.782 3.09202C19.5903 2.71569 19.2843 2.40973 18.908 2.21799C18.4802 2 17.9201 2 16.8 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22Z">
+                                        </path>
+                                    </svg>
+                                    <span>墨韵·造梦</span>
                                 </button>
                             </div>
                         </div>
@@ -651,7 +662,7 @@
                                 <!-- Message Bubble -->
                                 <div class="group relative"
                                     :class="{'w-full': messageUsesWideLayout(msg)}">
-                                    <div
+                                    <div @click="handleGeneratedImageReroll($event, index)"
                                         :class="['p-0 rounded-2xl shadow-sm text-sm md:text-base leading-relaxed overflow-hidden',
                                         msg.shouldAnimate && !(msg.role === 'assistant' && msg.reasoning) ? 'animate-message-in' : '',
                                         messageUsesWideLayout(msg) ? 'w-full' : '',
@@ -1511,6 +1522,13 @@
             <div v-if="currentView === 'square'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">
                 <embedded-view-content :src="squareUrl" :loading="isSquareLoading"
                     loading-text="加载万相广场中..." @menu="toggleMobileMenu" @load="onSquareLoad">
+                </embedded-view-content>
+            </div>
+
+            <!-- Novel View -->
+            <div v-if="currentView === 'novel'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">
+                <embedded-view-content :src="novelUrl" :loading="isNovelLoading"
+                    loading-text="加载墨韵·造梦中..." @menu="toggleMobileMenu" @load="onNovelLoad">
                 </embedded-view-content>
             </div>
 
@@ -5158,18 +5176,49 @@
                                 :title="selectedStoryRouteNode?.isActive ? '已在当前分支' : '进入当前选中的分支'">
                                 {{ storyBranchSwitching ? '切换中' : '进入' }}
                             </button>
-                            <button @click="createStoryBranch" :disabled="storyBranchSwitching"
-                                class="story-route-create-button" title="从选中的分支创建新分支">
-                                新建
+                            <button @click="openStoryBranchNameEditor"
+                                :disabled="storyBranchSwitching || !selectedStoryRouteNode || selectedStoryRouteNode.id === 'main'"
+                                class="story-route-edit-button"
+                                :title="!selectedStoryRouteNode ? '请先选择分支' : selectedStoryRouteNode.id === 'main' ? '主线名称不可修改' : '编辑当前选中的分支名称'">
+                                编辑
                             </button>
                             <button @click="deleteSelectedStoryBranch"
                                 :disabled="storyBranchSwitching || !selectedStoryRouteCanDelete"
-                                :title="selectedStoryRouteCanDelete ? '删除当前选中的分支' : '主线和当前分支所在路径不能删除'"
+                                :title="selectedStoryRouteCanDelete ? '删除当前选中的分支' : '请选择可删除的分支（主线不可删除）'"
                                 class="story-route-delete-button">
                                 删除
                             </button>
                         </div>
 
+                    </div>
+                </div>
+            </div>
+
+        </transition>
+
+        <!-- Story Branch Name Editor -->
+        <transition enter-active-class="transition-opacity duration-200" enter-from-class="opacity-0"
+            enter-to-class="opacity-100" leave-active-class="transition-opacity duration-150"
+            leave-from-class="opacity-100" leave-to-class="opacity-0">
+            <div v-if="showStoryBranchNameEditor"
+                class="fixed inset-0 z-[180] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4"
+                @click.self="showStoryBranchNameEditor = false">
+                <div class="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
+                    <h3 class="text-lg font-bold text-gray-800">编辑分支名称</h3>
+                    <p class="mt-1 text-sm text-gray-500">名称最多 30 个字。</p>
+                    <input v-model="storyBranchNameDraft" maxlength="30" autofocus
+                        @keyup.enter="saveStoryBranchName" @keyup.esc="showStoryBranchNameEditor = false"
+                        class="mt-4 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                        placeholder="输入分支名称">
+                    <div class="mt-5 flex justify-end gap-2">
+                        <button @click="showStoryBranchNameEditor = false"
+                            class="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-600 transition hover:bg-gray-50">
+                            取消
+                        </button>
+                        <button @click="saveStoryBranchName" :disabled="storyBranchSwitching"
+                            class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                            保存
+                        </button>
                     </div>
                 </div>
             </div>

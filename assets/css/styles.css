@@ -1416,6 +1416,93 @@
         .markdown-body th { background-color: #f9fafb; font-weight: 600; }
         .markdown-body del { text-decoration: line-through; color: inherit; opacity: 0.7; }
 
+        .generated-image-card {
+            position: relative;
+        }
+
+        .generated-image-reroll {
+            position: absolute;
+            right: 0.65rem;
+            bottom: 0.65rem;
+            z-index: 2;
+            display: inline-flex;
+            width: 2.1rem;
+            height: 2.1rem;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 0 !important;
+            border: 0;
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+            opacity: 1;
+            filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.55));
+            transition: opacity 160ms ease;
+        }
+
+        .generated-image-reroll svg {
+            width: 1.3rem;
+            height: 1.3rem;
+        }
+
+        .generated-image-reroll-loading {
+            position: absolute;
+            inset: 0;
+            z-index: 3;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(4px);
+        }
+
+        .generated-image-card.is-rerolling .generated-image-reroll-loading {
+            display: flex;
+            animation: generated-image-overlay-in 180ms ease-out both;
+        }
+
+        .generated-image-spinner {
+            width: 72px;
+            height: 72px;
+            animation: generated-image-spinner-rotate 2s linear infinite;
+        }
+
+        .generated-image-spinner-path {
+            stroke: #fff;
+            stroke-linecap: round;
+            animation: generated-image-spinner-dash 1.5s ease-in-out infinite;
+        }
+
+        .generated-image-card.is-rerolling .generated-image-reroll {
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        @keyframes generated-image-overlay-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes generated-image-spinner-rotate {
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes generated-image-spinner-dash {
+            0% {
+                stroke-dasharray: 1, 150;
+                stroke-dashoffset: 0;
+            }
+            50% {
+                stroke-dasharray: 90, 150;
+                stroke-dashoffset: -35;
+            }
+            100% {
+                stroke-dasharray: 90, 150;
+                stroke-dashoffset: -124;
+            }
+        }
+
         .markdown-body .response-error-text {
             color: #dc2626;
             font-weight: 700;
@@ -2631,10 +2718,12 @@ opacity: 0;
 
 .story-route-node-copy {
     display: flex;
+    width: 100%;
     min-width: 0;
     flex: 1;
     align-items: center;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .story-route-node-type {
@@ -2646,6 +2735,9 @@ opacity: 0;
 }
 
 .story-route-node-copy strong {
+    display: block;
+    width: 100%;
+    max-width: 100%;
     margin-top: 0;
     overflow: hidden;
     color: #1e293b;
@@ -2725,7 +2817,7 @@ opacity: 0;
     padding-top: 14px;
 }
 
-.story-route-create-button,
+.story-route-edit-button,
 .story-route-delete-button {
     display: inline-flex;
     height: 36px;
@@ -2740,14 +2832,14 @@ opacity: 0;
     transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
 }
 
-.story-route-create-button {
+.story-route-edit-button {
     border: 1px solid transparent;
     color: #2563eb;
     background: #fff;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
-.story-route-create-button:hover {
+.story-route-edit-button:hover:not(:disabled) {
     border-color: #bfdbfe;
     background: #eff6ff;
 }
@@ -2764,12 +2856,12 @@ opacity: 0;
     background: #fef2f2;
 }
 
-.story-route-create-button:active,
+.story-route-edit-button:active:not(:disabled),
 .story-route-delete-button:active:not(:disabled) {
     transform: scale(0.97);
 }
 
-.story-route-create-button:disabled,
+.story-route-edit-button:disabled,
 .story-route-delete-button:disabled {
     cursor: not-allowed;
     opacity: 0.45;
