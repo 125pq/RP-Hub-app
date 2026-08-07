@@ -10513,6 +10513,31 @@ image###生成的提示词###
             return loaded;
         };
 
+        const characterCardPressStates = new WeakMap();
+        const beginCharacterCardPress = (event) => {
+            const card = event.currentTarget;
+            const previousState = characterCardPressStates.get(card);
+            if (previousState?.timer) clearTimeout(previousState.timer);
+            card.classList.remove('is-card-releasing');
+            card.classList.add('is-card-pressing');
+            characterCardPressStates.set(card, { startedAt: performance.now(), releasing: false, timer: null });
+        };
+
+        const endCharacterCardPress = (event) => {
+            const card = event.currentTarget;
+            const state = characterCardPressStates.get(card);
+            if (!state || state.releasing) return;
+            state.releasing = true;
+            state.timer = setTimeout(() => {
+                card.classList.remove('is-card-pressing');
+                card.classList.add('is-card-releasing');
+                state.timer = setTimeout(() => {
+                    card.classList.remove('is-card-releasing');
+                    characterCardPressStates.delete(card);
+                }, 180);
+            }, Math.max(0, 120 - (performance.now() - state.startedAt)));
+        };
+
         const selectCharacter = async (index, isNewImport = false) => {
             const char = characters.value[index];
             if (!char) {
@@ -12409,7 +12434,7 @@ ${uiTemplateAnalysisSection}
             handleConfirm, handleCancel, // Export handlers
             copyMessage, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,
-            createNewCharacter, editCharacter, saveCharacter, deleteCharacter, selectCharacter, toggleCharacterFavorite, isCharacterFavorite,
+            createNewCharacter, editCharacter, saveCharacter, deleteCharacter, selectCharacter, beginCharacterCardPress, endCharacterCardPress, toggleCharacterFavorite, isCharacterFavorite,
             currentUiTemplates, activeUiTemplates, uiTemplateUpdateStatus, createUiTemplate, editUiTemplate, saveUiTemplate, deleteUiTemplate, importUiTemplates, updateUiTemplatesFromChat, renderEditingUiTemplatePreview, handleUiTemplateClick, formatUiTemplateChangeValue,
             isBatchDeleteMode, isSidebarCollapsed, isOnlineNavOpen, toggleOnlineNav, isAdvancedNavOpen, toggleAdvancedNav, selectedCharacterIndices, toggleBatchDeleteMode, toggleCharacterSelection, batchDeleteCharacters,
             getCharacterWICount, getCharacterRegexCount,
