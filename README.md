@@ -16,6 +16,13 @@
 
 Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Roleplay体验。
 
+- 角色卡、世界书、正则脚本和多用户资料管理
+- 总结记忆与向量记忆，可按角色和剧情分支独立保存
+- 剧情分支创建、切换、回档、重命名和完整导入导出
+- UI 模板变量分析与对话状态展示
+- 自动生图、单张重新生成和多套内置画师风格
+- 角色卡生成、万相广场与“墨韵 · 造梦”在线工具
+
 ## 快速开始 (Quick Start)
 
 本项目无需复杂的 Node.js 环境或依赖安装，即开即用！
@@ -40,19 +47,32 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 
 ```text
 Roleplay-Hub/
-├── index.html            # 主程序
-├── character/            # 辅助页面
+├── index.html                     # 主界面与脚本加载入口
+├── character/                     # 角色卡生成工具
+│   └── index.html
+├── novel/                         # 墨韵 · 造梦
 │   └── index.html
 ├── assets/
 │   ├── css/
-│   │   └── styles.css    # 核心样式文件
+│   │   └── styles.css             # 全局样式
 │   └── js/
-│       ├── app.js        # 核心业务逻辑
-│       ├── card-utils.js # 角色卡导入导出相关工具
-│       ├── ui-select.js  # 自定义选择器组件
-│       └── utils.js      # 工具函数库
-└── README.md             # 本说明文件
+│       ├── built-in-content.js    # 默认预设、模式提示词、画师串与更新公告
+│       ├── core-utils.js          # 通用工具、角色卡处理与基础配置
+│       ├── data-services.js       # 存储、记忆、上下文、分支与 UI 状态
+│       ├── runtime-services.js    # API 请求、消息渲染与运行状态
+│       ├── ui-components.js       # 选择器、侧边栏、弹窗与页面组件
+│       └── app.js                 # 主业务入口与页面状态
+└── README.md                      # 项目说明
 ```
+
+### 代码组织说明
+
+页面会按照上方顺序加载 JavaScript 文件，请不要随意调整依赖顺序。
+
+- 修改默认预设、各模式提示词、生图画师串或工具说明时，统一编辑 `built-in-content.js`。
+- 更新公告固定放在 `built-in-content.js` 最底部，方便查找和替换。
+- 可复用界面统一放在 `ui-components.js`，业务数据处理放在 `data-services.js`。
+- 项目没有构建步骤，修改后刷新浏览器即可验证。
 
 ---
 
