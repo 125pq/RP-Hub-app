@@ -3782,7 +3782,7 @@ createApp({
             if (!targetMessage || !['user', 'assistant'].includes(targetMessage.role)) return;
             const deletesUserTurn = targetMessage.role === 'user';
             const message = deletesUserTurn
-                ? '确定要删除这条用户消息及其绑定的 AI 回复吗？该轮的相关项也将一并删除。'
+                ? '确定要删除该轮次吗？该轮的相关项也将一并删除。'
                 : '确定要删除这条 AI 消息吗？该轮的相关项也将一并删除。';
             confirmAction(message, async () => {
                 abortUiTemplateUpdate();
@@ -3824,7 +3824,7 @@ createApp({
                 removeOrphanedUiTemplateCorrections();
                 await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
                 await saveMemorySettingsNow();
-                const deletedLabel = deletesUserTurn ? '用户消息及绑定回复' : 'AI 消息';
+                const deletedLabel = deletesUserTurn ? '该轮次' : 'AI 消息';
                 showToast(`${deletedLabel}已删除，相关项已一并清除`, 'success');
             });
         };
