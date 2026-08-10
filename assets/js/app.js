@@ -2208,16 +2208,6 @@ createApp({
             return { handled: true, changed: false };
         };
 
-        const isObsoleteDynamicUiTemplateCorrection = (failure) => {
-            if (!failure || !String(failure.reason || '').includes('输出了未定义变量')) return false;
-            try {
-                normalizeUiTemplateUpdateList(parseUiTemplateUpdateJson(failure.result), activeUiTemplates.value);
-                return true;
-            } catch (e) {
-                return false;
-            }
-        };
-
         const appendPendingUiTemplateCorrection = (messageList) => {
             if (!settings.uiTemplateEnabled || !settings.uiTemplateMainModelAnalysis) return;
 
@@ -2232,11 +2222,6 @@ createApp({
                 }
             }
             if (!failureMessage) return;
-            if (isObsoleteDynamicUiTemplateCorrection(failureMessage.uiTemplateAnalysisFailure)) {
-                delete failureMessage.uiTemplateAnalysisFailure;
-                scheduleChatHistorySave();
-                return;
-            }
 
             let userIndex = -1;
             for (let index = chatHistory.value.length - 1; index > failureIndex; index--) {
@@ -4014,15 +3999,10 @@ createApp({
                             && source.role === 'user'
                             && !suppressUiTemplateCorrection
                             && source.uiTemplateCorrection) {
-                            if (isObsoleteDynamicUiTemplateCorrection(source.uiTemplateCorrection)) {
-                                delete source.uiTemplateCorrection;
-                                scheduleChatHistorySave();
-                            } else {
-                                content = `${BUILTIN_PROMPTS.buildMainModelUiTemplateCorrectionPrompt({
-                                    failedResult: source.uiTemplateCorrection.result,
-                                    failureReason: source.uiTemplateCorrection.reason
-                                })}\n\n${content.trimStart()}`;
-                            }
+                            content = `${BUILTIN_PROMPTS.buildMainModelUiTemplateCorrectionPrompt({
+                                failedResult: source.uiTemplateCorrection.result,
+                                failureReason: source.uiTemplateCorrection.reason
+                            })}\n\n${content.trimStart()}`;
                         }
                         const cleanSys = stripDisabledImageGenContext(parsedData.sys || '');
                         if (cleanSys && source.role === 'user') {

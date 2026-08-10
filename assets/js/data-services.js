@@ -1638,8 +1638,11 @@ ${content}
         const after = content.slice(position + 1, contextEnd).replace(/\r?\n/g, '↵');
         const message = String(error.message)
             .replace(/\s+at position\s+\d+(?:\s+\(line\s+\d+\s+column\s+\d+\))?$/i, '');
+        const hint = current === ']' && /Expected ',' or '}' after property value/i.test(message)
+            ? '；此处在数组结束前缺少“}”，需要先关闭当前这一项对象'
+            : '';
         const detailedError = new SyntaxError(
-            `${message}；精确位置：第 ${line} 行第 ${column} 列（索引 ${position}）；附近：${before}⟦${current}⟧${after}`
+            `${message}${hint}；精确位置：第 ${line} 行第 ${column} 列（索引 ${position}）；附近：${before}⟦${current}⟧${after}`
         );
         detailedError.jsonSource = content;
         detailedError.jsonPosition = position;
@@ -1747,90 +1750,22 @@ ${content}
             }
             const unknownNames = [];
             const invalidNames = [];
-            const dynamicIds = new Set();
-            const dynamicCollectionPaths = new Set();
-            const eachPattern = /\{\{\s*#each\s+([^\s}]+)/g;
-            let eachMatch;
-            while ((eachMatch = eachPattern.exec(String(template.htmlTemplate || '')))) {
-                const path = eachMatch[1].replace(/^root\./, '');
-                if (path && !path.startsWith('@') && !path.includes('../')) {
-                    dynamicCollectionPaths.add(splitUiTemplatePath(path).join('.'));
-                }
-            }
-            const collectDynamicIds = (value) => {
-                if (Array.isArray(value)) {
-                    value.forEach(item => {
-                        if (isRecord(item) && typeof item.id === 'string' && item.id.trim()) {
-                            dynamicIds.add(item.id.trim());
-                        }
-                        collectDynamicIds(item);
-                    });
-                } else if (isRecord(value)) {
-                    Object.values(value).forEach(collectDynamicIds);
-                }
-            };
-            collectDynamicIds(currentVariables);
-            collectDynamicIds(variables);
-
-            const findExpectedProperty = (expected, name, parentPath = '') => {
-                if (!isRecord(expected)) return { found: false, value: undefined };
-                if (Object.prototype.hasOwnProperty.call(expected, name)) {
-                    return { found: true, value: expected[name] };
-                }
-                const expectedNames = Object.keys(expected);
-                if (!expectedNames.length) {
-                    return { found: true, value: undefined, anyStructure: true };
-                }
-                if (dynamicCollectionPaths.has(parentPath)) {
-                    const exampleName = expectedNames[0];
-                    return {
-                        found: true,
-                        value: exampleName === undefined ? undefined : expected[exampleName],
-                        anyStructure: exampleName === undefined
-                    };
-                }
-                if (dynamicIds.has(name)) {
-                    const siblingName = expectedNames.find(candidate => dynamicIds.has(candidate));
-                    if (siblingName) return { found: true, value: expected[siblingName] };
-                }
-                const hasDynamicIdPart = value => [...dynamicIds].some(id => (
-                    value === id || value.startsWith(`${id}_`) || value.endsWith(`_${id}`) || value.includes(`_${id}_`)
-                ));
-                if (hasDynamicIdPart(name)) {
-                    const siblingName = expectedNames.find(hasDynamicIdPart);
-                    if (siblingName) return { found: true, value: expected[siblingName] };
-                }
-                for (const id of dynamicIds) {
-                    const suffix = `_${id}`;
-                    if (!name.endsWith(suffix)) continue;
-                    const prefix = name.slice(0, -suffix.length);
-                    const siblingName = expectedNames.find(candidate => (
-                        [...dynamicIds].some(candidateId => candidate === `${prefix}_${candidateId}`)
-                    ));
-                    if (siblingName) return { found: true, value: expected[siblingName] };
-                }
-                return { found: false, value: undefined };
-            };
-            const findExpectedPath = (expected, path, basePath = '') => {
+            const findExpectedPath = (expected, path) => {
                 let current = expected;
-                let parentPath = basePath;
                 for (const part of splitUiTemplatePath(path)) {
-                    const resolved = findExpectedProperty(current, part, parentPath);
-                    if (!resolved.found) return resolved;
-                    if (resolved.anyStructure) return resolved;
-                    current = resolved.value;
-                    parentPath = parentPath ? `${parentPath}.${part}` : part;
+                    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, part)) {
+                        return { found: false, value: undefined };
+                    }
+                    current = current[part];
                 }
                 return { found: true, value: current };
             };
             const inspectVariables = (expected, actual, prefix = '') => {
                 Object.keys(actual).forEach(name => {
                     const path = prefix ? `${prefix}.${name}` : name;
-                    const resolved = findExpectedPath(expected, name, prefix);
+                    const resolved = findExpectedPath(expected, name);
                     if (!resolved.found) {
                         unknownNames.push(path);
-                    } else if (resolved.anyStructure) {
-                        return;
                     } else if (isRecord(actual[name])) {
                         if (isRecord(resolved.value)) inspectVariables(resolved.value, actual[name], path);
                         else invalidNames.push(path);

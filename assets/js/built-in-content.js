@@ -127,10 +127,11 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         closeTag,
         'updates只列出本轮确实需要更新的模板，每个模板最多输出一次；没有任何更新时直接返回 {"updates":[]}。',
         '每个variables只列出需要更新的字段，不要重复未变化字段；对象或数组字段发生变化时，需返回该字段的完整新值。',
-        '只使用下方模板已有的普通字段，不要修改HTML；人物关系、背包等动态集合可按剧情新增或删除条目，并沿用现有命名规则增加关联字段；数组必须返回完整数组。',
+        '只允许更新当前变量JSON中已经存在的字段路径，不要修改HTML，不得新增对象键或顶层变量；人物、背包等新增内容只能写入已经存在的数组字段，数组必须返回完整数组。',
         `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
         '模板变量如下：',
-        JSON.stringify(templatePayload, null, 2)
+        JSON.stringify(templatePayload, null, 2),
+        '最终限制：无论模板的变量说明如何描述，都不得输出当前变量JSON中不存在的字段路径；每个updates数组项必须先关闭variables对象，再关闭该项对象，然后才能结束数组。'
     ].join('\n');
 
     const buildMainModelUiTemplateCorrectionPrompt = ({ failedResult, failureReason }) => [
@@ -147,7 +148,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '返回格式固定为 {"variables":{"变量路径":"新值"},"reason":"简短原因"}，例如 {"variables":{"a_line_1":"新台词","a_line_3":"新台词"},"reason":"对话内容更新了角色台词"}。',
         'variables只列出本轮实际需要更新的字段，不要重复未变化字段。',
         '变量值可以是文字、数字、对象或JSON数组；装备栏、背包、日志这类列表可直接返回完整数组字段，例如 {"equipment":[{"slot":"武器","name":"短剑"}]}。',
-        '人物关系、背包等动态集合可按剧情新增或删除条目，并沿用现有命名规则增加关联字段；不要为普通固定对象编造字段。',
+        '只允许更新当前变量JSON中已经存在的字段路径，不得新增对象键或顶层变量；人物、背包等新增内容只能写入已经存在的数组字段。',
         '如果模板根变量本身就是数组，可以直接返回JSON数组；如果只改数组里的一个小项，也可以返回 {"equipment.0.name":"短剑"} 这种路径对象。',
         '没有变化则返回 {"variables":{},"reason":"无变化"}。不要返回模板id，不要套updates数组，不要修改HTML。',
         `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
@@ -161,7 +162,8 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             '',
             '变量说明如下（给AI参考，必须按这里理解字段含义和生成规则）：',
             variableSchemaText
-        ].join('\n') : ''
+        ].join('\n') : '',
+        '最终限制：无论变量说明如何描述，都不得输出当前变量JSON中不存在的字段路径。'
     ].join('\n');
 
     const vectorMemoryRecallDescription = Object.freeze([
