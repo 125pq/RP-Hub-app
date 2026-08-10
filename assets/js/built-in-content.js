@@ -148,6 +148,9 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             /Expected ',' or '}' after property value/i.test(String(failureReason || ''))
                 ? '本次错误是在结束updates数组前漏关了当前更新项。不要套用固定数量的右括号；先完整关闭最后一个变量值和variables对象，再在当前项内写reason，随后依次关闭当前项、updates数组和根对象。'
                 : '',
+            /Expected ',' or ']' after array element/i.test(String(failureReason || ''))
+                ? '本次错误是在数组项结束后又多写了一个“}”。对象项只关闭一次，随后应直接关闭当前数组，或用逗号开始下一项。'
+                : '',
             /未定义变量/.test(String(failureReason || ''))
                 ? '错误中列出的普通字段没有被创建，下一轮不得继续沿用；只能使用系统本轮当前变量JSON里真实存在的路径，或变量说明明确允许且满足关联条件的动态键。'
                 : '',

@@ -1640,7 +1640,9 @@ ${content}
             .replace(/\s+at position\s+\d+(?:\s+\(line\s+\d+\s+column\s+\d+\))?$/i, '');
         const hint = current === ']' && /Expected ',' or '}' after property value/i.test(message)
             ? '；此处在数组结束前缺少“}”，需要先关闭当前这一项对象'
-            : '';
+            : current === '}' && /Expected ',' or ']' after array element/i.test(message)
+                ? '；此处在数组项结束后多写了一个“}”'
+                : '';
         const detailedError = new SyntaxError(
             `${message}${hint}；精确位置：第 ${line} 行第 ${column} 列（索引 ${position}）；附近：${before}⟦${current}⟧${after}`
         );
