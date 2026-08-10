@@ -54,7 +54,7 @@
         };
     };
 
-    const STREAM_RENDER_INTERVAL = 50;
+    const STREAM_RENDER_INTERVAL = 60;
 
     const readStreamingResponse = async (response, onDelta) => {
         const reader = response.body.getReader();

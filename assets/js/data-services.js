@@ -1737,6 +1737,7 @@ ${content}
             const template = templatesById.get(id);
             const label = template.name || id;
             const currentVariables = template.variableState || {};
+            const schemaText = stringifyUiSchema(template.variableSchema);
             if (received.length > 1) issues.push(`模板“${label}”重复输出了 ${received.length} 次`);
 
             const variables = received[0].variables;
@@ -1750,6 +1751,16 @@ ${content}
             }
             const unknownNames = [];
             const invalidNames = [];
+            const dynamicRoots = new Set();
+            schemaText.split(/\r?\n/).filter(line => /新增键|新增\s*id|只增添\s*\/\s*修改/.test(line)).forEach(line => {
+                Object.keys(currentVariables).forEach(key => {
+                    if (line.includes(key)) dynamicRoots.add(key);
+                });
+            });
+            const dynamicPrefixes = [...schemaText.matchAll(/([A-Za-z][A-Za-z0-9_]*?)\{id\}/g)]
+                .map(match => match[1]);
+            const socialNodes = Array.isArray(variables.social_nodes) ? variables.social_nodes : currentVariables.social_nodes;
+            const socialIds = new Set((Array.isArray(socialNodes) ? socialNodes : []).map(node => String(node?.id || '')));
             const findExpectedPath = (expected, path) => {
                 let current = expected;
                 for (const part of splitUiTemplatePath(path)) {
@@ -1760,12 +1771,37 @@ ${content}
                 }
                 return { found: true, value: current };
             };
+            const findDynamicExpected = (path) => {
+                const parts = splitUiTemplatePath(path);
+                const root = parts[0];
+                let sample;
+                if (parts.length > 1 && dynamicRoots.has(root) && isRecord(currentVariables[root])) {
+                    sample = Object.values(currentVariables[root])[0];
+                } else if (parts.length > 0) {
+                    const prefix = dynamicPrefixes.find(value => root.startsWith(value));
+                    const id = prefix ? root.slice(prefix.length) : '';
+                    if (!prefix || !id || !socialIds.has(id)) return { found: false };
+                    sample = Object.entries(currentVariables).find(([key]) => key.startsWith(prefix))?.[1];
+                } else {
+                    return { found: false };
+                }
+                if (parts.length <= (dynamicRoots.has(root) ? 2 : 1)) return { found: true, value: sample };
+                return findExpectedPath(sample, parts.slice(dynamicRoots.has(root) ? 2 : 1).join('.'));
+            };
             const inspectVariables = (expected, actual, prefix = '') => {
                 Object.keys(actual).forEach(name => {
                     const path = prefix ? `${prefix}.${name}` : name;
                     const resolved = findExpectedPath(expected, name);
                     if (!resolved.found) {
-                        unknownNames.push(path);
+                        const dynamic = findDynamicExpected(path);
+                        if (!dynamic.found) {
+                            unknownNames.push(path);
+                        } else if (isRecord(actual[name]) && isRecord(dynamic.value)) {
+                            inspectVariables(dynamic.value, actual[name], path);
+                        } else if ((Array.isArray(dynamic.value) && !Array.isArray(actual[name]))
+                            || (isRecord(dynamic.value) && !isRecord(actual[name]))) {
+                            invalidNames.push(path);
+                        }
                     } else if (isRecord(actual[name])) {
                         if (isRecord(resolved.value)) inspectVariables(resolved.value, actual[name], path);
                         else invalidNames.push(path);
