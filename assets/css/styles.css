@@ -927,6 +927,24 @@
                 background: transparent;
                 transform: none;
             }
+
+            .message-action-button.is-tapped {
+                animation: message-action-tap 0.36s ease;
+            }
+        }
+
+        @keyframes message-action-tap {
+            0%, 100% {
+                color: rgba(75, 85, 99, 0.78);
+                background: transparent;
+                transform: none;
+            }
+
+            50% {
+                color: #2563eb;
+                background: rgba(255, 255, 255, 0.72);
+                transform: translateY(-1px);
+            }
         }
 
         .settings-page-header {

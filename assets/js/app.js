@@ -3716,6 +3716,18 @@ createApp({
             });
         };
 
+        const playMessageActionFeedback = (event) => {
+            const button = event?.currentTarget;
+            if (!button) return;
+            button.classList.remove('is-tapped');
+            void button.offsetWidth;
+            button.classList.add('is-tapped');
+            setTimeout(() => {
+                button.classList.remove('is-tapped');
+                button.blur();
+            }, 400);
+        };
+
         const clearCurrentVectorEmptyTurns = () => {
             const key = getMemoryEmptyTurnsKey(getCurrentStoryBranchScopeId());
             if (key && memorySettings.emptyTurns?.[key]?.length) memorySettings.emptyTurns[key] = [];
@@ -8927,7 +8939,7 @@ createApp({
             toggleMobileMenu, closeMobileMenu,
             fetchModels, selectModel, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
-            copyMessage, deleteMessage, regenerateMessage,
+            copyMessage, playMessageActionFeedback, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,
             createNewCharacter, editCharacter, saveCharacter, deleteCharacter, selectCharacter, toggleCharacterFavorite, isCharacterFavorite,
             currentUiTemplates, activeUiTemplates, uiTemplateUpdateStatus, createUiTemplate, editUiTemplate, saveUiTemplate, deleteUiTemplate, importUiTemplates, updateUiTemplatesFromChat, renderEditingUiTemplatePreview, handleUiTemplateClick,

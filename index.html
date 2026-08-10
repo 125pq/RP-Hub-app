@@ -654,7 +654,7 @@
                                                 </path>
                                             </svg>
                                         </button>
-                                        <button @click="copyMessage(msg.content); $event.currentTarget.blur()"
+                                        <button @click="copyMessage(msg.content); playMessageActionFeedback($event)"
                                             class="message-action-button"
                                             title="复制">
                                             <svg class="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor"
@@ -664,7 +664,7 @@
                                                 </path>
                                             </svg>
                                         </button>
-                                        <button v-if="msg.role === 'assistant'" @click="createStoryBranch(index); $event.currentTarget.blur()"
+                                        <button v-if="msg.role === 'assistant'" @click="createStoryBranch(index); playMessageActionFeedback($event)"
                                             :disabled="storyBranchSwitching"
                                             class="message-action-button"
                                             title="从这里分支" aria-label="从这里创建分支">
