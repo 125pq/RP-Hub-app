@@ -2355,10 +2355,10 @@ createApp({
             ].join('\n');
         };
 
-        const rebuildUiTemplateStateFromLogs = (template, remainingLogs, allLogs) => {
+        const rebuildUiTemplateStateFromLogs = (template, remainingLogs) => {
             let rebuilt = cloneUiObject(inferInitialUiTemplateState(template));
             [...remainingLogs]
-                .sort((a, b) => (a.time || 0) - (b.time || 0))
+                .sort((a, b) => (a.turn || 0) - (b.turn || 0) || (a.time || 0) - (b.time || 0))
                 .forEach(log => {
                     Object.entries(log.changes || {}).forEach(([key, change]) => {
                         if (change && Object.prototype.hasOwnProperty.call(change, 'to')) {
@@ -2377,7 +2377,7 @@ createApp({
                 const remainingLogs = allLogs.filter(log => (log.turn || 0) < turn);
                 removedLogs += allLogs.length - remainingLogs.length;
                 if (allLogs.length !== remainingLogs.length) {
-                    rebuildUiTemplateStateFromLogs(template, remainingLogs, allLogs);
+                    rebuildUiTemplateStateFromLogs(template, remainingLogs);
                     template.changeLog = remainingLogs;
                 }
             });
@@ -2405,6 +2405,59 @@ createApp({
             }
 
             return { logs: removedLogs, blocks: removedBlocks };
+        };
+
+        const removeUiTemplateChangesForTurn = (turn, {
+            beforeSnapshot = buildConversationTurnSnapshot(),
+            beforeHistory = chatHistory.value
+        } = {}) => {
+            if (!Number.isFinite(turn) || turn < 1) return { logs: 0, blocks: 0 };
+            const hasNextTurn = (beforeSnapshot?.turns || []).some(turnInfo => Number(turnInfo.turn) > turn);
+
+            let changedLogs = 0;
+            currentUiTemplates.value.forEach(template => {
+                const allLogs = Array.isArray(template.changeLog) ? template.changeLog : [];
+                const affectedLogs = allLogs.filter(log => Number(log.turn || 0) === turn);
+                const shiftedLogs = allLogs.filter(log => Number(log.turn || 0) !== turn).map(log => {
+                    const oldTurn = Number(log.turn || 0);
+                    return oldTurn > turn ? { ...log, turn: oldTurn - 1 } : log;
+                });
+                changedLogs += affectedLogs.length + allLogs.filter(log => Number(log.turn || 0) > turn).length;
+
+                let nextLogs = shiftedLogs;
+                if (affectedLogs.length > 0 && hasNextTurn) {
+                    const carryLogs = shiftedLogs.filter(log => Number(log.turn || 0) === turn);
+                    const orderedLogs = [...affectedLogs, ...carryLogs]
+                        .sort((a, b) => (a.time || 0) - (b.time || 0));
+                    const changes = {};
+                    orderedLogs.forEach(log => Object.entries(log.changes || {}).forEach(([key, change]) => {
+                        if (!changes[key]) changes[key] = { ...change };
+                        else changes[key].to = change?.to;
+                    }));
+                    Object.keys(changes).forEach(key => {
+                        if (JSON.stringify(changes[key].from) === JSON.stringify(changes[key].to)) delete changes[key];
+                    });
+                    nextLogs = shiftedLogs.filter(log => Number(log.turn || 0) !== turn);
+                    if (Object.keys(changes).length > 0) {
+                        const latestLog = orderedLogs[orderedLogs.length - 1];
+                        nextLogs.push({ ...latestLog, turn, changes });
+                    }
+                } else if (affectedLogs.length > 0) {
+                    rebuildUiTemplateStateFromLogs(template, nextLogs);
+                }
+                template.changeLog = nextLogs.sort((a, b) => (b.time || 0) - (a.time || 0));
+            });
+
+            let removedBlocks = 0;
+            const affectedTurn = (beforeSnapshot?.turns || []).find(turnInfo => Number(turnInfo.turn) === turn);
+            (affectedTurn?.sourceIndexes || []).forEach(index => {
+                const message = beforeHistory[index];
+                if (message?.role === 'assistant' && message.uiTemplateBlocks) {
+                    delete message.uiTemplateBlocks;
+                    removedBlocks++;
+                }
+            });
+            return { logs: changedLogs, blocks: removedBlocks };
         };
 
         const resetUiTemplateRuntimeState = () => {
@@ -3278,14 +3331,16 @@ createApp({
                 msg.originalCot = cotMatch ? cotMatch[0] : '';
                 msg.originalSys = parseCot(msg.content).sys;
                 msg.originalUiTemplateUpdate = uiTemplateUpdateMatch ? uiTemplateUpdateMatch[0] : '';
-                msg.editMessageContent = stripUiTemplateUpdateBlock(parseCot(msg.content).main);
+                msg.originalEditMessageContent = stripUiTemplateUpdateBlock(parseCot(msg.content).main);
+                msg.editMessageContent = msg.originalEditMessageContent;
                 msg.editMessageHeight = Math.min(0.7 * window.innerHeight, Math.max(88, Math.round(messageHeight || 160)));
             }
         };
 
-        const saveEditMessage = (index) => {
+        const saveEditMessage = async (index) => {
             const msg = chatHistory.value[index];
             if (msg) {
+                const contentChanged = String(msg.editMessageContent || '') !== String(msg.originalEditMessageContent || '');
                 let finalContent = msg.editMessageContent;
                 if (msg.originalSys) {
                     finalContent = finalContent + '\n\n[系统指令:\n' + msg.originalSys + ']';
@@ -3303,7 +3358,28 @@ createApp({
                 delete msg.originalCot;
                 delete msg.originalSys;
                 delete msg.originalUiTemplateUpdate;
-                saveData();
+                delete msg.originalEditMessageContent;
+                if (!contentChanged) {
+                    await saveChatHistoryNow();
+                    showToast('消息已保存', 'success');
+                    return;
+                }
+
+                abortUiTemplateUpdate();
+                abortVectorBatchExtraction();
+                abortClassicBatchExtraction();
+                const snapshot = await ensureConversationMessageIds();
+                const affectedTurn = snapshot.turns.find(turnInfo =>
+                    (turnInfo.sourceIndexes || []).includes(index)
+                )?.turn || null;
+                syncMemoryConversationBindings(snapshot, { backfill: true });
+                await removeMemoriesForConversationTurn(snapshot, affectedTurn);
+                clearCurrentVectorEmptyTurns();
+                await saveConversationMutationNow();
+                await saveMemorySettingsNow();
+                if (affectedTurn && memorySettings.enabled) {
+                    nextTick(() => extractMemoryFromChat());
+                }
                 showToast('消息已保存', 'success');
             }
         };
@@ -3317,6 +3393,7 @@ createApp({
                 delete msg.originalCot;
                 delete msg.originalSys;
                 delete msg.originalUiTemplateUpdate;
+                delete msg.originalEditMessageContent;
             }
         };
 
@@ -3600,7 +3677,7 @@ createApp({
             return vectorRemoved + classicRemoved;
         };
 
-        const syncVectorMemoryConversationBindings = (snapshot, { backfill = false } = {}) => {
+        const syncMemoryConversationBindings = (snapshot, { backfill = false } = {}) => {
             const turns = Array.isArray(snapshot?.turns) ? snapshot.turns : [];
             const turnByMessageId = new Map();
             const sourcesByTurn = new Map();
@@ -3632,6 +3709,20 @@ createApp({
                     memory.vectorChunkId = String(memory.vectorChunkId).replace(/^[^:]+:/, `${liveTurn}:`);
                 }
             });
+            classicMemories.value.forEach(memory => {
+                if (backfill && !(memory.sourceUserIds || []).length && !(memory.sourceAssistantIds || []).length) {
+                    const sources = sourcesByTurn.get(Number(memory.turn));
+                    if (sources) {
+                        memory.sourceUserIds = sources.userIds;
+                        memory.sourceAssistantIds = sources.assistantIds;
+                    }
+                }
+                const sourceIds = (memory.sourceAssistantIds || []).length
+                    ? memory.sourceAssistantIds
+                    : (memory.sourceUserIds || []);
+                const liveTurn = sourceIds.map(id => turnByMessageId.get(id)).find(Number.isFinite);
+                if (Number.isFinite(liveTurn)) memory.turn = liveTurn;
+            });
         };
 
         const clearCurrentVectorEmptyTurns = () => {
@@ -3655,27 +3746,33 @@ createApp({
         };
 
         const deleteMessage = (index) => {
-            confirmAction('确定要删除这条消息吗？该楼层的关联记忆也将一并删除。', async () => {
-                const msg = chatHistory.value[index];
+            confirmAction('确定要删除这一整轮对话吗？该轮的记忆和模板记录也将一并删除。', async () => {
                 abortUiTemplateUpdate();
                 abortVectorBatchExtraction();
                 abortClassicBatchExtraction();
                 const snapshot = await ensureConversationMessageIds();
-                const affectedTurn = snapshot.turns.find(turnInfo =>
+                const affectedTurnInfo = snapshot.turns.find(turnInfo =>
                     (turnInfo.sourceIndexes || []).includes(index)
-                )?.turn || null;
-                // Remove timing record if exists
-                if (msg && msg.id) {
-                    recentGenerationTimes.value = recentGenerationTimes.value.filter(t => (t.id || t) !== msg.id);
-                }
-                const uiCleanup = pruneUiTemplateChangesFromTurn(affectedTurn);
-                syncVectorMemoryConversationBindings(snapshot, { backfill: true });
+                );
+                const affectedTurn = affectedTurnInfo?.turn || null;
+                const removedIndexes = new Set(affectedTurnInfo?.sourceIndexes || [index]);
+                const removedMessageIds = new Set([...removedIndexes]
+                    .map(messageIndex => chatHistory.value[messageIndex]?.id)
+                    .filter(Boolean));
+                recentGenerationTimes.value = recentGenerationTimes.value.filter(t => !removedMessageIds.has(t.id || t));
+                const nextHistory = chatHistory.value.filter((_, messageIndex) => !removedIndexes.has(messageIndex));
+                const nextSnapshot = buildConversationTurnSnapshot(nextHistory, { includeSystem: false });
+                const uiCleanup = removeUiTemplateChangesForTurn(affectedTurn, {
+                    beforeSnapshot: snapshot,
+                    beforeHistory: chatHistory.value
+                });
+                syncMemoryConversationBindings(snapshot, { backfill: true });
                 // 只删除与该轮对话关联的两类记忆，而非全部清空。
-                const removed = ['user', 'assistant'].includes(msg?.role)
+                const removed = affectedTurn
                     ? await removeMemoriesForConversationTurn(snapshot, affectedTurn)
                     : 0;
-                chatHistory.value.splice(index, 1);
-                syncVectorMemoryConversationBindings(buildConversationTurnSnapshot());
+                chatHistory.value = nextHistory;
+                syncMemoryConversationBindings(nextSnapshot);
                 clearCurrentVectorEmptyTurns();
                 removeOrphanedUiTemplateCorrections();
                 await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
@@ -3683,7 +3780,7 @@ createApp({
                 const extras = [];
                 if (removed > 0) extras.push(`${removed} 个关联分片`);
                 if (uiCleanup.logs > 0 || uiCleanup.blocks > 0) extras.push('变量模板');
-                showToast(extras.length ? `消息已删除，清除了 ${extras.join('、')}` : '消息已删除', 'success');
+                showToast(extras.length ? `整轮对话已删除，清除了 ${extras.join('、')}` : '整轮对话已删除', 'success');
             });
         };
 
@@ -3708,7 +3805,7 @@ createApp({
                 abortClassicBatchExtraction();
                 // 只删除最新一轮的记忆，保留之前的
                 const snapshot = await ensureConversationMessageIds();
-                syncVectorMemoryConversationBindings(snapshot, { backfill: true });
+                syncMemoryConversationBindings(snapshot, { backfill: true });
                 const currentTurn = snapshot.turns.length;
                 await filterMemoriesAsync(m => (m.turn || 0) < currentTurn);
                 await removeClassicMemoriesFromTurn(snapshot, currentTurn);
@@ -3724,7 +3821,7 @@ createApp({
                     abortClassicBatchExtraction();
                     // 计算被删除区间的 assistant 轮次，只删除 >= 该轮次的记忆
                     const snapshot = await ensureConversationMessageIds();
-                    syncVectorMemoryConversationBindings(snapshot, { backfill: true });
+                    syncMemoryConversationBindings(snapshot, { backfill: true });
                     const turnAtIndex = getConversationTurnAtIndexFromSnapshot(snapshot, index);
                     const uiTurnAtIndex = turnAtIndex;
                     await filterMemoriesAsync(m => (m.turn || 0) < turnAtIndex);
@@ -3735,7 +3832,7 @@ createApp({
                         recentGenerationTimes.value = recentGenerationTimes.value.filter(t => (t.id || t) !== msg.id);
                     }
                     chatHistory.value = chatHistory.value.slice(0, index);
-                    syncVectorMemoryConversationBindings(buildConversationTurnSnapshot());
+                    syncMemoryConversationBindings(buildConversationTurnSnapshot());
                     clearCurrentVectorEmptyTurns();
                     removeOrphanedUiTemplateCorrections();
                     await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
