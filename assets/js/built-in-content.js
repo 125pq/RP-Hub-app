@@ -131,15 +131,18 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
         '模板变量如下：',
         JSON.stringify(templatePayload, null, 2),
-        '最终限制：无论模板的变量说明如何描述，都不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。每个updates数组项必须先关闭variables对象，再关闭该项对象，然后才能结束数组。'
+        '最终限制：无论模板的变量说明如何描述，都不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。结束顺序固定为：关闭variables对象、关闭当前updates项、关闭updates数组、关闭根对象；根对象关闭后立即输出结束标签，不得再追加“]”或其他字符。'
     ].join('\n');
 
     const buildMainModelUiTemplateCorrectionPrompt = ({ failedResult, failureReason }) => [
         '上一次UI模板变量输出存在错误，请在紧接着的下一轮变量更新中纠正，之后不要再犯同样的错误，并按当轮剧情正常更新；不要在正文中提及。',
         `错误原因：${failureReason}`,
+        /Unexpected non-whitespace character after JSON/i.test(String(failureReason || ''))
+            ? '本次错误是完整JSON结束后仍有多余字符。根对象最后一个“}”输出后立即结束变量块，禁止再追加“]”或其他内容；不要照抄错误输出的结尾。'
+            : '',
         '错误输出：',
         String(failedResult || '')
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 
     const buildUiTemplateAnalysisSystemPrompt = ({ userInfo, currentVariableJson, variableSchemaText, userName }) => [
         '你是RP-Hub的UI变量更新器。当前请求只分析一个UI模板。',

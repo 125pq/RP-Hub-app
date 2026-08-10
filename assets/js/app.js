@@ -2144,7 +2144,11 @@ createApp({
             }
             delete targetMessage.uiTemplateAnalysisFailure;
             const recordFailure = (result, reason) => {
-                targetMessage.uiTemplateAnalysisFailure = { result, reason };
+                targetMessage.uiTemplateAnalysisFailure = {
+                    result,
+                    reason,
+                    sourceMessageId: targetMessage.id || null
+                };
                 failUiTemplateAnalysis('变量分析失败，下次请求将自动修正', targetMessage.id || null);
                 console.warn('[UI模板] 主模型变量分析失败:', reason, result);
                 return { handled: true, changed: false };
@@ -2192,7 +2196,8 @@ createApp({
             if (redundantFields.size > 0) {
                 targetMessage.uiTemplateAnalysisFailure = {
                     result: match[1].trim(),
-                    reason: `重复输出了未变化字段：${[...redundantFields].join('、')}；只需输出实际变化字段，部分变化时只更新应变化的部分`
+                    reason: `重复输出了未变化字段：${[...redundantFields].join('、')}；只需输出实际变化字段，部分变化时只更新应变化的部分`,
+                    sourceMessageId: targetMessage.id || null
                 };
                 scheduleChatHistorySave();
             }
@@ -2247,11 +2252,22 @@ createApp({
             });
             userMessage.uiTemplateCorrection = {
                 result: failure.result,
-                reason: failure.reason
+                reason: failure.reason,
+                sourceMessageId: failure.sourceMessageId || failureMessage.id || null
             };
             delete failureMessage.uiTemplateAnalysisFailure;
             scheduleChatHistorySave();
             target.content = `${correctionPrompt}\n\n${String(target.content || '').trimStart()}`;
+        };
+
+        const removeOrphanedUiTemplateCorrections = () => {
+            const messageIds = new Set(chatHistory.value.map(message => message?.id).filter(Boolean));
+            chatHistory.value.forEach(message => {
+                const sourceMessageId = message?.uiTemplateCorrection?.sourceMessageId;
+                if (sourceMessageId && !messageIds.has(sourceMessageId)) {
+                    delete message.uiTemplateCorrection;
+                }
+            });
         };
 
         const attachUiTemplateBlocksToLastAssistant = ({ excludeTemplateIds = new Set(), targetMessageId = null } = {}) => {
@@ -3602,6 +3618,7 @@ createApp({
                     ? await removeMemoriesForConversationTurn(snapshot, affectedTurn)
                     : 0;
                 chatHistory.value.splice(index, 1);
+                removeOrphanedUiTemplateCorrections();
                 await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
                 const extras = [];
                 if (removed > 0) extras.push(`${removed} 个关联分片`);
@@ -3655,11 +3672,21 @@ createApp({
                         recentGenerationTimes.value = recentGenerationTimes.value.filter(t => (t.id || t) !== msg.id);
                     }
                     if (msg.uiTemplateAnalysisFailure) {
-                        const userMessage = [...chatHistory.value.slice(0, index)].reverse()
-                            .find(message => message?.role === 'user');
-                        if (userMessage) userMessage.uiTemplateCorrection = { ...msg.uiTemplateAnalysisFailure };
+                        const sameTurn = snapshot.turns.find(turnInfo =>
+                            (turnInfo.sourceIndexes || []).includes(index)
+                        );
+                        const userIndex = [...(sameTurn?.sourceIndexes || [])].reverse()
+                            .find(sourceIndex => sourceIndex < index && chatHistory.value[sourceIndex]?.role === 'user');
+                        const userMessage = Number.isInteger(userIndex) ? chatHistory.value[userIndex] : null;
+                        if (userMessage) {
+                            userMessage.uiTemplateCorrection = {
+                                ...msg.uiTemplateAnalysisFailure,
+                                sourceMessageId: userMessage.id || null
+                            };
+                        }
                     }
                     chatHistory.value = chatHistory.value.slice(0, index);
+                    removeOrphanedUiTemplateCorrections();
                     await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
                     await generateResponse(startTime, { reuseGeneratingState: true });
                 });
