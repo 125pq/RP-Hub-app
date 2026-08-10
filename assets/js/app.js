@@ -2192,7 +2192,7 @@ createApp({
             if (redundantFields.size > 0) {
                 targetMessage.uiTemplateAnalysisFailure = {
                     result: match[1].trim(),
-                    reason: `重复输出了未变化字段：${[...redundantFields].join('、')}；只需输出实际变化字段，部分变化时只更新应变化的部分，无变化时返回空updates数组`
+                    reason: `重复输出了未变化字段：${[...redundantFields].join('、')}；只需输出实际变化字段，部分变化时只更新应变化的部分`
                 };
                 scheduleChatHistorySave();
             }
