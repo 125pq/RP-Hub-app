@@ -924,7 +924,7 @@
             </div>
 
             <!-- Characters Management -->
-            <div v-if="currentView === 'characters'" class="management-view">
+            <div v-if="hasOpenedCharacterManager" v-show="currentView === 'characters'" class="management-view">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 md:mb-6 gap-3">
                     <div class="flex items-center justify-between w-full md:w-auto">
                         <div class="flex items-center">
@@ -1059,7 +1059,7 @@
                 </div>
 
                 <!-- Mobile View (Grid) -->
-                <div class="md:hidden grid grid-cols-2 gap-4">
+                <div v-if="!isDesktopCharacterLayout" class="grid grid-cols-2 gap-4">
                     <character-card v-for="char in displayedCharacters" :key="'mobile-'+char.uuid"
                         mobile :char="char"
                         :active="currentCharacter?.uuid === char.uuid"
@@ -1067,8 +1067,8 @@
                         :batch-mode="isBatchDeleteMode"
                         :selected="selectedCharacterIndices.has(char.originalIndex)"
                         :favorite="isCharacterFavorite(char)"
-                        :world-info-count="getCharacterWICount(char)"
-                        :regex-count="getCharacterRegexCount(char)"
+                        :world-info-count="char.worldInfoCount"
+                        :regex-count="char.regexCount"
                         @select="isBatchDeleteMode ? toggleCharacterSelection(char.originalIndex) : selectCharacter(char.originalIndex)"
                         @edit="editCharacter(char.originalIndex)"
                         @export-card="openCharacterExportModal(char.originalIndex)"
@@ -1077,7 +1077,7 @@
                 </div>
 
                 <!-- Desktop View (Grid) -->
-                <div class="hidden md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div v-if="isDesktopCharacterLayout" class="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     <character-card v-for="char in displayedCharacters" :key="char.uuid"
                         :char="char"
                         :active="currentCharacter?.uuid === char.uuid"
@@ -1085,8 +1085,8 @@
                         :batch-mode="isBatchDeleteMode"
                         :selected="selectedCharacterIndices.has(char.originalIndex)"
                         :favorite="isCharacterFavorite(char)"
-                        :world-info-count="getCharacterWICount(char)"
-                        :regex-count="getCharacterRegexCount(char)"
+                        :world-info-count="char.worldInfoCount"
+                        :regex-count="char.regexCount"
                         @select="isBatchDeleteMode ? toggleCharacterSelection(char.originalIndex) : selectCharacter(char.originalIndex)"
                         @edit="editCharacter(char.originalIndex)"
                         @export-card="openCharacterExportModal(char.originalIndex)"
@@ -2551,7 +2551,7 @@
                             title="全部总结记忆的总体压缩率">
                             <span class="h-3.5 w-0.5 rounded-full bg-primary-300" aria-hidden="true"></span>
                             <span class="text-gray-500">压缩率</span>
-                            <span class="font-semibold tabular-nums text-gray-900">{{ summaryCompressionRate }}%</span>
+                            <span class="font-semibold tabular-nums text-gray-900">{{ summaryCompressionRate === null ? '未压缩' : summaryCompressionRate + '%' }}</span>
                         </div>
                     </div>
 

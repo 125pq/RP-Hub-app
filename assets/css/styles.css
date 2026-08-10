@@ -2050,6 +2050,14 @@ opacity: 0;
             contain-intrinsic-size: 1px 300px; /* Rough estimate of card height */
         }
 
+        .character-card-cover {
+            transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .char-grid-item.is-cover-zoomed .character-card-cover {
+            transform: scale(1.1);
+        }
+
         .char-grid-item.is-card-pressing {
             transform: scale(0.94);
             transition-duration: 120ms;

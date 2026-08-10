@@ -2317,13 +2317,30 @@
             let pressStartedAt = 0;
             let releaseTimer = null;
             let cleanupTimer = null;
+            let coverZoomStartedAt = 0;
+            let coverZoomTimer = null;
 
-            const clearPressTimers = () => {
+            const clearCardTimers = () => {
                 clearTimeout(releaseTimer);
                 clearTimeout(cleanupTimer);
+                clearTimeout(coverZoomTimer);
+            };
+            const beginCoverZoom = (event) => {
+                if (event.pointerType !== 'mouse') return;
+                clearTimeout(coverZoomTimer);
+                const card = event.currentTarget;
+                if (!card.classList.contains('is-cover-zoomed')) coverZoomStartedAt = performance.now();
+                card.classList.add('is-cover-zoomed');
+            };
+            const endCoverZoom = (event) => {
+                if (event.pointerType !== 'mouse') return;
+                const card = event.currentTarget;
+                clearTimeout(coverZoomTimer);
+                coverZoomTimer = setTimeout(() => card.classList.remove('is-cover-zoomed'),
+                    Math.max(0, 400 - (performance.now() - coverZoomStartedAt)));
             };
             const beginPress = (event) => {
-                clearPressTimers();
+                clearCardTimers();
                 const card = event.currentTarget;
                 card.classList.remove('is-card-releasing');
                 card.classList.add('is-card-pressing');
@@ -2340,8 +2357,8 @@
                 }, Math.max(0, 120 - (performance.now() - pressStartedAt)));
             };
 
-            onBeforeUnmount(clearPressTimers);
-            return { beginPress, endPress };
+            onBeforeUnmount(clearCardTimers);
+            return { beginCoverZoom, endCoverZoom, beginPress, endPress };
         },
         template: `
             <div class="char-grid-item relative rounded-2xl overflow-hidden transition-[transform,shadow,border-color] duration-300"
@@ -2349,7 +2366,8 @@
                     ? ['aspect-[2/3] shadow-md border border-gray-100', active && !batchMode ? 'ring-4 ring-primary-500 ring-offset-2' : '']
                     : ['bg-white border border-gray-200 hover:border-primary-400 hover:shadow-xl cursor-pointer group shadow-sm flex flex-col', active && !batchMode ? 'ring-4 ring-primary-500 ring-offset-2' : '', batchMode && selected ? 'ring-2 ring-red-500 border-red-500' : '']"
                 :aria-busy="loading"
-                @pointerdown="beginPress" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress"
+                @pointerenter="beginCoverZoom" @pointerdown="beginPress" @pointerup="endPress"
+                @pointercancel="endPress" @pointerleave="endPress($event); endCoverZoom($event)"
                 @click="!loading && $emit('select')">
                 <div v-if="loading && !batchMode" @click.stop role="status" aria-live="polite"
                     class="absolute inset-0 z-40 flex items-center justify-center bg-gray-950/45 backdrop-blur-[2px]">
@@ -2361,7 +2379,7 @@
                     </div>
                 </div>
                 <template v-if="mobile">
-                    <img :src="char?.avatar" class="absolute inset-0 w-full h-full object-cover" loading="lazy">
+                    <img :src="char?.avatar" class="absolute inset-0 w-full h-full object-cover" loading="lazy" decoding="async">
                     <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
                     <div v-if="batchMode" class="absolute inset-0 bg-black/40 flex items-center justify-center z-20">
@@ -2414,7 +2432,7 @@
 
                 <template v-else>
                     <div class="aspect-w-2 aspect-h-3 relative h-[500px] overflow-hidden">
-                        <img :src="char?.avatar" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-[400ms]" loading="lazy">
+                        <img :src="char?.avatar" class="character-card-cover w-full h-full object-cover" loading="lazy" decoding="async">
                         <div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity"></div>
 
                         <div v-if="active && !batchMode" class="absolute top-4 left-4 z-10">

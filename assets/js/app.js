@@ -106,7 +106,6 @@ const {
     applyUiTemplateUpdateListToTemplate,
     cloneUiObject,
     createExecutableHtmlIframe,
-    getUiTemplateValue,
     inferInitialUiTemplateState,
     normalizeUiTemplate,
     normalizeUiTemplateUpdateList,
@@ -297,6 +296,8 @@ createApp({
         const activeToolResultContexts = ref([]);
         const tempUserSetup = reactive({ name: '', description: '', person: 'second' });
         const characterDisplayLimit = ref(8);
+        const hasOpenedCharacterManager = ref(false);
+        const isDesktopCharacterLayout = ref(window.innerWidth >= 768);
 
         // Quota State
         const quotaValue = ref(0);
@@ -524,7 +525,10 @@ createApp({
             }, 180);
         };
 
-        const handleMobileViewportResize = () => scheduleMobileVisualViewportSync();
+        const handleMobileViewportResize = () => {
+            isDesktopCharacterLayout.value = window.innerWidth >= 768;
+            scheduleMobileVisualViewportSync();
+        };
         const handleMobileOrientationChange = () => {
             lastAppliedMobileBackgroundHeight = 0;
             document.documentElement.style.removeProperty('--chat-bg-height');
@@ -1401,7 +1405,9 @@ createApp({
         // Watch view change to refresh embedded pages and sortable lists
         watch(currentView, (newView) => {
             settingsHelpTopic.value = '';
-            if (newView === 'generator') {
+            if (newView === 'characters') {
+                hasOpenedCharacterManager.value = true;
+            } else if (newView === 'generator') {
                 isGeneratorLoading.value = true;
                 generatorUrl.value = `./character/index.html?t=${Date.now()}`;
             } else if (newView === 'square') {
@@ -1523,13 +1529,18 @@ createApp({
             await setScopedStoredValue('classic_memories', storyScopeId, cloneForStorage(memorySource), { clone: false });
         };
 
+        const saveCharactersNow = async () => {
+            if (!getMainDb()) await initDB();
+            await setStoredValue('characters', unwrapForStorage(characters.value), { clone: false });
+        };
+
         const saveData = async (options = {}) => {
-            const { saveMemories = true } = options;
+            const { saveMemories = true, saveCharacters = true } = options;
             try {
                 if (!getMainDb()) await initDB();
                 settings.contextSize = MAX_CONTEXT_SIZE;
                 normalizeActiveToolAggressivenessSettings();
-                await setStoredValue('characters', characters.value);
+                if (saveCharacters) await saveCharactersNow();
                 await setStoredValue('settings', settings);
                 await setStoredValue('presets', presets.value);
                 await setStoredValue('regex', regexScripts.value);
@@ -1580,7 +1591,7 @@ createApp({
                 await saveMemoriesNow(storyScopeId, vectorMemorySource);
                 await saveClassicMemoriesNow(storyScopeId, classicMemorySource);
                 if (saveTemplateRuntime) {
-                    await setStoredValue('characters', characters.value);
+                    await saveCharactersNow();
                     await setStoredValue('global_ui_templates', globalUiTemplates.value);
                 }
             } catch (e) {
@@ -1627,17 +1638,10 @@ createApp({
                             delete char.scenario;
                             migrated = true;
                         }
-                        if (Array.isArray(char.worldInfo)) {
-                            char.worldInfo = char.worldInfo.map(normalizeWorldInfoEntry).filter(entry => entry.scope !== 'global');
-                        }
-                        if (Array.isArray(char.regexScripts)) {
-                            char.regexScripts = char.regexScripts.map(script => normalizeRegexScript(script, 'character')).filter(script => script.scope !== 'global');
-                        }
-                        normalizeCharacterUiTemplates(char);
                         return char;
                     });
                     if (migrated) {
-                        await setStoredValue('characters', characters.value);
+                        await saveCharactersNow();
                     }
                 }
 
@@ -2008,11 +2012,27 @@ createApp({
 
         // Debounced Save
         const debouncedSave = debounce(() => {
-            saveData({ saveMemories: false });
+            saveData({ saveMemories: false, saveCharacters: false });
         }, 1000);
+        const debouncedCharacterSave = debounce(() => {
+            saveCharactersNow().catch(error => console.error('Save characters failed:', error));
+        }, 1000);
+        let suspendCharacterAutoSave = false;
 
         // Watch for changes to auto-save
-        watch([characters, settings, presets, regexScripts, globalRegexScripts, worldInfo, globalWorldInfo, globalUiTemplates, activeTools, user, recentGenerationTimes], () => {
+        watch(() => characters.value.map(char => [
+            char,
+            char?.uuid,
+            char?.favoriteAt,
+            char?.worldInfo,
+            char?.regexScripts,
+            char?.uiTemplates,
+            char?.recentGenerationTimes
+        ]), () => {
+            if (_initComplete && !suspendCharacterAutoSave) debouncedCharacterSave();
+        });
+        watch([settings, presets, regexScripts, globalRegexScripts, worldInfo, globalWorldInfo, globalUiTemplates, activeTools, user, recentGenerationTimes], () => {
+            if (!_initComplete) return;
             debouncedSave();
         }, { deep: true });
 
@@ -2110,20 +2130,6 @@ createApp({
         };
 
         const getLastAssistantMessage = () => [...chatHistory.value].reverse().find(msg => msg && msg.role === 'assistant');
-        const getRedundantUiTemplateFields = (template, variables) => {
-            const entries = Array.isArray(variables) ? [['$root', variables]] : Object.entries(variables || {});
-            const label = template.name || template.id;
-            if (!entries.length) return [`${label}（空更新）`];
-            return entries
-                .filter(([key, value]) => {
-                    const currentValue = key === '$root'
-                        ? template.variableState
-                        : getUiTemplateValue(template.variableState || {}, key);
-                    return JSON.stringify(currentValue) === JSON.stringify(value);
-                })
-                .map(([key]) => `${label}.${key}`);
-        };
-
         const buildMainModelUiTemplateUpdatePrompt = () => {
             if (!settings.uiTemplateEnabled || !settings.uiTemplateMainModelAnalysis) return '';
             const templates = activeUiTemplates.value;
@@ -2182,7 +2188,6 @@ createApp({
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));
             const turn = targetMessageIndex >= 0 ? getAssistantTurnAtIndex(targetMessageIndex) : null;
             let changedFieldCount = 0;
-            const redundantFields = new Set();
             updates.forEach(update => {
                 const targets = update?.id
                     ? activeUiTemplates.value.filter(template => template.id === update.id)
@@ -2190,7 +2195,6 @@ createApp({
                         ? activeUiTemplates.value.filter(template => template.name === update.name)
                         : (activeUiTemplates.value.length === 1 ? [activeUiTemplates.value[0]] : []));
                 targets.forEach(template => {
-                    getRedundantUiTemplateFields(template, update.variables).forEach(field => redundantFields.add(field));
                     const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn, source: 'main_model' });
                     if (result.changed) {
                         changedFieldCount += result.fieldCount;
@@ -2199,15 +2203,6 @@ createApp({
             });
 
             attachUiTemplateBlocksToLastAssistant({ targetMessageId: targetMessage.id });
-
-            if (redundantFields.size > 0) {
-                targetMessage.uiTemplateAnalysisFailure = {
-                    result: match[1].trim(),
-                    reason: `重复输出了未变化字段：${[...redundantFields].join('、')}；只需输出实际变化字段，部分变化时只更新应变化的部分`,
-                    sourceMessageId: targetMessage.id || null
-                };
-                scheduleChatHistorySave();
-            }
 
             if (changedFieldCount > 0) {
                 saveGlobalUiTemplateRuntimeForCharacter();
@@ -2409,28 +2404,39 @@ createApp({
 
         const removeUiTemplateChangesForTurn = (turn, {
             beforeSnapshot = buildConversationTurnSnapshot(),
-            beforeHistory = chatHistory.value
+            beforeHistory = chatHistory.value,
+            shiftLaterTurns = true
         } = {}) => {
             if (!Number.isFinite(turn) || turn < 1) return { logs: 0, blocks: 0 };
             let changedLogs = 0;
             currentUiTemplates.value.forEach(template => {
                 const logs = Array.isArray(template.changeLog) ? template.changeLog : [];
-                const removedLog = logs.find(log => Number(log.turn) === turn);
+                const removedLogs = logs.filter(log => Number(log.turn) === turn);
                 const nextLogs = logs.filter(log => Number(log.turn) !== turn).map(log => (
-                    Number(log.turn) > turn ? { ...log, turn: Number(log.turn) - 1 } : log
+                    shiftLaterTurns && Number(log.turn) > turn ? { ...log, turn: Number(log.turn) - 1 } : log
                 ));
-                const nextLog = nextLogs.find(log => Number(log.turn) === turn);
-                if (removedLog && nextLog) {
+                const nextLog = [...nextLogs]
+                    .filter(log => Number(log.turn) >= (shiftLaterTurns ? turn : turn + 1))
+                    .sort((a, b) => Number(a.turn) - Number(b.turn) || Number(a.time) - Number(b.time))[0];
+                const removedChanges = {};
+                [...removedLogs].sort((a, b) => Number(a.time) - Number(b.time)).forEach(log => {
+                    Object.entries(log.changes || {}).forEach(([key, change]) => {
+                        removedChanges[key] = removedChanges[key]
+                            ? { ...removedChanges[key], to: change.to }
+                            : change;
+                    });
+                });
+                if (removedLogs.length && nextLog) {
                     nextLog.changes ||= {};
-                    Object.entries(removedLog.changes || {}).forEach(([key, change]) => {
+                    Object.entries(removedChanges).forEach(([key, change]) => {
                         nextLog.changes[key] = nextLog.changes[key]
                             ? { ...nextLog.changes[key], from: change.from }
                             : change;
                     });
-                } else if (removedLog) {
+                } else if (removedLogs.length) {
                     rebuildUiTemplateStateFromLogs(template, nextLogs);
                 }
-                if (removedLog || logs.some(log => Number(log.turn) > turn)) changedLogs++;
+                if (removedLogs.length || (shiftLaterTurns && logs.some(log => Number(log.turn) > turn))) changedLogs++;
                 template.changeLog = nextLogs;
             });
 
@@ -2508,32 +2514,40 @@ createApp({
         const isCharacterFavorite = (char) => getCharacterFavoriteTime(char) > 0;
 
         const filteredCharacters = computed(() => {
-            let result = characters.value.map((char, index) => ({ ...char, originalIndex: index }));
+            let result = characters.value.map((char, originalIndex) => ({ char, originalIndex }));
 
             if (characterSearchQuery.value) {
                 const query = characterSearchQuery.value.toLowerCase();
-                result = result.filter(char =>
-                    char.name.toLowerCase().includes(query) ||
-                    (char.description && char.description.toLowerCase().includes(query))
+                result = result.filter(({ char }) =>
+                    String(char.name || '').toLowerCase().includes(query) ||
+                    String(char.description || '').toLowerCase().includes(query)
                 );
             }
 
             // Favorites stay on top, with the most recently favorited first.
             result.sort((a, b) => {
-                const favoriteDiff = getCharacterFavoriteTime(b) - getCharacterFavoriteTime(a);
+                const favoriteDiff = getCharacterFavoriteTime(b.char) - getCharacterFavoriteTime(a.char);
                 if (favoriteDiff !== 0) return favoriteDiff;
-                const timeA = a.createdAt || 0;
-                const timeB = b.createdAt || 0;
+                const timeA = a.char.createdAt || 0;
+                const timeB = b.char.createdAt || 0;
                 if (timeB !== timeA) return timeB - timeA;
                 // Fallback to UUID if timestamps are missing or identical
-                return (b.uuid || '').localeCompare(a.uuid || '');
+                return (b.char.uuid || '').localeCompare(a.char.uuid || '');
             });
 
             return result;
         });
 
         const displayedCharacters = computed(() => {
-            return filteredCharacters.value.slice(0, characterDisplayLimit.value);
+            return filteredCharacters.value.slice(0, characterDisplayLimit.value).map(({ char, originalIndex }) => ({
+                originalIndex,
+                uuid: char.uuid,
+                name: char.name,
+                avatar: char.avatar,
+                favoriteAt: char.favoriteAt,
+                worldInfoCount: getCharacterWICount(char),
+                regexCount: getCharacterRegexCount(char)
+            }));
         });
 
         const loadMoreCharacters = () => {
@@ -2764,9 +2778,13 @@ createApp({
             });
             return Math.max(0, predictedLength);
         });
-        const summaryCompressionRate = computed(() => conversationBodyLength.value > 0
-            ? Math.max(0, Math.round((1 - summaryCompressedBodyLength.value / conversationBodyLength.value) * 100))
-            : 0);
+        const summaryCompressionRate = computed(() => {
+            const floorCount = getPostprocessedChatMessages(chatHistory.value, { includeSystem: false }).length;
+            if (floorCount <= memorySettings.summaryKeepFloors) return null;
+            return conversationBodyLength.value > 0
+                ? Math.max(0, Math.round((1 - summaryCompressedBodyLength.value / conversationBodyLength.value) * 100))
+                : 0;
+        });
 
         const modelTags = computed(() => {
             const counts = { all: availableModels.value.length, other: 0 };
@@ -2818,12 +2836,16 @@ createApp({
 
         const getCharacterWICount = (char) => {
             if (!char.worldInfo) return 0;
-            return char.worldInfo.filter(w => !systemWorldInfoNames.includes(w.comment)).length;
+            return char.worldInfo.reduce((count, entry) => (
+                count + (systemWorldInfoNames.includes(entry.comment) ? 0 : 1)
+            ), 0);
         };
 
         const getCharacterRegexCount = (char) => {
             if (!char.regexScripts) return 0;
-            return char.regexScripts.filter(r => !systemRegexNames.includes(r.name || r.scriptName)).length;
+            return char.regexScripts.reduce((count, script) => (
+                count + (systemRegexNames.includes(script.name || script.scriptName) ? 0 : 1)
+            ), 0);
         };
 
         // --- Methods ---
@@ -3366,7 +3388,8 @@ createApp({
                     (turnInfo.sourceIndexes || []).includes(index)
                 )?.turn || null;
                 syncMemoryConversationBindings(snapshot, { backfill: true });
-                await removeMemoriesForConversationTurn(snapshot, affectedTurn);
+                await removeVectorMemoriesForConversationTurn(snapshot, affectedTurn);
+                await removeClassicMemoriesForConversationTurn(snapshot, affectedTurn);
                 clearCurrentVectorEmptyTurns();
                 await saveConversationMutationNow();
                 await saveMemorySettingsNow();
@@ -3650,24 +3673,28 @@ createApp({
             return removed;
         };
 
-        const removeMemoriesForConversationTurn = async (snapshot, turn) => {
+        const removeVectorMemoriesForConversationTurn = async (snapshot, turn) => {
             if (!Number.isFinite(turn) || turn <= 0) return 0;
             const turnInfo = snapshot?.turns?.find(item => item.turn === turn);
             const sourceIds = new Set((turnInfo?.sourceIndexes || [])
                 .map(index => chatHistory.value[index]?.id)
                 .filter(Boolean));
-            const assistantIds = new Set(getClassicTurnSourceIds(turnInfo, 'assistant'));
-            const vectorRemoved = await filterMemoriesAsync(memory => {
+            return filterMemoriesAsync(memory => {
                 const memorySourceIds = [...(memory.sourceUserIds || []), ...(memory.sourceAssistantIds || [])];
                 const matchesSource = memorySourceIds.some(id => sourceIds.has(id));
                 return !matchesSource && Number(memory.turn) !== turn;
             });
-            const classicRemoved = await filterClassicMemoriesAsync(memory => {
+        };
+
+        const removeClassicMemoriesForConversationTurn = async (snapshot, turn) => {
+            if (!Number.isFinite(turn) || turn <= 0) return 0;
+            const turnInfo = snapshot?.turns?.find(item => item.turn === turn);
+            const assistantIds = new Set(getClassicTurnSourceIds(turnInfo, 'assistant'));
+            return filterClassicMemoriesAsync(memory => {
                 const memoryIds = memory.sourceAssistantIds || [];
                 const matchesSource = memoryIds.some(id => assistantIds.has(id));
                 return !matchesSource && Number(memory.turn) !== turn;
             });
-            return vectorRemoved + classicRemoved;
         };
 
         const syncMemoryConversationBindings = (snapshot, { backfill = false } = {}) => {
@@ -3751,16 +3778,29 @@ createApp({
         };
 
         const deleteMessage = (index) => {
-            confirmAction('确定要删除这一整轮对话吗？该轮的记忆和模板记录也将一并删除。', async () => {
+            const targetMessage = chatHistory.value[index];
+            if (!targetMessage || !['user', 'assistant'].includes(targetMessage.role)) return;
+            const deletesUserTurn = targetMessage.role === 'user';
+            const message = deletesUserTurn
+                ? '确定要删除这条用户消息及其绑定的 AI 回复吗？该轮的相关项也将一并删除。'
+                : '确定要删除这条 AI 消息吗？该轮的相关项也将一并删除。';
+            confirmAction(message, async () => {
                 abortUiTemplateUpdate();
                 abortVectorBatchExtraction();
                 abortClassicBatchExtraction();
                 const snapshot = await ensureConversationMessageIds();
+                const removedIndexes = new Set([index]);
+                if (deletesUserTurn) {
+                    for (let nextIndex = index + 1; nextIndex < chatHistory.value.length; nextIndex++) {
+                        const role = chatHistory.value[nextIndex]?.role;
+                        if (role === 'user') break;
+                        if (role === 'assistant') removedIndexes.add(nextIndex);
+                    }
+                }
                 const affectedTurnInfo = snapshot.turns.find(turnInfo =>
-                    (turnInfo.sourceIndexes || []).includes(index)
+                    (turnInfo.sourceIndexes || []).some(sourceIndex => removedIndexes.has(sourceIndex))
                 );
                 const affectedTurn = affectedTurnInfo?.turn || null;
-                const removedIndexes = new Set(affectedTurnInfo?.sourceIndexes || [index]);
                 const removedMessageIds = new Set([...removedIndexes]
                     .map(messageIndex => chatHistory.value[messageIndex]?.id)
                     .filter(Boolean));
@@ -3769,23 +3809,23 @@ createApp({
                 const nextSnapshot = buildConversationTurnSnapshot(nextHistory, { includeSystem: false });
                 const uiCleanup = removeUiTemplateChangesForTurn(affectedTurn, {
                     beforeSnapshot: snapshot,
-                    beforeHistory: chatHistory.value
+                    beforeHistory: chatHistory.value,
+                    shiftLaterTurns: nextSnapshot.turns.length < snapshot.turns.length
                 });
                 syncMemoryConversationBindings(snapshot, { backfill: true });
-                // 只删除与该轮对话关联的两类记忆，而非全部清空。
-                const removed = affectedTurn
-                    ? await removeMemoriesForConversationTurn(snapshot, affectedTurn)
-                    : 0;
+                // 向量和总结记忆按各自的消息绑定分别清理。
+                if (affectedTurn) {
+                    await removeVectorMemoriesForConversationTurn(snapshot, affectedTurn);
+                    await removeClassicMemoriesForConversationTurn(snapshot, affectedTurn);
+                }
                 chatHistory.value = nextHistory;
                 syncMemoryConversationBindings(nextSnapshot);
                 clearCurrentVectorEmptyTurns();
                 removeOrphanedUiTemplateCorrections();
                 await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
                 await saveMemorySettingsNow();
-                const extras = [];
-                if (removed > 0) extras.push(`${removed} 个关联分片`);
-                if (uiCleanup.logs > 0 || uiCleanup.blocks > 0) extras.push('变量模板');
-                showToast(extras.length ? `整轮对话已删除，清除了 ${extras.join('、')}` : '整轮对话已删除', 'success');
+                const deletedLabel = deletesUserTurn ? '用户消息及绑定回复' : 'AI 消息';
+                showToast(`${deletedLabel}已删除，相关项已一并清除`, 'success');
             });
         };
 
@@ -7036,7 +7076,7 @@ createApp({
                 list.push(template);
             }
             showUiTemplateEditor.value = false;
-            saveData();
+            saveData({ saveMemories: false });
             showToast('UI模板已保存', 'success');
         };
 
@@ -7098,7 +7138,7 @@ createApp({
             showToast(`成功导入 ${normalized.length} 个UI模板`, 'success');
         }, error => showToast(`UI模板导入失败: ${error.message}`, 'error'));
 
-        const deleteCharacterData = async (char, legacyIndex) => {
+        const deleteCharacterData = async (char, legacyIndex, knownStorageKeys = null) => {
             if (!getMainDb()) await initDB();
             let savedBranches = null;
             if (char?.uuid) {
@@ -7111,11 +7151,11 @@ createApp({
                 .filter(branch => branch?.id && branch.id !== STORY_BRANCH_MAIN_ID)
                 .map(branch => getStoryBranchScopeId(char.uuid, branch.id)));
             if (char?.uuid) {
-                const [mainKeys, legacyKeys] = await Promise.all([
+                const storageKeys = knownStorageKeys || (await Promise.all([
                     readStorageKeys(getMainDb()),
                     readStorageKeys(getLegacyDb())
-                ]);
-                [...mainKeys, ...legacyKeys].forEach(key => {
+                ])).flat();
+                storageKeys.forEach(key => {
                     const logicalKey = getStorageLogicalKey(key);
                     const storageName = CHARACTER_SCOPED_STORAGE_NAMES
                         .find(name => logicalKey.startsWith(`${name}_`));
@@ -7142,7 +7182,7 @@ createApp({
 
         const finishCharacterDeletion = async () => {
             await Promise.all([
-                setStoredValue('characters', characters.value),
+                saveCharactersNow(),
                 saveMemorySettingsNow(),
                 setStoredValue('global_ui_templates', globalUiTemplates.value),
                 currentCharacterIndex.value >= 0
@@ -7194,6 +7234,7 @@ createApp({
 
                     await deleteCharacterData(char, index);
 
+                    suspendCharacterAutoSave = true;
                     characters.value.splice(index, 1);
                     if (isCurrent) {
                         clearCurrentCharacterData();
@@ -7205,6 +7246,8 @@ createApp({
                 } catch (err) {
                     console.error('Failed to delete character or associated data:', err);
                     showToast('删除角色失败', 'error');
+                } finally {
+                    suspendCharacterAutoSave = false;
                 }
             });
         };
@@ -7224,7 +7267,10 @@ createApp({
                 };
                 showToast('已收藏角色卡', 'success');
             }
-            saveData({ saveMemories: false });
+            saveCharactersNow().catch(error => {
+                console.error('Save character favorite failed:', error);
+                showToast('收藏状态保存失败', 'error');
+            });
         };
 
         const toggleBatchDeleteMode = () => {
@@ -7249,11 +7295,17 @@ createApp({
                     const indices = Array.from(selectedCharacterIndices.value).sort((a, b) => b - a);
                     const deletingCurrent = indices.includes(currentCharacterIndex.value);
                     if (deletingCurrent && !await stopCurrentCharacterWork()) return;
+                    if (!getMainDb()) await initDB();
+                    const storageKeys = (await Promise.all([
+                        readStorageKeys(getMainDb()),
+                        readStorageKeys(getLegacyDb())
+                    ])).flat();
 
+                    suspendCharacterAutoSave = true;
                     for (const index of indices) {
                         const char = characters.value[index];
                         if (!char) continue;
-                        await deleteCharacterData(char, index);
+                        await deleteCharacterData(char, index, storageKeys);
                         characters.value.splice(index, 1);
                     }
 
@@ -7272,6 +7324,8 @@ createApp({
                 } catch (err) {
                     console.error('Batch delete failed:', err);
                     showToast('删除失败', 'error');
+                } finally {
+                    suspendCharacterAutoSave = false;
                 }
             });
         };
@@ -7490,7 +7544,7 @@ createApp({
                 saveStoryBranchesForCharacter(char, branchState),
                 saveMemorySettingsNow(),
                 setStoredValue('global_ui_templates', globalUiTemplates.value),
-                setStoredValue('characters', characters.value)
+                saveCharactersNow()
             ]);
             return true;
         };
@@ -7601,7 +7655,7 @@ createApp({
                             saveStoryBranchesForCharacter(char),
                             saveMemorySettingsNow(),
                             setStoredValue('global_ui_templates', globalUiTemplates.value),
-                            setStoredValue('characters', characters.value)
+                            saveCharactersNow()
                         ]);
                         showToast(`已删除“${target.name}”${childHint}`, 'success');
                     } catch (error) {
@@ -7715,7 +7769,7 @@ createApp({
                     saveStoryBranchesForCharacter(char),
                     saveMemorySettingsNow(),
                     setStoredValue('global_ui_templates', globalUiTemplates.value),
-                    setStoredValue('characters', characters.value)
+                    saveCharactersNow()
                 ]);
                 loadGlobalUiTemplateRuntimeForCharacter(char);
                 _isApplyingCharacterScopedData = true;
@@ -7749,7 +7803,7 @@ createApp({
                         saveStoryBranchesForCharacter(char),
                         saveMemorySettingsNow(),
                         setStoredValue('global_ui_templates', globalUiTemplates.value),
-                        setStoredValue('characters', characters.value)
+                        saveCharactersNow()
                     ]);
                 }
                 console.error('Failed to create story branch:', error);
@@ -7859,6 +7913,11 @@ createApp({
                 showToast('角色不存在，无法读取聊天记录', 'error');
                 return;
             }
+            if (!isNewImport && currentCharacterIndex.value === index) {
+                currentView.value = 'chat';
+                await scrollChatToBottom();
+                return;
+            }
             const switchEpoch = ++_characterSwitchEpoch;
             const isLatestSwitch = () => switchEpoch === _characterSwitchEpoch;
             switchingCharacterIndex.value = index;
@@ -7893,8 +7952,7 @@ createApp({
             try {
                 if (!char.uuid) {
                     char.uuid = generateUUID();
-                    if (!getMainDb()) await initDB();
-                    await setStoredValue('characters', characters.value);
+                    await saveCharactersNow();
                     if (!isLatestSwitch()) return;
                 }
                 branchState = await readStoryBranchesForCharacter(char);
@@ -7918,7 +7976,6 @@ createApp({
             activeStoryBranchId.value = branchState.activeBranchId;
             selectedStoryBranchId.value = branchState.activeBranchId;
             resetChatRenderWindow();
-            normalizeCharacterUiTemplates(char);
             if (previousCharacterIndex !== index) {
                 loadGlobalUiTemplateRuntimeForCharacter(char);
             }
@@ -7962,7 +8019,7 @@ createApp({
                 showAutoImageGenModal.value = true;
             }
 
-            _characterSwitchSavePromise = saveData({ saveMemories: false });
+            _characterSwitchSavePromise = setStoredValue('last_active_char', index);
             await _characterSwitchSavePromise;
             } finally {
                 if (isLatestSwitch()) switchingCharacterIndex.value = -1;
@@ -8503,7 +8560,7 @@ createApp({
             removeLegacyUserRegex();
 
             // Save enforced defaults immediately (仅保存预设/正则等结构性数据)
-            saveData();
+            saveData({ saveMemories: false, saveCharacters: false });
 
             // 初始化守卫解除：此后 saveData 才允许写入 user / memorySettings
             _initComplete = true;
@@ -8515,13 +8572,12 @@ createApp({
                 currentCharacterIndex.value = lastActiveCharacterId.value;
                 resetChatRenderWindow();
                 const char = characters.value[currentCharacterIndex.value];
-                normalizeCharacterUiTemplates(char);
 
                 // Load Chat History for this character
                 try {
                     if (!char.uuid) {
                         char.uuid = generateUUID();
-                        await setStoredValue('characters', characters.value);
+                        await saveCharactersNow();
                     }
                     await loadStoryBranchesForCharacter(char);
                     chatHistory.value = await loadStoredChatHistory(
@@ -8792,7 +8848,7 @@ createApp({
             isGeneratorLoading, generatorUrl, onGeneratorLoad, // Generator exports
             isSquareLoading, squareUrl, onSquareLoad, // Square exports
             isNovelLoading, novelUrl, onNovelLoad, // Novel exports
-            editorTab, characterDisplayLimit, displayedCharacters, loadMoreCharacters,
+            editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, displayedCharacters, loadMoreCharacters,
             isAutoImageGenEnabled,
             apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
             toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll,
@@ -8946,7 +9002,6 @@ createApp({
             createNewCharacter, editCharacter, saveCharacter, deleteCharacter, selectCharacter, toggleCharacterFavorite, isCharacterFavorite,
             currentUiTemplates, activeUiTemplates, uiTemplateUpdateStatus, createUiTemplate, editUiTemplate, saveUiTemplate, deleteUiTemplate, importUiTemplates, updateUiTemplatesFromChat, renderEditingUiTemplatePreview, handleUiTemplateClick,
             isBatchDeleteMode, isSidebarCollapsed, isOnlineNavOpen, toggleOnlineNav, isAdvancedNavOpen, toggleAdvancedNav, selectedCharacterIndices, toggleBatchDeleteMode, toggleCharacterSelection, batchDeleteCharacters,
-            getCharacterWICount, getCharacterRegexCount,
             handleAvatarUpload, importCharacter,
             createPreset, editPreset, savePreset, deletePreset,
             renderMarkdown, messageUsesWideLayout, parseCot, closeCharacterEditor: () => showCharacterEditor.value = false,

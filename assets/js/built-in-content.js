@@ -126,46 +126,43 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '{"updates":[{"id":"模板id","variables":{"变量名":"完整值"},"reason":"简短原因"}]}',
         closeTag,
         'updates只列出本轮确实需要更新的模板，每个模板最多输出一次；清理与当前剧情无关的模板示例也属于本轮必须完成的更新。只有剧情没有变化且当前变量中不存在待清理的示例内容时，才返回 {"updates":[]}。',
-        '每个variables只列出需要更新的字段，不要重复未变化字段；普通对象优先使用点路径更新，固定数组仅修改成员内容时使用索引路径，数组新增、删除或重新排序成员时必须返回完整数组。',
+        '普通对象优先使用点路径更新，固定数组仅修改成员内容时使用索引路径，数组新增、删除或重新排序成员时必须返回完整数组。',
         '输出前必须逐项检查当前变量JSON中的所有现有字段，不得只关注上一轮或最近连续更新过的字段；凡本轮剧情已明确改变的字段都要一并更新。当前值仍准确时不得仅改写措辞制造变化。',
         '只允许更新当前变量JSON中已经存在的字段路径，以及变量说明明确允许新增的动态键或ID；除此之外不得新增对象键或顶层变量。判断普通字段是否存在只看本轮提供的当前变量JSON，之前失败输出中出现过的字段不算已创建。动态键必须满足变量说明中的关联条件。',
         `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
         '模板变量如下：',
         JSON.stringify(templatePayload, null, 2),
-        '最终限制：除变量说明明确允许新增的动态键或ID外，不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。每个updates项都必须包含reason；先完整关闭最后一个变量值和variables对象，再在同一项内写reason，随后依次关闭当前项、updates数组和根对象。根对象关闭后立即输出结束标签，不得再追加字符。'
+        '最终限制：除变量说明明确允许新增的动态键或ID外，不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。根对象只能包含updates；reason只能写在updates数组内对应的更新项中。每个updates项都必须包含reason；先完整关闭最后一个变量值和variables对象，再在同一项内写reason，随后依次关闭当前项、updates数组和根对象。根对象关闭后立即输出结束标签，不得再追加字符。'
     ].join('\n');
 
-    const buildMainModelUiTemplateCorrectionPrompt = ({ failedResult, failureReason }) => {
-        const isRedundantFieldWarning = /^重复输出了未变化字段/.test(String(failureReason || ''));
-        return [
-            isRedundantFieldWarning
-                ? '上一次UI模板变量输出重复了未变化字段，其中有效变化已经写入模板。下一轮只需输出当轮剧情需要变化的字段，必须以系统本轮提供的当前变量JSON为唯一依据，不要在正文中提及。'
-                : '上一次UI模板变量输出存在错误，本次变量变化未被应用，其中任何修改或新增字段都没有写入模板。请在紧接着的下一轮变量更新中纠正，之后不要再犯同样的错误，并按当轮剧情正常更新；必须以系统本轮提供的当前变量JSON为唯一依据，不要在正文中提及。',
-            `错误原因：${failureReason}`,
-            /Unexpected non-whitespace character after JSON/i.test(String(failureReason || ''))
-                ? '本次错误是完整JSON结束后仍有多余字符。根对象最后一个“}”输出后立即结束变量块，禁止再追加“]”或其他内容。'
-                : '',
-            /Expected ',' or '}' after property value/i.test(String(failureReason || ''))
-                ? '本次错误是在结束updates数组前漏关了当前更新项。不要套用固定数量的右括号；先完整关闭最后一个变量值和variables对象，再在当前项内写reason，随后依次关闭当前项、updates数组和根对象。'
-                : '',
-            /Expected ',' or ']' after array element/i.test(String(failureReason || ''))
-                ? '本次错误是在数组项结束后又多写了一个“}”。对象项只关闭一次，随后应直接关闭当前数组，或用逗号开始下一项。'
-                : '',
-            /未定义变量/.test(String(failureReason || ''))
-                ? '错误中列出的普通字段没有被创建，下一轮不得继续沿用；只能使用系统本轮当前变量JSON里真实存在的路径，或变量说明明确允许且满足关联条件的动态键。'
-                : '',
-            isRedundantFieldWarning ? '上一次输出（有效变化已应用，仅用于定位）：' : '错误输出（未应用，仅用于定位）：',
-            String(failedResult || ''),
-            '本轮必须按错误原因纠正，并重新检查所有现有变量，不得只处理上次涉及的字段。'
-        ].filter(Boolean).join('\n');
-    };
+    const buildMainModelUiTemplateCorrectionPrompt = ({ failedResult, failureReason }) => [
+        '上一次UI模板变量输出存在错误，本次变量变化未被应用，其中任何修改或新增字段都没有写入模板。请在紧接着的下一轮变量更新中纠正，之后不要再犯同样的错误，并按当轮剧情正常更新；必须以系统本轮提供的当前变量JSON为唯一依据，不要在正文中提及。',
+        `错误原因：${failureReason}`,
+        /Unexpected non-whitespace character after JSON/i.test(String(failureReason || ''))
+            ? '本次错误是完整JSON结束后仍有多余字符。根对象最后一个“}”输出后立即结束变量块，禁止再追加“]”或其他内容。'
+            : '',
+        /Expected ',' or '}' after property value/i.test(String(failureReason || ''))
+            ? '本次错误是在结束updates数组前漏关了当前更新项。不要套用固定数量的右括号；先完整关闭最后一个变量值和variables对象，再在当前项内写reason，随后依次关闭当前项、updates数组和根对象。'
+            : '',
+        /Expected ',' or ']' after array element/i.test(String(failureReason || ''))
+            ? '本次错误是在数组项结束后又多写了一个“}”。对象项只关闭一次，随后应直接关闭当前数组，或用逗号开始下一项。'
+            : '',
+        /未定义变量/.test(String(failureReason || ''))
+            ? '错误中列出的普通字段没有被创建，下一轮不得继续沿用；只能使用系统本轮当前变量JSON里真实存在的路径，或变量说明明确允许且满足关联条件的动态键。'
+            : '',
+        /外层包含未定义字段：[^；\n]*reason/i.test(String(failureReason || ''))
+            ? 'reason只能写在updates数组内对应的更新项中；根对象只能包含updates，不得在updates数组结束后再次输出reason。'
+            : '',
+        '错误输出（未应用，仅用于定位）：',
+        String(failedResult || ''),
+        '本轮必须按错误原因纠正，并重新检查所有现有变量，不得只处理上次涉及的字段。'
+    ].filter(Boolean).join('\n');
 
     const buildUiTemplateAnalysisSystemPrompt = ({ userInfo, currentVariableJson, variableSchemaText, userName }) => [
         '你是RP-Hub的UI变量更新器。当前请求只分析一个UI模板。',
         '只根据用户消息里提供的最近对话，更新下方模板已定义的变量。',
         '严格返回JSON，不要解释，不要输出Markdown。',
         '返回格式固定为 {"variables":{"变量路径":"新值"},"reason":"简短原因"}，例如 {"variables":{"a_line_1":"新台词","a_line_3":"新台词"},"reason":"对话内容更新了角色台词"}。',
-        'variables只列出本轮实际需要更新的字段，不要重复未变化字段。',
         '输出前必须逐项检查当前变量JSON中的所有现有字段，不得只关注上一轮或最近连续更新过的字段；凡本轮剧情已明确改变的字段都要一并更新。当前值仍准确时不得仅改写措辞制造变化。',
         '变量值可以是文字、数字、对象或JSON数组；普通对象优先使用点路径更新。',
         '只允许更新当前变量JSON中已经存在的字段路径，以及变量说明明确允许新增的动态键或ID；除此之外不得新增对象键或顶层变量。动态键必须满足变量说明中的关联条件。',
@@ -598,7 +595,7 @@ image###生成的提示词###
 ` : '';
         const uiTemplateAnalysisSection = uiTemplateAnalysisEnabled ? `
 **[变量更新分析]**
-对照系统提供的 UI 模板当前变量与变量说明，逐项检查全部变量条目，结合当前剧情判断每一项是否需要变化或调整，并给出需要更新的变量路径、新值及依据。保持变量路径和值类型正确，不重复未变化字段，不补写对话无法确认的状态。此处只完成更新判断，最终变量块必须在正文结束后按系统规定格式输出。
+对照系统提供的 UI 模板当前变量与变量说明，逐项检查全部变量条目，结合当前剧情判断每一项是否需要变化或调整，并给出需要更新的变量路径、新值及依据。保持变量路径和值类型正确，不补写对话无法确认的状态。此处只完成更新判断，最终变量块必须在正文结束后按系统规定格式输出。
 ` : '';
 
         return `<cot_protocol>
