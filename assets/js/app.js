@@ -6924,9 +6924,12 @@ createApp({
                     readStorageKeys(getLegacyDb())
                 ]);
                 [...mainKeys, ...legacyKeys].forEach(key => {
-                    const scoped = getScopedStorageInfo(getStorageLogicalKey(key));
-                    if (scoped && getStoryBranchOwnerId(scoped.id) === char.uuid && scoped.id !== char.uuid) {
-                        branchScopeIds.add(scoped.id);
+                    const logicalKey = getStorageLogicalKey(key);
+                    const storageName = CHARACTER_SCOPED_STORAGE_NAMES
+                        .find(name => logicalKey.startsWith(`${name}_`));
+                    const scopeId = storageName ? logicalKey.slice(storageName.length + 1) : '';
+                    if (scopeId && getStoryBranchOwnerId(scopeId) === char.uuid && scopeId !== char.uuid) {
+                        branchScopeIds.add(scopeId);
                     }
                 });
             }
