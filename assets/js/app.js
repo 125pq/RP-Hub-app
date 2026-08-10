@@ -3779,11 +3779,13 @@ createApp({
 
         const deleteMessage = (index) => {
             const targetMessage = chatHistory.value[index];
-            if (!targetMessage || !['user', 'assistant'].includes(targetMessage.role)) return;
+            if (!targetMessage || !['user', 'assistant', 'system'].includes(targetMessage.role)) return;
             const deletesUserTurn = targetMessage.role === 'user';
             const message = deletesUserTurn
                 ? '确定要删除该轮次吗？该轮的相关项也将一并删除。'
-                : '确定要删除这条 AI 消息吗？该轮的相关项也将一并删除。';
+                : targetMessage.role === 'system'
+                    ? '确定要删除这条状态消息吗？'
+                    : '确定要删除这条 AI 消息吗？该轮的相关项也将一并删除。';
             confirmAction(message, async () => {
                 abortUiTemplateUpdate();
                 abortVectorBatchExtraction();
@@ -3824,7 +3826,7 @@ createApp({
                 removeOrphanedUiTemplateCorrections();
                 await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
                 await saveMemorySettingsNow();
-                const deletedLabel = deletesUserTurn ? '该轮次' : 'AI 消息';
+                const deletedLabel = deletesUserTurn ? '该轮次' : targetMessage.role === 'system' ? '状态消息' : 'AI 消息';
                 showToast(`${deletedLabel}已删除，相关项已一并清除`, 'success');
             });
         };
