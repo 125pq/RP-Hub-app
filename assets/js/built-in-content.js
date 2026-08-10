@@ -127,21 +127,26 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         closeTag,
         'updates只列出本轮确实需要更新的模板，每个模板最多输出一次；清理与当前剧情无关的模板示例也属于本轮必须完成的更新。只有剧情没有变化且当前变量中不存在待清理的示例内容时，才返回 {"updates":[]}。',
         '每个variables只列出需要更新的字段，不要重复未变化字段；对象或数组字段发生变化时，需返回该字段的完整新值。',
+        '输出前必须逐项检查当前变量JSON中的所有现有字段，不得只关注上一轮或最近连续更新过的字段；凡本轮剧情已明确改变的字段都要一并更新。当前值仍准确时不得仅改写措辞制造变化。',
         '只允许更新当前变量JSON中已经存在的字段路径，不要修改HTML，不得新增对象键或顶层变量；人物、背包等新增内容只能写入已经存在的数组字段，数组必须返回完整数组。',
         `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
         '模板变量如下：',
         JSON.stringify(templatePayload, null, 2),
-        '最终限制：无论模板的变量说明如何描述，都不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。结束顺序固定为：关闭variables对象、关闭当前updates项、关闭updates数组、关闭根对象；根对象关闭后立即输出结束标签，不得再追加“]”或其他字符。'
+        '最终限制：无论模板的变量说明如何描述，都不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。结束顺序固定为：关闭variables对象、关闭当前updates项、关闭updates数组、关闭根对象；不输出reason时结尾必须是“}}]}”，不得写成“}]}”。若输出reason，必须放在当前updates项内，即variables后的“},\"reason\":\"...\"}]}”。根对象关闭后立即输出结束标签，不得再追加字符。'
     ].join('\n');
 
     const buildMainModelUiTemplateCorrectionPrompt = ({ failedResult, failureReason }) => [
         '上一次UI模板变量输出存在错误，请在紧接着的下一轮变量更新中纠正，之后不要再犯同样的错误，并按当轮剧情正常更新；不要在正文中提及。',
         `错误原因：${failureReason}`,
+        '错误输出：',
+        String(failedResult || ''),
         /Unexpected non-whitespace character after JSON/i.test(String(failureReason || ''))
             ? '本次错误是完整JSON结束后仍有多余字符。根对象最后一个“}”输出后立即结束变量块，禁止再追加“]”或其他内容；不要照抄错误输出的结尾。'
             : '',
-        '错误输出：',
-        String(failedResult || '')
+        /Expected ',' or '}' after property value/i.test(String(failureReason || ''))
+            ? '本次错误是关闭variables后漏掉了关闭当前updates项的“}”。不输出reason时，结尾必须是“}}]}”；若输出reason，必须写成“},\"reason\":\"简短原因\"}]}”。禁止再次写成“}]}”，也不得把reason放到updates数组外。'
+            : '',
+        '以上错误输出只用于定位，禁止照抄其JSON结构或结尾；本轮必须按错误原因纠正，并重新检查所有现有变量，不得只处理上次涉及的字段。'
     ].filter(Boolean).join('\n');
 
     const buildUiTemplateAnalysisSystemPrompt = ({ userInfo, currentVariableJson, variableSchemaText, userName }) => [
@@ -150,6 +155,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '严格返回JSON，不要解释，不要输出Markdown。',
         '返回格式固定为 {"variables":{"变量路径":"新值"},"reason":"简短原因"}，例如 {"variables":{"a_line_1":"新台词","a_line_3":"新台词"},"reason":"对话内容更新了角色台词"}。',
         'variables只列出本轮实际需要更新的字段，不要重复未变化字段。',
+        '输出前必须逐项检查当前变量JSON中的所有现有字段，不得只关注上一轮或最近连续更新过的字段；凡本轮剧情已明确改变的字段都要一并更新。当前值仍准确时不得仅改写措辞制造变化。',
         '变量值可以是文字、数字、对象或JSON数组；装备栏、背包、日志这类列表可直接返回完整数组字段，例如 {"equipment":[{"slot":"武器","name":"短剑"}]}。',
         '只允许更新当前变量JSON中已经存在的字段路径，不得新增对象键或顶层变量；人物、背包等新增内容只能写入已经存在的数组字段。',
         '如果模板根变量本身就是数组，可以直接返回JSON数组；如果只改数组里的一个小项，也可以返回 {"equipment.0.name":"短剑"} 这种路径对象。',

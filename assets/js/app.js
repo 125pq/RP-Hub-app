@@ -1568,10 +1568,17 @@ createApp({
 
         const saveConversationMutationNow = async ({ saveTemplateRuntime = false } = {}) => {
             try {
+                const storyScopeId = getCurrentStoryBranchScopeId();
+                const historySource = chatHistory.value;
+                const vectorMemorySource = memories.value;
+                const classicMemorySource = classicMemories.value;
+                if (saveTemplateRuntime) {
+                    saveGlobalUiTemplateRuntimeForCharacter(currentCharacter.value, activeStoryBranchId.value);
+                }
                 if (!getMainDb()) await initDB();
-                await saveChatHistoryNow();
-                await saveMemoriesNow();
-                await saveClassicMemoriesNow();
+                await saveChatHistoryNow(storyScopeId, historySource);
+                await saveMemoriesNow(storyScopeId, vectorMemorySource);
+                await saveClassicMemoriesNow(storyScopeId, classicMemorySource);
                 if (saveTemplateRuntime) {
                     await setStoredValue('characters', characters.value);
                     await setStoredValue('global_ui_templates', globalUiTemplates.value);
@@ -2422,8 +2429,11 @@ createApp({
             ...(Array.isArray(char?.uiTemplates) ? char.uiTemplates : [])
         ];
 
-        const saveGlobalUiTemplateRuntimeForCharacter = (char = currentCharacter.value) => {
-            const key = getUiTemplateRuntimeKey(char);
+        const saveGlobalUiTemplateRuntimeForCharacter = (
+            char = currentCharacter.value,
+            branchId = activeStoryBranchId.value
+        ) => {
+            const key = getUiTemplateRuntimeKey(char, branchId);
             if (!key) return;
             getUiTemplatesForRuntime(char).forEach(template => {
                 if (!template.runtimeByCharacter || typeof template.runtimeByCharacter !== 'object') {
@@ -3573,14 +3583,60 @@ createApp({
         const removeMemoriesForConversationTurn = async (snapshot, turn) => {
             if (!Number.isFinite(turn) || turn <= 0) return 0;
             const turnInfo = snapshot?.turns?.find(item => item.turn === turn);
+            const sourceIds = new Set((turnInfo?.sourceIndexes || [])
+                .map(index => chatHistory.value[index]?.id)
+                .filter(Boolean));
             const assistantIds = new Set(getClassicTurnSourceIds(turnInfo, 'assistant'));
-            const vectorRemoved = await filterMemoriesAsync(memory => Number(memory.turn) !== turn);
+            const vectorRemoved = await filterMemoriesAsync(memory => {
+                const memorySourceIds = [...(memory.sourceUserIds || []), ...(memory.sourceAssistantIds || [])];
+                const matchesSource = memorySourceIds.some(id => sourceIds.has(id));
+                return !matchesSource && Number(memory.turn) !== turn;
+            });
             const classicRemoved = await filterClassicMemoriesAsync(memory => {
                 const memoryIds = memory.sourceAssistantIds || [];
                 const matchesSource = memoryIds.some(id => assistantIds.has(id));
                 return !matchesSource && Number(memory.turn) !== turn;
             });
             return vectorRemoved + classicRemoved;
+        };
+
+        const syncVectorMemoryConversationBindings = (snapshot, { backfill = false } = {}) => {
+            const turns = Array.isArray(snapshot?.turns) ? snapshot.turns : [];
+            const turnByMessageId = new Map();
+            const sourcesByTurn = new Map();
+            turns.forEach(turnInfo => {
+                const userIds = getClassicTurnSourceIds(turnInfo, 'user');
+                const assistantIds = getClassicTurnSourceIds(turnInfo, 'assistant');
+                const messageIds = [...new Set([...userIds, ...assistantIds])];
+                sourcesByTurn.set(Number(turnInfo.turn), { userIds, assistantIds });
+                messageIds.forEach(id => turnByMessageId.set(id, Number(turnInfo.turn)));
+            });
+
+            memories.value.forEach(memory => {
+                if (!isVectorMemory(memory)) return;
+                if (backfill && !(memory.sourceUserIds || []).length && !(memory.sourceAssistantIds || []).length) {
+                    const sources = sourcesByTurn.get(Number(memory.turn));
+                    if (sources) {
+                        memory.sourceUserIds = sources.userIds;
+                        memory.sourceAssistantIds = sources.assistantIds;
+                    }
+                }
+                const sourceIds = (memory.sourceAssistantIds || []).length
+                    ? memory.sourceAssistantIds
+                    : (memory.sourceUserIds || []);
+                const liveTurn = sourceIds.map(id => turnByMessageId.get(id)).find(Number.isFinite);
+                if (!Number.isFinite(liveTurn) || Number(memory.turn) === liveTurn) return;
+                memory.turn = liveTurn;
+                memory.sourceText = String(memory.sourceText || '').replace(/^第\s*\d+\s*轮/, `第 ${liveTurn} 轮`);
+                if (memory.vectorChunkId) {
+                    memory.vectorChunkId = String(memory.vectorChunkId).replace(/^[^:]+:/, `${liveTurn}:`);
+                }
+            });
+        };
+
+        const clearCurrentVectorEmptyTurns = () => {
+            const key = getMemoryEmptyTurnsKey(getCurrentStoryBranchScopeId());
+            if (key && memorySettings.emptyTurns?.[key]?.length) memorySettings.emptyTurns[key] = [];
         };
 
         const removeClassicMemoriesFromTurn = async (snapshot, firstRemovedTurn) => {
@@ -3604,7 +3660,7 @@ createApp({
                 abortUiTemplateUpdate();
                 abortVectorBatchExtraction();
                 abortClassicBatchExtraction();
-                const snapshot = buildConversationTurnSnapshot();
+                const snapshot = await ensureConversationMessageIds();
                 const affectedTurn = snapshot.turns.find(turnInfo =>
                     (turnInfo.sourceIndexes || []).includes(index)
                 )?.turn || null;
@@ -3613,13 +3669,17 @@ createApp({
                     recentGenerationTimes.value = recentGenerationTimes.value.filter(t => (t.id || t) !== msg.id);
                 }
                 const uiCleanup = pruneUiTemplateChangesFromTurn(affectedTurn);
+                syncVectorMemoryConversationBindings(snapshot, { backfill: true });
                 // 只删除与该轮对话关联的两类记忆，而非全部清空。
                 const removed = ['user', 'assistant'].includes(msg?.role)
                     ? await removeMemoriesForConversationTurn(snapshot, affectedTurn)
                     : 0;
                 chatHistory.value.splice(index, 1);
+                syncVectorMemoryConversationBindings(buildConversationTurnSnapshot());
+                clearCurrentVectorEmptyTurns();
                 removeOrphanedUiTemplateCorrections();
                 await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
+                await saveMemorySettingsNow();
                 const extras = [];
                 if (removed > 0) extras.push(`${removed} 个关联分片`);
                 if (uiCleanup.logs > 0 || uiCleanup.blocks > 0) extras.push('变量模板');
@@ -3647,11 +3707,13 @@ createApp({
                 abortVectorBatchExtraction();
                 abortClassicBatchExtraction();
                 // 只删除最新一轮的记忆，保留之前的
-                const snapshot = buildConversationTurnSnapshot();
+                const snapshot = await ensureConversationMessageIds();
+                syncVectorMemoryConversationBindings(snapshot, { backfill: true });
                 const currentTurn = snapshot.turns.length;
                 await filterMemoriesAsync(m => (m.turn || 0) < currentTurn);
                 await removeClassicMemoriesFromTurn(snapshot, currentTurn);
-                await Promise.all([saveMemoriesNow(), saveClassicMemoriesNow()]);
+                clearCurrentVectorEmptyTurns();
+                await Promise.all([saveMemoriesNow(), saveClassicMemoriesNow(), saveMemorySettingsNow()]);
                 await generateResponse(startTime, { reuseGeneratingState: true });
             } else {
                 // 如果是 AI 消息，删除它（及之后）然后重新生成
@@ -3661,7 +3723,8 @@ createApp({
                     abortVectorBatchExtraction();
                     abortClassicBatchExtraction();
                     // 计算被删除区间的 assistant 轮次，只删除 >= 该轮次的记忆
-                    const snapshot = buildConversationTurnSnapshot();
+                    const snapshot = await ensureConversationMessageIds();
+                    syncVectorMemoryConversationBindings(snapshot, { backfill: true });
                     const turnAtIndex = getConversationTurnAtIndexFromSnapshot(snapshot, index);
                     const uiTurnAtIndex = turnAtIndex;
                     await filterMemoriesAsync(m => (m.turn || 0) < turnAtIndex);
@@ -3686,8 +3749,11 @@ createApp({
                         }
                     }
                     chatHistory.value = chatHistory.value.slice(0, index);
+                    syncVectorMemoryConversationBindings(buildConversationTurnSnapshot());
+                    clearCurrentVectorEmptyTurns();
                     removeOrphanedUiTemplateCorrections();
                     await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
+                    await saveMemorySettingsNow();
                     await generateResponse(startTime, { reuseGeneratingState: true });
                 });
             }
@@ -4470,7 +4536,7 @@ createApp({
                 .map(message => message.id);
         };
 
-        const ensureClassicMessageIds = async () => {
+        const ensureConversationMessageIds = async () => {
             const snapshot = buildConversationTurnSnapshot(chatHistory.value, { includeSystem: false });
             let changed = false;
             snapshot.turns.forEach(turnInfo => {
@@ -4630,7 +4696,7 @@ createApp({
             const memoryId = memory.id;
             retryingClassicMemoryId.value = memoryId;
             try {
-                const snapshot = await ensureClassicMessageIds();
+                const snapshot = await ensureConversationMessageIds();
                 const sourceAssistantIds = new Set((memory.sourceAssistantIds || []).filter(Boolean));
                 const targetIndex = snapshot.turns.findIndex(turnInfo => {
                     if (sourceAssistantIds.size > 0) {
@@ -4711,6 +4777,9 @@ createApp({
                 if (message.role !== 'user' && message.role !== 'assistant') return;
                 const speaker = message.role === 'user' ? user.name : (message.name || currentCharacter.value?.name || 'AI');
                 const sourceLabel = message.role === 'user' ? '用户' : '角色卡';
+                const sourceMessageIds = (message._sourceIndexes || [])
+                    .map(index => chatHistory.value[index]?.id)
+                    .filter(Boolean);
                 const cleanMessageText = getCleanMemoryMessageText(message);
                 const storyTime = message.role === 'assistant' ? extractStoryTime(cleanMessageText) : '';
                 const paragraphs = splitMemoryParagraphs(storyTime ? stripStoryTimeLine(cleanMessageText) : cleanMessageText)
@@ -4724,6 +4793,7 @@ createApp({
                         paragraphEndIndex: group.end,
                         speaker,
                         role: message.role,
+                        sourceMessageIds,
                         storyTime,
                         text: group.text
                     };
@@ -4741,6 +4811,7 @@ createApp({
             const userText = userBlocks.map(block => block.text).filter(Boolean).join('\n\n');
             const userLine = userText ? `用户：${userText}` : '';
             const userIdPart = userBlocks.map(block => block.idPart).join('+');
+            const userSourceIds = [...new Set(userBlocks.flatMap(block => block.sourceMessageIds || []))];
 
             const sourceBlocks = roleBlocks.length > 0
                 ? roleBlocks
@@ -4758,6 +4829,8 @@ createApp({
                 ].filter(Boolean).join('\n');
                 const roles = includeUser ? ['user', block.role] : [block.role];
                 const idParts = [includeUser ? userIdPart : '', block.idPart].filter(Boolean).join('+');
+                const sourceUserIds = includeUser || block.role === 'user' ? userSourceIds : [];
+                const sourceAssistantIds = block.role === 'assistant' ? block.sourceMessageIds : [];
                 return {
                     turn,
                     sequence: index + 1,
@@ -4766,6 +4839,8 @@ createApp({
                     paragraphEndIndex: block.paragraphEndIndex,
                     speaker: includeUser ? [user.name, block.speaker].filter(Boolean).join(' + ') : block.speaker,
                     role: roles.length === 1 ? roles[0] : 'mixed',
+                    sourceUserIds,
+                    sourceAssistantIds,
                     paragraph,
                     ...(block.storyTime ? { storyTime: block.storyTime } : {}),
                     sourceText: [`第 ${turn || '?'} 轮`, paragraph].filter(Boolean).join('\n'),
@@ -4852,6 +4927,8 @@ createApp({
                 paragraphEndIndex: fragment.paragraphEndIndex,
                 sequence: fragment.sequence,
                 contentFingerprint: getVectorFragmentFingerprint(fragment),
+                sourceUserIds: fragment.sourceUserIds,
+                sourceAssistantIds: fragment.sourceAssistantIds,
                 embeddingModel: getMemoryEmbeddingModel(),
                 embedding,
                 sourceText: fragment.sourceText,
@@ -6550,7 +6627,7 @@ createApp({
                 while (_batchExtractAbort === batchController && !batchController.signal.aborted) {
                     if (getCurrentStoryBranchScopeId() !== storyScopeId) break;
                     _vectorBatchRescanRequested = false;
-                    const snapshot = buildConversationTurnSnapshot(chatHistory.value, { includeSystem: false });
+                    const snapshot = await ensureConversationMessageIds();
                     const safeTurns = isConversationBusy.value ? snapshot.turns.slice(0, -1) : snapshot.turns;
                     const emptyTurnSet = new Set(emptyLog);
                     const chunks = safeTurns
@@ -6627,7 +6704,7 @@ createApp({
             try {
                 while (_classicBatchExtractAbort === batchController && !batchController.signal.aborted) {
                     _classicBatchRescanRequested = false;
-                    const snapshot = await ensureClassicMessageIds();
+            const snapshot = await ensureConversationMessageIds();
                     if (_classicBatchExtractAbort !== batchController || batchController.signal.aborted) return;
                     const safeTurnCount = isConversationBusy.value
                         ? Math.max(0, snapshot.turns.length - 1)
