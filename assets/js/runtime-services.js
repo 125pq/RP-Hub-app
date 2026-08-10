@@ -54,34 +54,57 @@
         };
     };
 
+    const STREAM_RENDER_INTERVAL = 50;
+
     const readStreamingResponse = async (response, onDelta) => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let usage = null;
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-            for (const line of lines) {
-                const trimmedLine = line.trim();
-                if (!trimmedLine.startsWith('data: ')) continue;
-                const payload = trimmedLine.slice(6);
-                if (payload === '[DONE]') continue;
-                try {
-                    const chunk = parseSsePayload(payload, response.status);
-                    usage = getApiUsagePayload(chunk.data) || usage;
-                    if (chunk.content || chunk.reasoning) await onDelta?.(chunk);
-                } catch (error) {
-                    if (error.isApiError) throw error;
-                    if (/error/i.test(payload)) throw new Error(formatApiErrorMessage(response.status, payload));
-                    console.warn('Error parsing stream chunk:', error);
+        let pendingContent = '';
+        let pendingReasoning = '';
+        let flushPromise = Promise.resolve();
+
+        const flushPending = () => {
+            if (!pendingContent && !pendingReasoning) return;
+            const delta = { content: pendingContent, reasoning: pendingReasoning };
+            pendingContent = '';
+            pendingReasoning = '';
+            flushPromise = flushPromise.then(() => onDelta?.(delta));
+        };
+
+        const flushInterval = setInterval(flushPending, STREAM_RENDER_INTERVAL);
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine.startsWith('data: ')) continue;
+                    const payload = trimmedLine.slice(6);
+                    if (payload === '[DONE]') continue;
+                    try {
+                        const chunk = parseSsePayload(payload, response.status);
+                        usage = getApiUsagePayload(chunk.data) || usage;
+                        pendingContent += chunk.content;
+                        pendingReasoning += chunk.reasoning;
+                    } catch (error) {
+                        if (error.isApiError) throw error;
+                        if (/error/i.test(payload)) throw new Error(formatApiErrorMessage(response.status, payload));
+                        console.warn('Error parsing stream chunk:', error);
+                    }
                 }
             }
+            flushPending();
+            await flushPromise;
+            return { content: '', reasoning: '', usage };
+        } finally {
+            clearInterval(flushInterval);
         }
-        return { content: '', reasoning: '', usage };
     };
 
     const readNonStreamingResponse = async (response) => {

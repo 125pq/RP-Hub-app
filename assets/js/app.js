@@ -4183,29 +4183,6 @@ createApp({
             };
 
             try {
-                let pendingNativeReasoning = '';
-                let nativeReasoningFlushRaf = null;
-                const applyPendingNativeReasoning = () => {
-                    if (!assistantMessage || !pendingNativeReasoning) return;
-                    appendAssistantReasoning(assistantMessage, pendingNativeReasoning);
-                    pendingNativeReasoning = '';
-                };
-                const scheduleNativeReasoningFlush = () => {
-                    if (!assistantMessage || !pendingNativeReasoning || nativeReasoningFlushRaf) return;
-                    nativeReasoningFlushRaf = requestAnimationFrame(() => {
-                        nativeReasoningFlushRaf = null;
-                        applyPendingNativeReasoning();
-                    });
-                };
-                const flushNativeReasoning = () => {
-                    if (!assistantMessage || !pendingNativeReasoning) return;
-                    if (nativeReasoningFlushRaf) {
-                        cancelAnimationFrame(nativeReasoningFlushRaf);
-                        nativeReasoningFlushRaf = null;
-                    }
-                    applyPendingNativeReasoning();
-                };
-
                 const responseResult = await requestChatCompletion({
                     url: getApiEndpoint('chat/completions'),
                     apiKey: settings.apiKey,
@@ -4232,12 +4209,10 @@ createApp({
                             await nextTick();
                         }
                         if (reasoning && !seededReasoning) {
-                            pendingNativeReasoning += reasoning;
+                            appendAssistantReasoning(assistantMessage, reasoning);
                             isThinking.value = true;
-                            scheduleNativeReasoningFlush();
                         }
                         if (content && !seededContent) {
-                            flushNativeReasoning();
                             appendAssistantText(assistantMessage, 'content', content);
                             isThinking.value = false;
                             collapseNativeReasoning(assistantMessage);
@@ -4245,7 +4220,6 @@ createApp({
                     }
                 });
                 responseUsage = responseResult.usage || responseUsage;
-                flushNativeReasoning();
 
                 if (!responseResult.isStream) {
                     const { content, reasoning } = responseResult;
