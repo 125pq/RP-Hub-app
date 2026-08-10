@@ -2866,12 +2866,14 @@ createApp({
             const callback = confirmCallback.value;
             showConfirmModal.value = false;
             confirmCallback.value = null;
+            document.activeElement?.blur?.();
             if (callback) runConfirmCallback(callback);
         };
 
         const handleCancel = () => {
             showConfirmModal.value = false;
             confirmCallback.value = null;
+            document.activeElement?.blur?.();
         };
 
         // Regex Processing
@@ -3725,7 +3727,7 @@ createApp({
             setTimeout(() => {
                 button.classList.remove('is-tapped');
                 button.blur();
-            }, 400);
+            }, 280);
         };
 
         const clearCurrentVectorEmptyTurns = () => {
