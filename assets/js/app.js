@@ -2412,40 +2412,26 @@ createApp({
             beforeHistory = chatHistory.value
         } = {}) => {
             if (!Number.isFinite(turn) || turn < 1) return { logs: 0, blocks: 0 };
-            const hasNextTurn = (beforeSnapshot?.turns || []).some(turnInfo => Number(turnInfo.turn) > turn);
-
             let changedLogs = 0;
             currentUiTemplates.value.forEach(template => {
-                const allLogs = Array.isArray(template.changeLog) ? template.changeLog : [];
-                const affectedLogs = allLogs.filter(log => Number(log.turn || 0) === turn);
-                const shiftedLogs = allLogs.filter(log => Number(log.turn || 0) !== turn).map(log => {
-                    const oldTurn = Number(log.turn || 0);
-                    return oldTurn > turn ? { ...log, turn: oldTurn - 1 } : log;
-                });
-                changedLogs += affectedLogs.length + allLogs.filter(log => Number(log.turn || 0) > turn).length;
-
-                let nextLogs = shiftedLogs;
-                if (affectedLogs.length > 0 && hasNextTurn) {
-                    const carryLogs = shiftedLogs.filter(log => Number(log.turn || 0) === turn);
-                    const orderedLogs = [...affectedLogs, ...carryLogs]
-                        .sort((a, b) => (a.time || 0) - (b.time || 0));
-                    const changes = {};
-                    orderedLogs.forEach(log => Object.entries(log.changes || {}).forEach(([key, change]) => {
-                        if (!changes[key]) changes[key] = { ...change };
-                        else changes[key].to = change?.to;
-                    }));
-                    Object.keys(changes).forEach(key => {
-                        if (JSON.stringify(changes[key].from) === JSON.stringify(changes[key].to)) delete changes[key];
+                const logs = Array.isArray(template.changeLog) ? template.changeLog : [];
+                const removedLog = logs.find(log => Number(log.turn) === turn);
+                const nextLogs = logs.filter(log => Number(log.turn) !== turn).map(log => (
+                    Number(log.turn) > turn ? { ...log, turn: Number(log.turn) - 1 } : log
+                ));
+                const nextLog = nextLogs.find(log => Number(log.turn) === turn);
+                if (removedLog && nextLog) {
+                    nextLog.changes ||= {};
+                    Object.entries(removedLog.changes || {}).forEach(([key, change]) => {
+                        nextLog.changes[key] = nextLog.changes[key]
+                            ? { ...nextLog.changes[key], from: change.from }
+                            : change;
                     });
-                    nextLogs = shiftedLogs.filter(log => Number(log.turn || 0) !== turn);
-                    if (Object.keys(changes).length > 0) {
-                        const latestLog = orderedLogs[orderedLogs.length - 1];
-                        nextLogs.push({ ...latestLog, turn, changes });
-                    }
-                } else if (affectedLogs.length > 0) {
+                } else if (removedLog) {
                     rebuildUiTemplateStateFromLogs(template, nextLogs);
                 }
-                template.changeLog = nextLogs.sort((a, b) => (b.time || 0) - (a.time || 0));
+                if (removedLog || logs.some(log => Number(log.turn) > turn)) changedLogs++;
+                template.changeLog = nextLogs;
             });
 
             let removedBlocks = 0;

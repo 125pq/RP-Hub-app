@@ -1359,15 +1359,10 @@
                         </div>
 
                         <div v-if="tab === 'history'" class="space-y-4">
-                            <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-4">
-                                <div><div class="text-base font-bold text-gray-800">变更记录</div></div>
-                                <div class="text-right"><div class="text-2xl font-bold text-primary-600">{{ (templateData.changeLog || []).length }}</div></div>
-                            </div>
                             <div v-if="!(templateData.changeLog || []).length" class="bg-white border border-dashed border-gray-200 rounded-2xl p-8 text-center text-gray-400">暂无变更记录</div>
                             <div v-else class="space-y-3">
-                                <div v-for="(log, logIndex) in (templateData.changeLog || [])" :key="log.id || logIndex" class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-                                    <div class="font-bold text-gray-800">第 {{ log.turn || '?' }} 轮</div>
-                                    <div v-if="log.reason" class="mt-3 rounded-xl bg-amber-50/70 border border-amber-100 px-3 py-2 text-xs text-amber-800 leading-relaxed">{{ log.reason }}</div>
+                                <div v-for="log in (templateData.changeLog || []).slice(0, 1)" :key="log.id" class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                                    <div v-if="log.reason" class="rounded-xl bg-amber-50/70 border border-amber-100 px-3 py-2 text-xs text-amber-800 leading-relaxed">{{ log.reason }}</div>
                                     <div class="mt-3 space-y-3">
                                         <div v-for="(change, key) in (log.changes || {})" :key="key" class="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
                                             <div class="text-xs font-bold text-gray-700 mb-2">{{ key }}</div>
