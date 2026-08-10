@@ -2165,7 +2165,7 @@ createApp({
                 const reason = e instanceof SyntaxError
                     ? `JSON格式错误：${e.message}`
                     : e.message;
-                return recordFailure(match[1], reason);
+                return recordFailure(e?.jsonSource || match[1], reason);
             }
 
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));

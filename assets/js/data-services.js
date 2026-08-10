@@ -1623,6 +1623,31 @@ ${content}
         .replace(UI_TEMPLATE_UPDATES_OPEN_STRIP_PATTERN, '')
         .trimEnd();
 
+    const createDetailedJsonSyntaxError = (error, content) => {
+        const positionMatch = String(error?.message || '').match(/position\s+(\d+)/i);
+        if (!positionMatch) return error;
+        const position = Math.min(Number(positionMatch[1]), content.length);
+        const beforePosition = content.slice(0, position);
+        const line = beforePosition.split('\n').length;
+        const lineStart = beforePosition.lastIndexOf('\n') + 1;
+        const column = position - lineStart + 1;
+        const contextStart = Math.max(0, position - 36);
+        const contextEnd = Math.min(content.length, position + 37);
+        const before = content.slice(contextStart, position).replace(/\r?\n/g, '↵');
+        const current = content.slice(position, position + 1) || '文本结尾';
+        const after = content.slice(position + 1, contextEnd).replace(/\r?\n/g, '↵');
+        const message = String(error.message)
+            .replace(/\s+at position\s+\d+(?:\s+\(line\s+\d+\s+column\s+\d+\))?$/i, '');
+        const detailedError = new SyntaxError(
+            `${message}；精确位置：第 ${line} 行第 ${column} 列（索引 ${position}）；附近：${before}⟦${current}⟧${after}`
+        );
+        detailedError.jsonSource = content;
+        detailedError.jsonPosition = position;
+        detailedError.jsonLine = line;
+        detailedError.jsonColumn = column;
+        return detailedError;
+    };
+
     const parseUiTemplateUpdateJson = (rawContent) => {
         const normalizedContent = String(rawContent || '')
             .replace(/^```(?:json)?\s*/i, '')
@@ -1633,16 +1658,22 @@ ${content}
         } catch (primaryError) {
             const objectStart = normalizedContent.indexOf('{');
             const arrayStart = normalizedContent.indexOf('[');
-            const candidates = [
+            const candidateRange = [
                 [objectStart, normalizedContent.lastIndexOf('}')],
                 [arrayStart, normalizedContent.lastIndexOf(']')]
-            ].filter(([start, end]) => start >= 0 && end > start);
-            for (const [start, end] of candidates) {
+            ]
+                .filter(([start, end]) => start >= 0 && end > start)
+                .sort(([leftStart], [rightStart]) => leftStart - rightStart)[0];
+            if (candidateRange) {
+                const [start, end] = candidateRange;
+                const candidate = normalizedContent.slice(start, end + 1);
                 try {
-                    return JSON.parse(normalizedContent.slice(start, end + 1));
-                } catch (_) { }
+                    return JSON.parse(candidate);
+                } catch (error) {
+                    throw createDetailedJsonSyntaxError(error, candidate);
+                }
             }
-            throw primaryError;
+            throw createDetailedJsonSyntaxError(primaryError, normalizedContent);
         }
     };
 
@@ -1733,16 +1764,63 @@ ${content}
             }
             const unknownNames = [];
             const invalidNames = [];
+            const dynamicIds = new Set();
+            const collectDynamicIds = (value) => {
+                if (Array.isArray(value)) {
+                    value.forEach(item => {
+                        if (isRecord(item) && typeof item.id === 'string' && item.id.trim()) {
+                            dynamicIds.add(item.id.trim());
+                        }
+                        collectDynamicIds(item);
+                    });
+                } else if (isRecord(value)) {
+                    Object.values(value).forEach(collectDynamicIds);
+                }
+            };
+            collectDynamicIds(currentVariables);
+            collectDynamicIds(variables);
+
+            const findExpectedProperty = (expected, name) => {
+                if (!isRecord(expected)) return { found: false, value: undefined };
+                if (Object.prototype.hasOwnProperty.call(expected, name)) {
+                    return { found: true, value: expected[name] };
+                }
+                const expectedNames = Object.keys(expected);
+                if (dynamicIds.has(name)) {
+                    const siblingName = expectedNames.find(candidate => dynamicIds.has(candidate));
+                    if (siblingName) return { found: true, value: expected[siblingName] };
+                }
+                for (const id of dynamicIds) {
+                    const suffix = `_${id}`;
+                    if (!name.endsWith(suffix)) continue;
+                    const prefix = name.slice(0, -suffix.length);
+                    const siblingName = expectedNames.find(candidate => (
+                        [...dynamicIds].some(candidateId => candidate === `${prefix}_${candidateId}`)
+                    ));
+                    if (siblingName) return { found: true, value: expected[siblingName] };
+                }
+                return { found: false, value: undefined };
+            };
+            const findExpectedPath = (expected, path) => {
+                let current = expected;
+                for (const part of splitUiTemplatePath(path)) {
+                    const resolved = findExpectedProperty(current, part);
+                    if (!resolved.found) return resolved;
+                    current = resolved.value;
+                }
+                return { found: true, value: current };
+            };
             const inspectVariables = (expected, actual, prefix = '') => {
                 Object.keys(actual).forEach(name => {
                     const path = prefix ? `${prefix}.${name}` : name;
-                    if (!Object.prototype.hasOwnProperty.call(expected, name)) {
+                    const resolved = findExpectedPath(expected, name);
+                    if (!resolved.found) {
                         unknownNames.push(path);
                     } else if (isRecord(actual[name])) {
-                        if (isRecord(expected[name])) inspectVariables(expected[name], actual[name], path);
+                        if (isRecord(resolved.value)) inspectVariables(resolved.value, actual[name], path);
                         else invalidNames.push(path);
-                    } else if ((Array.isArray(expected[name]) && !Array.isArray(actual[name]))
-                        || (isRecord(expected[name]) && !isRecord(actual[name]))) {
+                    } else if ((Array.isArray(resolved.value) && !Array.isArray(actual[name]))
+                        || (isRecord(resolved.value) && !isRecord(actual[name]))) {
                         invalidNames.push(path);
                     }
                 });
