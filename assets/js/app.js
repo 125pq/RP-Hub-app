@@ -3734,20 +3734,6 @@ createApp({
                     if (msg && msg.id) {
                         recentGenerationTimes.value = recentGenerationTimes.value.filter(t => (t.id || t) !== msg.id);
                     }
-                    if (msg.uiTemplateAnalysisFailure) {
-                        const sameTurn = snapshot.turns.find(turnInfo =>
-                            (turnInfo.sourceIndexes || []).includes(index)
-                        );
-                        const userIndex = [...(sameTurn?.sourceIndexes || [])].reverse()
-                            .find(sourceIndex => sourceIndex < index && chatHistory.value[sourceIndex]?.role === 'user');
-                        const userMessage = Number.isInteger(userIndex) ? chatHistory.value[userIndex] : null;
-                        if (userMessage) {
-                            userMessage.uiTemplateCorrection = {
-                                ...msg.uiTemplateAnalysisFailure,
-                                sourceMessageId: userMessage.id || null
-                            };
-                        }
-                    }
                     chatHistory.value = chatHistory.value.slice(0, index);
                     syncVectorMemoryConversationBindings(buildConversationTurnSnapshot());
                     clearCurrentVectorEmptyTurns();
