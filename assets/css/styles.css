@@ -920,6 +920,15 @@
             background: rgba(254, 242, 242, 0.82);
         }
 
+        @media (hover: none) {
+            .message-action-button:hover,
+            .message-action-button--danger:hover {
+                color: rgba(75, 85, 99, 0.78);
+                background: transparent;
+                transform: none;
+            }
+        }
+
         .settings-page-header {
             display: flex;
             align-items: center;

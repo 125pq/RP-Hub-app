@@ -2670,6 +2670,7 @@ createApp({
             if (event.pointerType === 'mouse' && event.button !== 0) return;
             const container = event.currentTarget;
             storyRouteDragState = {
+                container,
                 pointerId: event.pointerId,
                 startX: event.clientX,
                 startY: event.clientY,
@@ -2677,20 +2678,24 @@ createApp({
                 scrollTop: container.scrollTop,
                 moved: false
             };
+            if (!event.target?.closest?.('.story-route-node')) {
+                container.setPointerCapture?.(event.pointerId);
+            }
         };
         const moveStoryRouteDrag = (event) => {
             const state = storyRouteDragState;
             if (!state || state.pointerId !== event.pointerId) return;
+            const container = state.container;
             const deltaX = event.clientX - state.startX;
             const deltaY = event.clientY - state.startY;
             if (!state.moved) {
                 if (Math.hypot(deltaX, deltaY) < 4) return;
                 state.moved = true;
                 storyRouteMapDragging.value = true;
-                event.currentTarget.setPointerCapture?.(event.pointerId);
+                container.setPointerCapture?.(event.pointerId);
             }
-            event.currentTarget.scrollLeft = state.scrollLeft - deltaX;
-            event.currentTarget.scrollTop = state.scrollTop - deltaY;
+            container.scrollLeft = state.scrollLeft - deltaX;
+            container.scrollTop = state.scrollTop - deltaY;
             event.preventDefault();
         };
         const endStoryRouteDrag = (event) => {
@@ -2698,8 +2703,8 @@ createApp({
             if (!state || state.pointerId !== event.pointerId) return;
             storyRouteDragState = null;
             storyRouteMapDragging.value = false;
-            if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
+            if (state.container.hasPointerCapture?.(event.pointerId)) {
+                state.container.releasePointerCapture(event.pointerId);
             }
             if (state.moved) {
                 suppressStoryRouteNodeClick = true;
