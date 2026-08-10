@@ -1764,7 +1764,7 @@ ${content}
             const findExpectedPath = (expected, path) => {
                 let current = expected;
                 for (const part of splitUiTemplatePath(path)) {
-                    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, part)) {
+                    if ((!isRecord(current) && !Array.isArray(current)) || !Object.prototype.hasOwnProperty.call(current, part)) {
                         return { found: false, value: undefined };
                     }
                     current = current[part];
