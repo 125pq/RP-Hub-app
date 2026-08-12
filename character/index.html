@@ -7,8 +7,7 @@
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>角色卡工坊</title>
     <link href="../assets/vendor/fonts/fonts.css" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <link href="../assets/generated/character.css" rel="stylesheet">
     <script src="../assets/vendor/vue/vue.global.prod.js"></script>
     <script src="../assets/vendor/localforage/localforage.min.js"></script>
     <script src="../assets/js/built-in-content.js"></script>
@@ -292,26 +291,6 @@
             }
         }
     </style>
-    <script>
-        tailwind.config = {
-            future: {
-                hoverOnlyWhenSupported: true,
-            },
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['var(--app-font-family)', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Microsoft YaHei', 'Noto Sans SC', 'Arial', 'sans-serif'],
-                        serif: ['var(--app-font-serif)', 'Lora', 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN', 'STSong', 'SimSun', 'Georgia', 'Cambria', 'Times New Roman', 'Times', 'serif']
-                    },
-                    colors: {
-                        primary: '#65c3c8',
-                        secondary: '#ef9fbc',
-                        accent: '#eeaf3a',
-                    }
-                }
-            }
-        }
-    </script>
 </head>
 
 <body class="flex flex-col overflow-hidden bg-base-200/30">

@@ -14,6 +14,15 @@ const publishAllowlist = [
   'novel',
 ];
 
+const publishExclusions = new Set([
+  'assets/css/tailwind.input.css',
+]);
+
+function shouldPublish(sourcePath) {
+  const relativePath = path.relative(projectRoot, sourcePath).split(path.sep).join('/');
+  return !publishExclusions.has(relativePath);
+}
+
 async function assertSourceExists(relativePath) {
   const sourcePath = path.join(projectRoot, relativePath);
 
@@ -38,7 +47,7 @@ for (const relativePath of publishAllowlist) {
   await cp(
     path.join(projectRoot, relativePath),
     path.join(outputDirectory, relativePath),
-    { recursive: true },
+    { recursive: true, filter: shouldPublish },
   );
 }
 

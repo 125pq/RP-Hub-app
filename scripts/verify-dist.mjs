@@ -15,12 +15,19 @@ const publishAllowlist = [
   'novel',
 ];
 
+const publishExclusions = new Set([
+  'assets/css/tailwind.input.css',
+]);
+
 const requiredFiles = [
   'index.html',
   'character/index.html',
   'novel/index.html',
   'LICENSE',
   'assets/css/styles.css',
+  'assets/generated/main.css',
+  'assets/generated/character.css',
+  'assets/generated/novel.css',
   'assets/js/built-in-content.js',
   'assets/js/core-utils.js',
   'assets/js/data-services.js',
@@ -58,6 +65,12 @@ const expectedVendorFiles = [
   'assets/vendor/vue/vue.global.prod.js',
 ];
 
+const expectedGeneratedFiles = [
+  'assets/generated/character.css',
+  'assets/generated/main.css',
+  'assets/generated/novel.css',
+];
+
 const globalBundleChecks = [
   ['assets/vendor/vue/vue.global.prod.js', /var Vue=function/],
   ['assets/vendor/marked/marked.min.js', /g\["marked"\]=f\(\)/],
@@ -67,7 +80,13 @@ const globalBundleChecks = [
   ['assets/vendor/jquery/jquery.min.js', /\.jQuery/],
 ];
 
-const blockedRemotePattern = /https?:\/\/(?:unpkg\.com\/vue|cdn\.jsdelivr\.net\/npm\/(?:marked|dompurify|sortablejs|localforage|jquery)|fonts\.googleapis\.com|fonts\.gstatic\.com)[^"'\s<]*/gi;
+const blockedRemotePattern = /https?:\/\/(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net\/npm\/(?:daisyui|marked|dompurify|sortablejs|localforage|jquery)|unpkg\.com\/vue|fonts\.googleapis\.com|fonts\.gstatic\.com)[^"'\s<]*/gi;
+
+const entryDocuments = new Set([
+  'index.html',
+  'character/index.html',
+  'novel/index.html',
+]);
 
 const forbiddenPathSegments = new Set([
   '.git',
@@ -118,7 +137,8 @@ async function listPublishedSourceFiles() {
     const sourceStat = await stat(sourcePath);
     if (sourceStat.isDirectory()) {
       for (const nestedPath of await listFiles(sourcePath)) {
-        files.push(toPosixPath(path.join(relativePath, nestedPath)));
+        const publishedPath = toPosixPath(path.join(relativePath, nestedPath));
+        if (!publishExclusions.has(publishedPath)) files.push(publishedPath);
       }
     } else {
       files.push(toPosixPath(relativePath));
@@ -181,6 +201,11 @@ if (actualVendorFiles.join('\n') !== expectedVendorFiles.join('\n')) {
   throw new Error('Vendor output differs from the exact Commit 2 allowlist.');
 }
 
+const actualGeneratedFiles = distFiles.filter((relativePath) => relativePath.startsWith('assets/generated/'));
+if (actualGeneratedFiles.join('\n') !== expectedGeneratedFiles.join('\n')) {
+  throw new Error('Generated CSS output differs from the exact Commit 3 allowlist.');
+}
+
 const missingRequiredFiles = requiredFiles.filter((relativePath) => !distFileSet.has(relativePath));
 if (missingRequiredFiles.length > 0) {
   throw new Error(`Missing required dist files:\n- ${missingRequiredFiles.join('\n- ')}`);
@@ -231,11 +256,27 @@ for (const relativePath of distFiles) {
       remoteRuntimeDependencies.add(dependency);
     }
 
+    if (entryDocuments.has(relativePath)) {
+      const documentHead = text.slice(0, text.toLowerCase().indexOf('</head>'));
+      const forbiddenEntryDependencies = findRemoteRuntimeDependencies(documentHead)
+        .filter((dependency) => dependency.includes('cdn.tailwindcss.com')
+          || dependency.includes('/daisyui@'));
+      if (forbiddenEntryDependencies.length > 0) {
+        blockedRemoteDependencies.push(...forbiddenEntryDependencies.map(
+          (dependency) => `${relativePath} entry document: ${dependency}`,
+        ));
+      }
+    }
+
     for (const match of text.matchAll(blockedRemotePattern)) {
       const dependency = match[0];
       if (relativePath === 'assets/js/data-services.js'
         && dependency.includes('/jquery@3.7.1/')) {
         deferredRemoteDependencies.push(`${relativePath}: ${dependency}`);
+      } else if (relativePath === 'character/index.html'
+        && dependency === 'https://cdn.tailwindcss.com'
+        && text.slice(Math.max(0, match.index - 500), match.index).includes('uiHTML = `<!DOCTYPE html>')) {
+        deferredRemoteDependencies.push(`${relativePath} preview iframe: ${dependency}`);
       } else {
         blockedRemoteDependencies.push(`${relativePath}: ${dependency}`);
       }
@@ -265,12 +306,13 @@ console.log(`Manifest SHA-256: ${manifestHash}`);
 console.log(`Source matches: ${sourceFiles.length}/${sourceFiles.length}`);
 console.log('Forbidden files: 0');
 console.log(`Vendor files: ${actualVendorFiles.length}`);
+console.log(`Generated CSS files: ${actualGeneratedFiles.length}`);
 console.log(`Static global checks: ${globalBundleChecks.length}/${globalBundleChecks.length}`);
 console.log(`Remote runtime dependencies: ${remoteRuntimeDependencies.size}`);
 
 if (deferredRemoteDependencies.length > 0) {
-  console.warn('WARN: jQuery CDN remains inside the existing executable iframe renderer.');
-  console.warn('The owning business JS file is out of scope for Commit 2.');
+  console.warn('WARN: deferred iframe runtime dependencies remain.');
+  console.warn('Character preview Tailwind and executable iframe jQuery are out of scope for Commit 3.');
   for (const dependency of deferredRemoteDependencies) {
     console.warn(`- ${dependency}`);
   }
@@ -278,7 +320,7 @@ if (deferredRemoteDependencies.length > 0) {
 
 if (remoteRuntimeDependencies.size > 0) {
   console.warn('WARN: remote runtime dependencies detected');
-  console.warn('Tailwind/DaisyUI and the scoped iframe exception are deferred.');
+  console.warn('Only explicitly scoped iframe exceptions may remain.');
   for (const dependency of [...remoteRuntimeDependencies].sort()) {
     console.warn(`- ${dependency}`);
   }
