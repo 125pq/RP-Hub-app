@@ -215,7 +215,7 @@
                 }
             }
             if (!usesFrame && !trimmed.includes('```')) {
-                usesFrame = /(<!doctype html>|<html\b[^>]*>)/i.test(trimmed);
+                usesFrame = /(<!doctype html>|<html\b[^>]*>|^\s*<(style|script)\b)/i.test(trimmed);
             }
             return cacheValue(frameDetectionCache, cacheKey, usesFrame);
         };
