@@ -14,7 +14,7 @@
     "@fontsource/noto-serif-sc": "5.2.8",
     "@mhsdesign/jit-browser-tailwindcss": "0.4.2",
     "daisyui": "4.12.24",
-    "dompurify": "3.0.6",
+    "dompurify": "3.4.13",
     "jquery": "3.7.1",
     "localforage": "1.10.0",
     "marked": "15.0.12",
