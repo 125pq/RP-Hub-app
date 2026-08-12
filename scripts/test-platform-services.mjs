@@ -23,6 +23,9 @@ function createDocument(readyState = 'complete') {
 function loadPlatformServices(overrides = {}) {
   const document = overrides.document || createDocument();
   const window = {
+    Blob,
+    Uint8Array,
+    btoa,
     console,
     document,
     location: new URL('https://app.example/index.html'),
@@ -30,7 +33,7 @@ function loadPlatformServices(overrides = {}) {
     open: () => ({ opener: {} }),
     ...overrides,
   };
-  const context = vm.createContext({ URL, window });
+  const context = vm.createContext({ Blob, URL, Uint8Array, window });
   vm.runInContext(source, context, { filename: 'platform-services.js' });
   return { document, services: window.PlatformServices, window };
 }
@@ -47,6 +50,12 @@ function loadPlatformServices(overrides = {}) {
   assert.equal(services.isNative(), false);
   assert.equal(services.getPlatform(), 'web');
   assert.equal((await services.share({ text: 'test' })).supported, false);
+  const downloads = [];
+  window.RPHubCardUtils = { downloadBlob: (blob, filename) => downloads.push({ blob, filename }) };
+  const webSave = await services.saveFile({ filename: '测试.json', mimeType: 'application/json', data: '{"ok":true}' });
+  assert.equal(webSave.cancelled, false);
+  assert.equal(downloads[0].filename, '测试.json');
+  assert.equal(await downloads[0].blob.text(), '{"ok":true}');
   assert.equal((await services.openExternalUrl('https://example.com/path')).opened, true);
   assert.deepEqual(opened[0], ['https://example.com/path', '_blank', 'noopener,noreferrer']);
   assert.equal(document.listeners.has('click'), false, 'web must keep its existing link behavior');
@@ -71,7 +80,7 @@ function loadPlatformServices(overrides = {}) {
 }
 
 {
-  const calls = { browser: [], share: [], minimize: 0, removed: [] };
+  const calls = { browser: [], share: [], minimize: 0, removed: [], file: [], cancelled: [] };
   const listeners = new Map();
   const plugins = {
     App: {
@@ -100,6 +109,24 @@ function loadPlatformServices(overrides = {}) {
         return { activityType: '' };
       },
     },
+    NativeFile: {
+      async beginSave(options) {
+        calls.file.push({ method: 'beginSave', options });
+        return { cancelled: false, sessionId: 'save-1' };
+      },
+      async appendChunk(options) {
+        calls.file.push({ method: 'appendChunk', options });
+        return { nextChunkIndex: options.index + 1 };
+      },
+      async finishSave(options) {
+        calls.file.push({ method: 'finishSave', options });
+        return { bytesWritten: 42 };
+      },
+      async cancelSave(options) {
+        calls.cancelled.push(options);
+        return { cancelled: true };
+      },
+    },
   };
   const document = createDocument();
   const { services } = loadPlatformServices({
@@ -122,6 +149,34 @@ function loadPlatformServices(overrides = {}) {
     text: 'test',
     url: 'https://example.com/share',
   });
+
+  const boundaryText = `${'a'.repeat((256 * 1024) - 1)}😺\n中文`;
+  const fileResult = await services.saveFile({
+    filename: '聊天:备份.jsonl',
+    mimeType: 'application/jsonl; charset=utf-8',
+    data: boundaryText,
+  });
+  assert.equal(fileResult.cancelled, false);
+  const fileCalls = calls.file.splice(0);
+  assert.deepEqual(toPlainObject(fileCalls[0]), {
+    method: 'beginSave',
+    options: { filename: '聊天:备份.jsonl', mimeType: 'application/jsonl' },
+  });
+  const textChunks = fileCalls.filter(item => item.method === 'appendChunk');
+  assert.equal(textChunks.length, 2);
+  assert.equal(textChunks.map(item => item.options.data).join(''), boundaryText, 'surrogate pairs must remain intact');
+  assert.deepEqual(textChunks.map(item => item.options.index), [0, 1]);
+  assert.equal(fileCalls.at(-1).method, 'finishSave');
+
+  await services.saveFile({
+    filename: 'card.png',
+    mimeType: 'image/png',
+    data: new Blob([new Uint8Array(200 * 1024).fill(0x5a)], { type: 'image/png' }),
+  });
+  const binaryCalls = calls.file.splice(0).filter(item => item.method === 'appendChunk');
+  assert.equal(binaryCalls.length, 2);
+  assert.equal(binaryCalls.every(item => item.options.encoding === 'base64'), true);
+  assert.equal(Buffer.concat(binaryCalls.map(item => Buffer.from(item.options.data, 'base64'))).length, 200 * 1024);
 
   const info = await services.getAppInfo();
   assert.deepEqual(toPlainObject(info), {
@@ -172,4 +227,28 @@ function loadPlatformServices(overrides = {}) {
   assert.deepEqual(toPlainObject(calls.browser.at(-1)), { url: 'https://outside.example/page' });
 }
 
-console.log('PlatformServices browser fallback and native contracts: PASS');
+{
+  let cancelCount = 0;
+  const plugins = {
+    NativeFile: {
+      async beginSave() { return { cancelled: false, sessionId: 'failed-save' }; },
+      async appendChunk() { throw new Error('write failed'); },
+      async finishSave() { throw new Error('finish must not run'); },
+      async cancelSave() { cancelCount += 1; return { cancelled: true }; },
+    },
+  };
+  const { services } = loadPlatformServices({
+    Capacitor: { Plugins: plugins, getPlatform: () => 'android', isNativePlatform: () => true },
+  });
+  await assert.rejects(
+    () => services.saveFile({ filename: 'backup.json', mimeType: 'application/json', data: '{}' }),
+    /write failed/,
+  );
+  assert.equal(cancelCount, 1, 'failed writes must clean up the native session');
+
+  plugins.NativeFile.beginSave = async () => ({ cancelled: true });
+  const cancelled = await services.saveFile({ filename: 'backup.json', mimeType: 'application/json', data: '{}' });
+  assert.deepEqual(toPlainObject(cancelled), { supported: true, cancelled: true });
+}
+
+console.log('PlatformServices browser fallback, native file chunks, cancellation, and error contracts: PASS');

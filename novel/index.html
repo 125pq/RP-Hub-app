@@ -1953,7 +1953,7 @@
                 };
                 
                 // 导出书籍功能
-                const exportBook = () => {
+                const exportBook = async () => {
                    if (chapters.value.length === 0) {
                        showToast('暂无章节可导出', 'error');
                        return;
@@ -1990,6 +1990,28 @@
                         content += `===========================\n剧情摘要汇总\n===========================\n\n${summaries}`;
                     }
                     
+                    let platformServices = window.PlatformServices;
+                    try {
+                        if (!platformServices && window.parent !== window) platformServices = window.parent.PlatformServices;
+                    } catch {}
+                    if (platformServices?.saveFile) {
+                        let result;
+                        try {
+                            result = await platformServices.saveFile({
+                                data: content,
+                                filename: `${novel.value.title || '小说导出'}.txt`,
+                                mimeType: 'text/plain'
+                            });
+                        } catch (error) {
+                            showToast(`小说导出失败：${error.message || '文件保存失败'}`, 'error');
+                            return;
+                        }
+                        if (result.cancelled) return;
+                        if (result.supported === false) throw new Error('当前平台不支持文件保存');
+                        showToast('小说已开始导出', 'success');
+                        return;
+                    }
+
                     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');

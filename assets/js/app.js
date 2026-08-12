@@ -7504,11 +7504,12 @@ const app = createApp({
             });
         };
 
-        const downloadJsonFile = (data, fileName, spacing = 2, options = {}) => {
+        const downloadJsonFile = async (data, fileName, spacing = 2, options = {}) => {
             const json = typeof data === 'string' ? data : JSON.stringify(data, null, spacing);
-            const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-            cardUtils.downloadBlob(blob, fileName, options);
-            return blob;
+            return cardUtils.saveGeneratedFile(json, fileName, {
+                ...options,
+                mimeType: 'application/json'
+            });
         };
 
         const readJsonFileInput = (event, handleData, handleError) => {
@@ -8695,14 +8696,18 @@ const app = createApp({
             regexScriptMapper: (script) => toRegexExportEntry({ ...script, scope: 'character' }, 'character')
         });
 
-        const exportCharacterJson = (index) => {
+        const exportCharacterJson = async (index) => {
             const char = characters.value[index];
             if (!char) return;
 
             try {
                 const v2Data = buildCharacterExportData(char);
-                const blob = new Blob([JSON.stringify(v2Data, null, 2)], { type: 'application/json' });
-                cardUtils.downloadBlob(blob, (char.name || 'character') + '.json');
+                const result = await cardUtils.saveGeneratedFile(
+                    JSON.stringify(v2Data, null, 2),
+                    (char.name || 'character') + '.json',
+                    { mimeType: 'application/json' }
+                );
+                if (result.cancelled) return;
                 showToast('角色卡 JSON 导出成功', 'success');
             } catch (e) {
                 console.error('JSON export error:', e);
@@ -8768,8 +8773,12 @@ const app = createApp({
                     branches: branchMetadata
                 };
                 const chatLines = [manifest, ...branchChats].map(record => JSON.stringify(record)).join('\n');
-                const chatBlob = new Blob([chatLines], { type: 'application/x-ndjson;charset=utf-8' });
-                cardUtils.downloadBlob(chatBlob, (char.name || 'character') + '_全部分支_chat.jsonl');
+                const result = await cardUtils.saveGeneratedFile(
+                    chatLines,
+                    (char.name || 'character') + '_全部分支_chat.jsonl',
+                    { mimeType: 'application/jsonl' }
+                );
+                if (result.cancelled) return;
                 showToast(`已导出 ${branches.length} 个分支，共 ${totalMessages} 条聊天记录`, 'success');
             } catch (chatExpError) {
                 console.error('Chat export error:', chatExpError);
@@ -8789,7 +8798,12 @@ const app = createApp({
                     'chara',
                     cardUtils.encodeBase64Utf8(JSON.stringify(v2Data))
                 );
-                cardUtils.downloadBlob(new Blob([finalPng], { type: 'image/png' }), (char.name || 'character') + '.png');
+                const result = await cardUtils.saveGeneratedFile(
+                    new Blob([finalPng], { type: 'image/png' }),
+                    (char.name || 'character') + '.png',
+                    { mimeType: 'image/png' }
+                );
+                if (result.cancelled) return;
                 showToast('角色卡 PNG 导出成功', 'success');
             } catch (e) {
                 console.error('PNG export error:', e);
@@ -9353,13 +9367,20 @@ const app = createApp({
                     exportData = await compactMemoriesForStorageAsync(memories.value);
                     if (exportData.length === 0) { showToast('当前模式没有记忆可导出', 'info'); return; }
                 }
-                const blob = downloadJsonFile(
-                    exportData,
-                    `${isClassicMode ? 'summary_memories' : 'vector_memories'}_${currentCharacter.value?.name || 'unknown'}.json`,
-                    isClassicMode ? 2 : 0,
-                    { revokeDelay: 1000 }
-                );
-                showToast(`${isClassicMode ? '总结模式' : '向量'}记忆已导出，约 ${Math.max(1, Math.round(blob.size / 1024))} KB`, 'success');
+                let result;
+                try {
+                    result = await downloadJsonFile(
+                        exportData,
+                        `${isClassicMode ? 'summary_memories' : 'vector_memories'}_${currentCharacter.value?.name || 'unknown'}.json`,
+                        isClassicMode ? 2 : 0,
+                        { revokeDelay: 1000 }
+                    );
+                } catch (error) {
+                    showToast(`记忆导出失败: ${error.message || '文件保存失败'}`, 'error');
+                    return;
+                }
+                if (result.cancelled) return;
+                showToast(`${isClassicMode ? '总结模式' : '向量'}记忆已导出，约 ${Math.max(1, Math.round((result.bytesWritten || 0) / 1024))} KB`, 'success');
             },
             importMemories: (event) => readJsonFileInput(event, async data => {
                 const isClassicMode = memorySettings.mode === MEMORY_MODE_CLASSIC;
@@ -9455,7 +9476,7 @@ const app = createApp({
             deselectAllExportItems: () => {
                 selectedExportIndices.value.clear();
             },
-            confirmExport: () => {
+            confirmExport: async () => {
                 const indices = Array.from(selectedExportIndices.value).sort((a, b) => a - b);
                 const items = indices.map(i => exportItems.value[i]);
 
@@ -9482,7 +9503,14 @@ const app = createApp({
                     };
                 }
 
-                downloadJsonFile(dataToExport, fileName);
+                let result;
+                try {
+                    result = await downloadJsonFile(dataToExport, fileName);
+                } catch (error) {
+                    showToast(`导出失败: ${error.message || '文件保存失败'}`, 'error');
+                    return;
+                }
+                if (result.cancelled) return;
 
                 showExportModal.value = false;
                 showToast(`成功导出 ${items.length} 个项目`, 'success');

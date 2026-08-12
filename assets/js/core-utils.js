@@ -881,6 +881,29 @@ window.RPHubUtils = {
         }
     };
 
+    const getPlatformServices = () => {
+        if (window.PlatformServices) return window.PlatformServices;
+        try {
+            if (window.parent !== window && window.parent.PlatformServices) return window.parent.PlatformServices;
+        } catch {}
+        return null;
+    };
+
+    const saveGeneratedFile = async (data, filename, options = {}) => {
+        const mimeType = String(options.mimeType || data?.type || 'application/octet-stream');
+        const platformServices = getPlatformServices();
+        if (platformServices?.saveFile) {
+            const result = await platformServices.saveFile({ data, filename, mimeType });
+            if (result?.supported === false) throw new Error('当前平台不支持文件保存');
+            return result;
+        }
+        const blob = data && typeof data.arrayBuffer === 'function' && typeof data.slice === 'function'
+            ? data
+            : new Blob([data], { type: mimeType });
+        downloadBlob(blob, filename, options);
+        return { supported: true, cancelled: false, bytesWritten: blob.size };
+    };
+
     window.RPHubCardUtils = {
         blobToDataUrl,
         buildCharacterCardData,
@@ -892,6 +915,7 @@ window.RPHubUtils = {
         getImageStyleArtists,
         imageUrlToPngBytes,
         injectPngTextChunk,
+        saveGeneratedFile,
         normalizeImportedRegexScript,
         normalizeRegexScript,
         normalizeRegexModifiers,
