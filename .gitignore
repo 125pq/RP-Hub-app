@@ -10,6 +10,7 @@ npm-debug.log*
 android/.gradle/
 android/local.properties
 android/**/build/
+debug_apk/
 
 # Release signing secrets
 *.keystore
