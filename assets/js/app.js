@@ -3796,7 +3796,7 @@ createApp({
                     for (let nextIndex = index + 1; nextIndex < chatHistory.value.length; nextIndex++) {
                         const role = chatHistory.value[nextIndex]?.role;
                         if (role === 'user') break;
-                        if (role === 'assistant') removedIndexes.add(nextIndex);
+                        if (role === 'assistant' || role === 'system') removedIndexes.add(nextIndex);
                     }
                 }
                 const affectedTurnInfo = snapshot.turns.find(turnInfo =>
