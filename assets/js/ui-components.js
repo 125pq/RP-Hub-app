@@ -816,6 +816,7 @@
                 }
                 this.draftSlotModels[this.activeSlot] = this.draftSlotModels[this.activeSlot] === modelId ? '' : modelId;
                 this.draftSlotModels = [...this.draftSlotModels];
+                this.$emit('select-slots', [...this.draftSlotModels]);
             }
         },
         template: `
@@ -874,12 +875,6 @@
                                     </span>
                                 </button>
                             </div>
-                        </div>
-                        <div v-if="target === 'quickModels'" class="flex justify-end gap-2 border-t border-gray-100 p-4">
-                            <button type="button" @click="$emit('close')"
-                                class="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">取消</button>
-                            <button type="button" @click="$emit('select-slots', [...draftSlotModels])"
-                                class="px-4 py-2 rounded-lg bg-primary-600 text-sm font-medium text-white hover:bg-primary-700 transition-colors">选择</button>
                         </div>
                 </modal-shell>
             </transition>`

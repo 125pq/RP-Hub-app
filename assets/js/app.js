@@ -3297,7 +3297,6 @@ const app = createApp({
             } else {
                 settings.model = previousModel;
             }
-            showModelSelector.value = false;
         };
 
         const selectModel = (modelId) => {
