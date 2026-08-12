@@ -15,7 +15,6 @@
     <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
     <script src="../assets/js/built-in-content.js"></script>
     <script src="../assets/js/core-utils.js"></script>
-    <script src="../assets/js/ui-components.js"></script>
     <style>
         :root {
             --app-visual-height: 100vh;
@@ -1115,10 +1114,7 @@
                                                         <div class="form-control col-span-2 md:col-span-2">
                                                             <label class="label py-0"><span
                                                                     class="label-text text-xs font-bold text-base-content/50">插入位置</span></label>
-                                                            <custom-select v-model="entry.position" :options="worldInfoPositionOptions"
-                                                                button-class="h-8 min-h-8 rounded-lg border-base-300 bg-base-200/30 px-3 py-1 text-xs text-base-content"
-                                                                menu-class="text-xs">
-                                                            </custom-select>
+                                                            <workshop-select v-model="entry.position" :options="worldInfoPositionOptions"></workshop-select>
                                                         </div>
                                                         <div class="form-control">
                                                             <label class="label py-0"><span
@@ -1558,12 +1554,32 @@
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                 </svg>`
         };
+        const WorkshopSelect = {
+            props: {
+                modelValue: { type: [String, Number], default: '' },
+                options: { type: Array, default: () => [] }
+            },
+            emits: ['update:modelValue'],
+            template: `
+                <div class="relative w-full">
+                    <select :value="modelValue" @change="$emit('update:modelValue', $event.target.value)"
+                        class="select select-bordered select-xs h-8 min-h-8 w-full appearance-none rounded-lg border-base-300 bg-base-200/30 px-3 pr-8 text-xs text-base-content focus:border-primary focus:outline-none">
+                        <option v-for="option in options" :key="String(option.value)" :value="option.value">
+                            {{ option.label ?? option.value }}
+                        </option>
+                    </select>
+                    <svg class="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-base-content/50"
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </div>`
+        };
 
         createApp({
             components: {
                 AddItemButton,
-                CustomSelect: window.RPHubCustomSelect,
-                SettingsIcon
+                SettingsIcon,
+                WorkshopSelect
             },
             setup() {
                 // Utility: Debounce
@@ -1575,18 +1591,8 @@
                     };
                 };
 
-                // UUID Generator
-                const generateUUID = () => {
-                    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-                        return crypto.randomUUID();
-                    }
-                    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                        return v.toString(16);
-                    });
-                };
-
                 const cardUtils = window.RPHubCardUtils;
+                const { generateUUID } = window.RPHubUtils;
                 const REGEX_SCRIPT_PROMPT_RULES = `
     **Regex Scripts 生成要求**：
        - 必须生成一套“阅读卡片式正文美化”正则，而不是只做简单改色。效果类型参考：柔和信纸、档案页、手帐便签、病历/报告、暗黑契约、科幻终端、旧日书页、雨夜短信、童话绘本等。请根据当前角色的气质、时代、职业、关系张力和世界观自动选择主题；禁止固定复刻某一种金色样式。
@@ -1705,8 +1711,6 @@
                     return Math.max(0, start - 2) * itemHeight;
                 });
 
-                const sidebarTotalHeight = computed(() => characters.value.length * itemHeight);
-
                 const sidebarBottomHeight = computed(() => {
                     const renderedCount = virtualCharacters.value.length;
                     const start = Math.floor(sidebarScrollTop.value / itemHeight);
@@ -1756,8 +1760,6 @@
                     window.addEventListener('message', (event) => {
                         const { type, settings: mainSettings } = event.data;
                         if (type === 'SYNC_SETTINGS' && mainSettings) {
-                            console.log('%c[Settings Sync Received]', 'color: #10b981; font-weight: bold;');
-
                             applyFontFamily(mainSettings.fontFamily);
 
                             // Sync API
@@ -1844,7 +1846,6 @@
                     if (!String(api.key || '').trim()) throw new Error('请先填写当前 API 预设的 Key');
                     if (!String(api.model || '').trim()) throw new Error('请先在主界面选择模型');
                     const apiUrl = getApiBaseUrl();
-                    console.log('%c[Workshop AI Request]', 'color: #3b82f6; font-weight: bold;', { url: apiUrl, model: api.model });
                     return fetch(`${apiUrl}/chat/completions`, {
                         method: 'POST',
                         headers: {
@@ -2179,13 +2180,8 @@
                 // Save to localforage whenever characters change (Debounced)
                 const debouncedSave = debounce(async (newVal) => {
                     try {
-                        const start = performance.now();
                         const json = JSON.stringify(newVal);
                         await localforage.setItem('ai_chargen_characters', json);
-                        const end = performance.now();
-                        if (end - start > 100) {
-                            console.log(`%c[Performance] Data save took ${Math.round(end - start)}ms`, 'color: #f59e0b');
-                        }
                         if (storageQuotaExceeded.value) {
                             storageQuotaExceeded.value = false;
                         }
@@ -2515,13 +2511,6 @@
 
                 const hasInlineThinking = (text = '') => /<\s*(think|cot)\b/i.test(String(text || ''));
                 const stripInlineThinking = (text = '') => String(text || '').replace(/<\s*(think|cot)\b[^>]*>[\s\S]*?(?:<\s*\/\s*\1\s*>|<\s*\1\s*>|$)/gi, '').trimStart();
-                const formatAIResponseForConsole = (content = '', reasoning = '') => {
-                    const reasoningText = String(reasoning || '').trim();
-                    const contentText = String(content || '');
-                    if (!reasoningText) return contentText;
-                    return `<thinking>\n${reasoningText}\n</thinking>${contentText ? `\n\n${contentText}` : ''}`;
-                };
-
                 const readWorkshopStream = async (response, onContent) => {
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
@@ -2684,9 +2673,6 @@ ${FIRST_MESSAGE_FINAL_CHECKS}
 
                     const systemPrompt = singlePlayerDiffSystemPrompt;
 
-                    // Log System Prompt for debugging
-                    console.log('%c[Diff System Prompt]', 'color: #8b5cf6; font-weight: bold;', systemPrompt);
-
                     try {
                         // We force non-stream for Diff to ensure integrity before parsing?
                         // Or stream and buffer. Stream gives better feedback.
@@ -2701,7 +2687,7 @@ ${FIRST_MESSAGE_FINAL_CHECKS}
                         if (!response.ok) throw new Error('API Request Failed');
 
                         let fullContent = '';
-                        const streamResult = await readWorkshopStream(response, visibleContent => {
+                        await readWorkshopStream(response, visibleContent => {
                             fullContent = visibleContent;
                             generationProgress.value = Math.min(99, generationProgress.value + 1);
 
@@ -2739,7 +2725,6 @@ ${FIRST_MESSAGE_FINAL_CHECKS}
                             }
                         });
 
-                        console.log('[Diff Response]', formatAIResponseForConsole(streamResult.rawContent || fullContent, streamResult.reasoning));
                         processDiffs(fullContent);
 
                         generationProgress.value = 100;
@@ -3456,7 +3441,6 @@ ${FIRST_MESSAGE_FINAL_CHECKS}
 
                 onMounted(() => {
                     window.triggerSlash = (text) => {
-                        console.log('[Preview] triggerSlash called:', text);
                         showToast(`触发：发送消息 "${text}"`, 'info');
                     };
                     nextTick(() => {
@@ -3492,7 +3476,6 @@ ${FIRST_MESSAGE_FINAL_CHECKS}
                         // 更新当前角色的头像数据为 base64
                         // 这将自动触发 watcher 保存到 IndexedDB
                         currentCharacter.value.avatar = base64;
-                        console.log('Avatar cached successfully');
                     } catch (err) {
                         console.warn('Avatar cache failed (likely CORS issue):', err);
                     }
@@ -3521,7 +3504,6 @@ ${FIRST_MESSAGE_FINAL_CHECKS}
                 // Avatar Helpers
                 const generateAvatarUrl = (tag) => {
                     let url;
-                    console.log('%c[Workshop Image Request]', 'color: #ec4899; font-weight: bold;', { style: options.avatarStyle, tag: tag });
                     const tokenParam = options.imageGenKey.trim();
                     const targetArtists = cardUtils.getImageStyleArtists(options.avatarStyle);
 
@@ -3663,9 +3645,6 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
 
                     const systemPrompt = singlePlayerSystemPrompt;
 
-                    // Log System Prompt for debugging
-                    console.log('%c[Generation System Prompt]', 'color: #8b5cf6; font-weight: bold;', systemPrompt);
-
                     const originalStream = api.stream;
 
                     const performGeneration = async (isRetry = false) => {
@@ -3697,12 +3676,11 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
 
                             if (api.stream) {
                                 let buffer = '';
-                                const streamResult = await readWorkshopStream(response, visibleContent => {
+                                await readWorkshopStream(response, visibleContent => {
                                     buffer = visibleContent;
                                     parseBuffer(buffer);
                                 });
                                 fullContent = buffer;
-                                console.log('%c[AI Full Response]', 'color: #3b82f6; font-weight: bold;', formatAIResponseForConsole(streamResult.rawContent || fullContent, streamResult.reasoning));
                             } else {
                                 const data = await response.json();
                                 const message = data.choices?.[0]?.message || {};
@@ -3712,7 +3690,6 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                                 const content = stripInlineThinking(rawContent);
                                 parseBuffer(content);
                                 fullContent = content;
-                                console.log('%c[AI Full Response]', 'color: #3b82f6; font-weight: bold;', formatAIResponseForConsole(rawContent || fullContent, reasoning));
                             }
 
                             // Check for truncation (missing avatar prompt or missing regex scripts when requested)
@@ -3786,14 +3763,6 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
 
                 const generatedSections = reactive(new Set());
 
-                const stripJsonCodeFence = (text = '') => {
-                    return String(text || '')
-                        .trim()
-                        .replace(/^```(?:json)?\s*/i, '')
-                        .replace(/\s*```\s*$/i, '')
-                        .trim();
-                };
-
                 const parseJsonWithLightRepair = (str) => {
                     try {
                         return JSON.parse(str);
@@ -3865,7 +3834,7 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                 };
 
                 const parseFlexibleJsonItems = (text, coerceItems) => {
-                    const clean = stripJsonCodeFence(text);
+                    const clean = stripCodeFence(text);
                     if (!clean) return [];
 
                     try {
@@ -3901,10 +3870,8 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                     // 必须严格匹配 ### 标题，后跟换行或空格，避免误匹配内容中的 ###
                     const sectionKeys = sections.map(s => s.key).join('|');
 
-                    // 定义基础字段集合和额外字段集合
+                    // 基础字段用于统计生成进度
                     const baseSectionKeys = new Set(['Name', 'Description', 'Personality', 'First Message', 'Post History Instructions', 'Creator Notes', 'Avatar Prompt']);
-                    const extraSectionKeys = new Set(['World Info', 'Regex Scripts']);
-
                     sections.forEach(section => {
                         // 增强版匹配正则：
                         // 1. 支持 2-6 个 # 开头 (## 到 ######)
@@ -3995,8 +3962,6 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                                         if (options.imageGenKey) {
                                             let url = generateAvatarUrl(tag);
                                             currentCharacter.value.avatar = url;
-                                        } else {
-                                            console.log('Image Generation Key is empty, skipping image request.');
                                         }
                                     }
                                 }

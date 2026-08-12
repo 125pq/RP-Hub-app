@@ -586,6 +586,34 @@
             </div>`
     };
 
+    const ModalShell = {
+        inheritAttrs: false,
+        props: {
+            overlayClass: { type: [String, Array, Object], default: '' },
+            panelClass: { type: [String, Array, Object], default: '' },
+            closeOnBackdrop: Boolean
+        },
+        emits: ['close'],
+        template: `
+            <div :class="['fixed inset-0 flex items-center justify-center', overlayClass]"
+                @click.self="closeOnBackdrop && $emit('close')">
+                <div :class="panelClass"><slot></slot></div>
+            </div>`
+    };
+
+    const ModalHeader = {
+        emits: ['close'],
+        template: `
+            <div class="editor-modal-header">
+                <slot></slot>
+                <button @click="$emit('close')" class="modal-close-button">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>`
+    };
+
     const UpdateNotificationModal = {
         props: {
             update: { type: Object, required: true },
@@ -647,9 +675,8 @@
             return { contentEl, countdown, handleScroll, close, scrolledToBottom, show };
         },
         template: `
-            <div v-if="show"
-                class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-white rounded-xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden relative">
+            <modal-shell v-if="show" overlay-class="z-[80] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden relative">
                     <div class="bg-gradient-to-r from-primary-50 to-purple-50 p-4 border-b border-gray-100">
                         <div class="flex items-center gap-3">
                             <h3 class="text-xl font-bold text-gray-900">{{ update.title }}</h3>
@@ -674,8 +701,7 @@
                             向下滑动查看完整内容
                         </div>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const StatusNoticeModal = {
@@ -687,8 +713,8 @@
         },
         emits: ['close'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-white rounded-xl border border-gray-200 w-full max-w-sm flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden">
+            <modal-shell v-if="show" overlay-class="z-[80] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-sm flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden">
                     <div class="bg-gradient-to-r from-primary-50 to-purple-50 p-6 flex flex-col items-center justify-center text-center border-b border-gray-100">
                         <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-3">
                             <svg class="w-6 h-6 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -703,8 +729,7 @@
                             {{ buttonLabel }}
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const UserSetupModal = {
@@ -716,8 +741,8 @@
         },
         emits: ['update:name', 'update:description', 'update:person', 'save'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-white rounded-xl border border-gray-200 w-full max-w-md flex flex-col shadow-2xl transform transition-all scale-100">
+            <modal-shell v-if="show" overlay-class="z-[70] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-md flex flex-col shadow-2xl transform transition-all scale-100">
                     <div class="p-6">
                         <div class="flex items-center justify-center w-12 h-12 rounded-full bg-primary-100 text-primary-600 mb-4 mx-auto">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -754,8 +779,7 @@
                         <button @click="$emit('save')" :disabled="!name || name === '请前往设置自定义你的名称'" type="button"
                             class="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-primary-600 text-base font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:ml-3 sm:w-auto sm:text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">保存并开始</button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const ModelSelectorModal = {
@@ -771,8 +795,8 @@
         emits: ['close', 'select', 'update:search-query', 'update:active-tag'],
         template: `
             <transition name="fade">
-                <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                    <div class="bg-white rounded-xl border border-gray-200 w-full max-w-2xl max-h-[90vh] h-[90vh] flex flex-col shadow-2xl transform transition-all scale-100">
+                <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-4"
+                    panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-2xl max-h-[90vh] h-[90vh] flex flex-col shadow-2xl transform transition-all scale-100">
                         <div class="p-4 border-b border-gray-100 flex justify-between items-center">
                             <h3 class="text-lg font-bold text-gray-800">选择模型</h3>
                             <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 focus:outline-none transition-colors">
@@ -818,8 +842,7 @@
                                 </button>
                             </div>
                         </div>
-                    </div>
-                </div>
+                </modal-shell>
             </transition>`
     };
 
@@ -852,9 +875,9 @@
         props: { show: Boolean },
         emits: ['close', 'create', 'import-character'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="fixed inset-0" @click="$emit('close')"></div>
-                <div class="compact-modal-panel">
+            <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
+                overlay-class="z-[60] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="compact-modal-panel">
                     <div class="p-6">
                         <h3 class="text-xl font-bold text-gray-900 mb-6 flex items-center">
                             <svg class="w-6 h-6 mr-2 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -901,16 +924,15 @@
                         </div>
                         <button @click="$emit('close')" class="mt-6 w-full py-3 text-red-500 font-medium hover:text-red-600 transition-colors">取消</button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const AutoImageGenModal = {
         props: { show: Boolean },
         emits: ['decide'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-white rounded-2xl border border-gray-200 w-full max-w-md flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden">
+            <modal-shell v-if="show" overlay-class="z-[90] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-md flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden">
                     <div class="bg-gradient-to-r from-primary-50 to-blue-50 p-6 border-b border-gray-100">
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center">
@@ -942,8 +964,7 @@
                         <button @click="$emit('decide', false)" class="px-5 py-2.5 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl border border-gray-200 transition-all active:scale-95">暂不开启</button>
                         <button @click="$emit('decide', true)" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95">立即开启</button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const ActiveToolEditorModal = {
@@ -957,9 +978,9 @@
         },
         emits: ['close', 'save', 'update:result-count', 'update:tavily-api-key'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl max-h-[90vh] overflow-hidden">
-                    <div class="editor-modal-header">
+            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl max-h-[90vh] overflow-hidden">
+                    <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
                             <div class="p-2 bg-primary-50 text-primary-600 rounded-lg">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94L14.7 6.3z"></path></svg>
@@ -969,10 +990,7 @@
                                 <p class="text-xs text-gray-500">{{ tool.name || '未命名工具' }}</p>
                             </div>
                         </div>
-                        <button @click="$emit('close')" class="modal-close-button">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        </button>
-                    </div>
+                    </modal-header>
                     <div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 bg-gray-50/30">
                         <div class="max-w-2xl mx-auto text-center">
                             <div class="w-14 h-14 mx-auto rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center shadow-sm border border-primary-100">
@@ -1011,8 +1029,7 @@
                             保存工具
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const PresetEditorModal = {
@@ -1026,9 +1043,9 @@
         },
         emits: ['close', 'save', 'update:name', 'update:role', 'update:content'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in">
-                <div class="bg-white rounded-2xl border border-gray-200 w-full max-w-2xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
-                    <div class="editor-modal-header">
+            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-2xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
+                    <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
                             <div class="p-2 bg-primary-50 text-primary-600 rounded-lg">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
@@ -1038,10 +1055,7 @@
                                 <p class="text-xs text-gray-500">{{ roleLabel }}</p>
                             </div>
                         </div>
-                        <button @click="$emit('close')" class="modal-close-button">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        </button>
-                    </div>
+                    </modal-header>
                     <div class="flex-1 p-6 space-y-6 bg-gray-50/30 overflow-y-auto custom-scrollbar">
                         <div>
                             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">预设名称</label>
@@ -1068,8 +1082,7 @@
                             保存预设
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const CharacterEditorModal = {
@@ -1094,8 +1107,8 @@
             }
         },
         template: `
-            <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4 animate-fade-in">
-                <div class="bg-white md:rounded-2xl border-0 md:border border-gray-200 w-full max-w-2xl h-full md:h-[750px] flex flex-col shadow-2xl overflow-hidden">
+            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-0 md:p-4 animate-fade-in"
+                panel-class="bg-white md:rounded-2xl border-0 md:border border-gray-200 w-full max-w-2xl h-full md:h-[750px] flex flex-col shadow-2xl overflow-hidden">
                     <div class="p-3 md:p-5 border-b border-gray-100 flex flex-col gap-4 bg-gray-50/80 backdrop-blur-sm flex-shrink-0">
                         <div class="flex justify-between items-center">
                             <h3 class="text-lg md:text-xl font-bold text-gray-800 flex items-center">
@@ -1159,8 +1172,7 @@
                             保存角色
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const RegexEditorModal = {
@@ -1192,9 +1204,9 @@
             }
         },
         template: `
-            <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in">
-                <div class="bg-white rounded-2xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
-                    <div class="editor-modal-header">
+            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
+                    <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
                             <div class="p-2 bg-primary-50 text-primary-600 rounded-lg">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
@@ -1204,10 +1216,7 @@
                                 <p class="text-xs text-gray-500">匹配与替换规则</p>
                             </div>
                         </div>
-                        <button @click="$emit('close')" class="modal-close-button">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        </button>
-                    </div>
+                    </modal-header>
 
                     <div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 bg-gray-50/30">
                         <div>
@@ -1300,8 +1309,7 @@
                             保存脚本
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const UiTemplateEditorModal = {
@@ -1334,9 +1342,9 @@
             }
         },
         template: `
-            <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in">
-                <div class="bg-white rounded-2xl border border-gray-200 w-full max-w-4xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
-                    <div class="editor-modal-header">
+            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-4xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
+                    <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
                             <div class="p-2 bg-primary-50 text-primary-600 rounded-lg">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm4 3h8M8 12h8M8 16h5"></path></svg>
@@ -1346,10 +1354,7 @@
                                 <p class="text-xs text-gray-500">HTML状态栏 + 变量JSON</p>
                             </div>
                         </div>
-                        <button @click="$emit('close')" class="modal-close-button">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        </button>
-                    </div>
+                    </modal-header>
 
                     <div class="flex-1 overflow-y-auto custom-scrollbar p-6 bg-gray-50/30 space-y-6">
                         <div class="segmented-switch segmented-switch--slim">
@@ -1435,8 +1440,7 @@
                             保存模板
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const WorldInfoEditorModal = {
@@ -1463,9 +1467,9 @@
             }
         },
         template: `
-            <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in">
-                <div class="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
-                    <div class="editor-modal-header">
+            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
+                    <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
                             <div class="p-2 bg-primary-50 text-primary-600 rounded-lg">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
@@ -1475,10 +1479,7 @@
                                 <p class="text-xs text-gray-500">世界书条目</p>
                             </div>
                         </div>
-                        <button @click="$emit('close')" class="modal-close-button">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        </button>
-                    </div>
+                    </modal-header>
 
                     <div class="flex-1 p-6 space-y-6 bg-gray-50/30 overflow-y-auto custom-scrollbar">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1573,8 +1574,7 @@
                             保存条目
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const ExportSelectionModal = {
@@ -1585,8 +1585,8 @@
         },
         emits: ['close', 'select-all', 'deselect-all', 'toggle', 'confirm'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-white rounded-xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl max-h-[80vh] overflow-hidden">
+            <modal-shell v-if="show" overlay-class="z-[90] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl max-h-[80vh] overflow-hidden">
                     <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/80 backdrop-blur-sm flex-shrink-0">
                         <h3 class="text-lg font-bold text-gray-800">选择导出项目</h3>
                         <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1 rounded-full transition-all">
@@ -1622,8 +1622,7 @@
                             导出选中 ({{ selected.size }})
                         </button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const CharacterExportModal = {
@@ -1637,9 +1636,9 @@
             ]
         }),
         template: `
-            <div v-if="show" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="fixed inset-0" @click="$emit('close')"></div>
-                <div class="compact-modal-panel">
+            <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
+                overlay-class="z-[90] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="compact-modal-panel">
                     <div class="p-6">
                         <h3 class="text-xl font-bold text-gray-900 mb-6 flex items-center">
                             <svg class="w-6 h-6 mr-2 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
@@ -1658,8 +1657,7 @@
                         </div>
                         <button @click="$emit('close')" class="mt-6 w-full py-3 text-red-500 font-medium hover:text-red-600 transition-colors">取消</button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const ActionConfirmModal = {
@@ -1669,8 +1667,8 @@
         },
         emits: ['confirm', 'cancel'],
         template: `
-            <div v-if="show" class="fixed inset-0 z-[160] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-white rounded-xl border border-gray-200 w-full max-w-sm flex flex-col shadow-2xl transform transition-all scale-100">
+            <modal-shell v-if="show" overlay-class="z-[160] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-sm flex flex-col shadow-2xl transform transition-all scale-100">
                     <div class="p-6 text-center">
                         <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
                             <svg class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1684,8 +1682,7 @@
                         <button @click="$emit('confirm')" type="button" class="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm transition-colors">确认</button>
                         <button @click="$emit('cancel')" type="button" class="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">取消</button>
                     </div>
-                </div>
-            </div>`
+            </modal-shell>`
     };
 
     const RetryConfirmModal = {
@@ -1694,9 +1691,8 @@
             <transition enter-active-class="transition duration-300 ease-modal-fade" enter-from-class="opacity-0"
                 enter-to-class="opacity-100" leave-active-class="transition duration-200 ease-in"
                 leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <div v-if="state.show" class="fixed inset-0 z-[200] flex items-center justify-center px-4 pt-4 pb-20 text-center sm:p-0">
-                    <div class="fixed inset-0 bg-black/40 backdrop-blur-[2px]"></div>
-                    <div class="bg-white rounded-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.15)] transform transition-transform w-full max-w-sm overflow-hidden relative z-10 border border-gray-100 p-6 flex flex-col items-center animate-slide-up">
+                <modal-shell v-if="state.show" overlay-class="z-[200] bg-black/40 backdrop-blur-[2px] px-4 pt-4 pb-20 text-center sm:p-0"
+                    panel-class="bg-white rounded-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.15)] transform transition-transform w-full max-w-sm overflow-hidden relative z-10 border border-gray-100 p-6 flex flex-col items-center animate-slide-up">
                         <div class="w-12 h-12 rounded-full bg-yellow-50 flex items-center justify-center mb-4 border border-yellow-100 shadow-sm">
                             <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
@@ -1708,8 +1704,7 @@
                             <button @click="state.onCancel" class="flex-1 py-2.5 px-4 bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold rounded-xl transition-all border border-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 hover:-translate-y-0.5">取消中断</button>
                             <button @click="state.onConfirm" class="flex-1 py-2.5 px-4 bg-primary-600 hover:bg-primary-500 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all focus:outline-none focus:ring-2 focus:ring-primary-400 hover:-translate-y-0.5">立即重试</button>
                         </div>
-                    </div>
-                </div>
+                </modal-shell>
             </transition>`
     };
 
@@ -1726,8 +1721,9 @@
             <transition enter-active-class="transition-opacity duration-300 ease-modal-fade" enter-from-class="opacity-0"
                 enter-to-class="opacity-100" leave-active-class="transition-opacity duration-200 ease-in"
                 leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <div v-if="show" class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 sm:p-6" @click.self="$emit('close')">
-                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden max-h-[90vh] sm:max-h-[85vh] border border-gray-200/50 relative">
+                <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
+                    overlay-class="z-[100] bg-gray-900/40 backdrop-blur-sm p-4 sm:p-6"
+                    panel-class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden max-h-[90vh] sm:max-h-[85vh] border border-gray-200/50 relative">
                         <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 flex-shrink-0">
                             <div class="flex items-center space-x-3">
                                 <div class="text-blue-600">
@@ -1800,8 +1796,7 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
+                </modal-shell>
             </transition>`
     };
 
@@ -2195,10 +2190,9 @@
             <transition enter-active-class="transition-opacity duration-300 ease-out" enter-from-class="opacity-0"
                 enter-to-class="opacity-100" leave-active-class="transition-opacity duration-200 ease-in"
                 leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <div v-if="show"
-                    class="fixed inset-0 z-[120] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 sm:p-6"
-                    @click.self="$emit('close')">
-                    <div class="w-full max-w-6xl h-[92vh] sm:h-[88vh] bg-white rounded-2xl shadow-2xl border border-gray-200/70 overflow-hidden flex flex-col">
+                <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
+                    overlay-class="z-[120] bg-gray-900/40 backdrop-blur-sm p-4 sm:p-6"
+                    panel-class="w-full max-w-6xl h-[92vh] sm:h-[88vh] bg-white rounded-2xl shadow-2xl border border-gray-200/70 overflow-hidden flex flex-col">
                         <div class="px-5 sm:px-6 py-4 border-b border-gray-100 bg-white flex items-center justify-between flex-shrink-0">
                             <div class="min-w-0">
                                 <div class="flex items-center gap-2.5">
@@ -2271,17 +2265,15 @@
                                     class="story-route-delete-button">删除</button>
                             </div>
                         </div>
-                    </div>
-                </div>
+                </modal-shell>
             </transition>
 
             <transition enter-active-class="transition-opacity duration-200" enter-from-class="opacity-0"
                 enter-to-class="opacity-100" leave-active-class="transition-opacity duration-150"
                 leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <div v-if="showNameEditor"
-                    class="fixed inset-0 z-[180] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4"
-                    @click.self="$emit('close-name-editor')">
-                    <div class="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
+                <modal-shell v-if="showNameEditor" close-on-backdrop @close="$emit('close-name-editor')"
+                    overlay-class="z-[180] bg-gray-900/40 backdrop-blur-sm p-4"
+                    panel-class="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
                         <h3 class="text-lg font-bold text-gray-800">编辑分支名称</h3>
                         <p class="mt-1 text-sm text-gray-500">名称最多 30 个字。</p>
                         <input :value="nameDraft" maxlength="30" autofocus
@@ -2295,8 +2287,7 @@
                             <button @click="$emit('save-name')" :disabled="switching"
                                 class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">保存</button>
                         </div>
-                    </div>
-                </div>
+                </modal-shell>
             </transition>`
     };
 
@@ -2503,6 +2494,8 @@
         GenerationTimer,
         ExportSelectionModal,
         ModelSelectorModal,
+        ModalHeader,
+        ModalShell,
         PaginationControls,
         PresetEditorModal,
         RegexEditorModal,

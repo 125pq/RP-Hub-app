@@ -16,6 +16,8 @@ const {
     GenerationTimer,
     ExportSelectionModal,
     ModelSelectorModal,
+    ModalHeader,
+    ModalShell,
     PaginationControls,
     PresetEditorModal,
     RegexEditorModal,
@@ -162,7 +164,7 @@ marked.use({
     }
 });
 
-createApp({
+const app = createApp({
     components: {
         ActionConfirmModal,
         ActiveToolEditorModal,
@@ -608,6 +610,23 @@ createApp({
             balancedModel: DEFAULT_API_CONFIG.balancedModel,
             fastModel: DEFAULT_API_CONFIG.fastModel
         });
+        const modelPresetOptions = [
+            {
+                label: '预设模型①',
+                field: 'qualityModel',
+                iconPath: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z'
+            },
+            {
+                label: '预设模型②',
+                field: 'balancedModel',
+                iconPath: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3'
+            },
+            {
+                label: '预设模型③',
+                field: 'fastModel',
+                iconPath: 'M13 10V3L4 14h7v7l9-11h-7z'
+            }
+        ];
 
         const normalizeFontFamily = (value) => ['modern', 'serif', 'system'].includes(value) ? value : 'modern';
         const normalizeFontSize = (value) => {
@@ -1845,7 +1864,162 @@ createApp({
             if (entry) entry.enabled = enabled;
         };
 
-        const handleGeneratedImageReroll = (event, messageIndex) => {
+        const generatedImageTasks = new Map();
+        let generatedImageObserver = null;
+
+        const fetchImageJobJson = async (url, options) => {
+            const response = await fetch(url, options);
+            const text = await response.text();
+            let payload = {};
+            try { payload = text ? JSON.parse(text) : {}; } catch { /* 交给下方统一报错 */ }
+            if (!response.ok) throw new Error(payload.error || text || `HTTP ${response.status}`);
+            return payload;
+        };
+
+        const renderGeneratedImageJob = (card, task, job) => {
+            if (!card?.isConnected) return task.cards.delete(card);
+            task.job = job;
+            card.dataset.imageJobId = job.id || '';
+            const progress = Math.max(0, Math.min(100, Number(job.generationProgress?.percent || 0)));
+            const label = card.querySelector('.generated-image-progress-label');
+            const bar = card.querySelector('.generated-image-progress-bar');
+            card.classList.toggle('is-waiting', job.status === 'queued');
+            if (bar) bar.style.width = `${progress}%`;
+
+            if (job.status === 'queued') {
+                if (label) label.textContent = job.queuePosition
+                    ? `排队中 · 第 ${job.queuePosition} / ${job.queuedCount || job.queuePosition} 个`
+                    : '排队中';
+                return;
+            }
+            if (job.status === 'running') {
+                if (label) label.textContent = `生成中 ${Math.round(progress)}%`;
+                return;
+            }
+
+            const imageUrl = job.imageUrl
+                ? new URL(job.imageUrl, task.baseUrl).href
+                : job.id
+                    ? `${task.baseUrl}/api/jobs/${encodeURIComponent(job.id)}/content?token=${encodeURIComponent(task.token)}`
+                    : '';
+            if (!imageUrl) {
+                card.classList.remove('is-generating');
+                card.classList.add('is-generation-error');
+                if (label) label.textContent = job.error || '生成失败';
+                return;
+            }
+
+            const image = card.querySelector('img');
+            image.style.height = '100%';
+            image.src = imageUrl;
+            card.classList.remove('is-generating', 'is-generation-error', 'is-waiting');
+            card.dataset.imageJobState = job.status;
+        };
+
+        const startGeneratedImageTask = (requestUrl, fresh = false) => {
+            const request = new URL(requestUrl, window.location.href);
+            const token = request.searchParams.get('token') || settings.imageGenKey.trim();
+            request.searchParams.set('token', token);
+            const key = fresh ? `${request.href}#${Date.now()}-${Math.random()}` : request.href;
+            if (generatedImageTasks.has(key)) return generatedImageTasks.get(key);
+            const task = { key, requestUrl: request.href, baseUrl: request.origin, token, cards: new Set(), job: null };
+            const publish = (job) => {
+                task.job = job;
+                [...task.cards].forEach(card => renderGeneratedImageJob(card, task, job));
+            };
+            task.promise = (async () => {
+                let job = await fetchImageJobJson(`${task.baseUrl}/api/jobs`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(Object.fromEntries(request.searchParams.entries()))
+                });
+                publish(job);
+                let pollFailures = 0;
+                while (!['done', 'failed'].includes(job.status)) {
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    try {
+                        job = await fetchImageJobJson(`${task.baseUrl}/api/jobs/${encodeURIComponent(job.id)}?token=${encodeURIComponent(task.token)}`);
+                        pollFailures = 0;
+                    } catch (error) {
+                        if (++pollFailures < 5) continue;
+                        throw error;
+                    }
+                    publish(job);
+                }
+                if (fresh && job.status === 'done') {
+                    const reusableRequest = new URL(task.requestUrl);
+                    reusableRequest.searchParams.set('nocache', '0');
+                    generatedImageTasks.delete(task.key);
+                    task.key = reusableRequest.href;
+                    generatedImageTasks.set(task.key, task);
+                }
+                return job;
+            })().catch((error) => {
+                const job = { status: 'failed', error: error.message || '生成失败' };
+                publish(job);
+                return job;
+            });
+            generatedImageTasks.set(key, task);
+            return task;
+        };
+
+        const ensureGeneratedImageProgressUi = (card) => {
+            if (card.querySelector('.generated-image-progress')) return;
+            const progress = document.createElement('div');
+            progress.className = 'generated-image-progress';
+            progress.setAttribute('aria-live', 'polite');
+            progress.innerHTML = '<svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span>';
+            card.appendChild(progress);
+        };
+
+        const loadGeneratedImageCard = (card, requestUrl = card?.dataset.imageRequest, options = {}) => {
+            if (!card || !requestUrl) return Promise.resolve({ status: 'failed' });
+            ensureGeneratedImageProgressUi(card);
+            generatedImageTasks.forEach(task => task.cards.delete(card));
+            card.querySelector('img')?.setAttribute('alt', '');
+            const animationTime = performance.now();
+            card.querySelector('.generated-image-spinner')?.style.setProperty('animation-delay', `-${animationTime % 2000}ms`);
+            card.querySelector('.generated-image-spinner-path')?.style.setProperty('animation-delay', `-${animationTime % 1500}ms`);
+            const label = card.querySelector('.generated-image-progress-label');
+            const bar = card.querySelector('.generated-image-progress-bar');
+            const task = startGeneratedImageTask(requestUrl, options.fresh === true);
+            if (!task.job) {
+            if (label) label.textContent = '等待生成';
+                if (bar) bar.style.width = '0%';
+            }
+            task.cards.add(card);
+            card.dataset.imageRequest = requestUrl;
+            card.dataset.imageJobState = 'loading';
+            card.classList.add('is-generating');
+            card.classList.remove('is-generation-error');
+            const size = new URL(requestUrl, window.location.href).searchParams.get('size');
+            card.style.aspectRatio = size === '横图' ? '1216 / 832' : size === '方图' ? '1' : '832 / 1216';
+            if (task.job) renderGeneratedImageJob(card, task, task.job);
+            return task.promise;
+        };
+
+        const hydrateGeneratedImages = (root) => {
+            const cards = root?.matches?.('.generated-image-card[data-image-request]')
+                ? [root]
+                : [...(root?.querySelectorAll?.('.generated-image-card[data-image-request]') || [])];
+            cards.forEach(card => {
+                if (!card.dataset.imageJobState) loadGeneratedImageCard(card);
+            });
+        };
+
+        watch(chatContainer, (container) => {
+            generatedImageObserver?.disconnect();
+            if (!container) return;
+            generatedImageObserver = new MutationObserver(records => {
+                records.forEach(record => record.addedNodes.forEach(node => {
+                    if (node.nodeType === Node.ELEMENT_NODE) hydrateGeneratedImages(node);
+                }));
+            });
+            generatedImageObserver.observe(container, { childList: true, subtree: true });
+            hydrateGeneratedImages(container);
+        });
+
+        const handleGeneratedImageReroll = async (event, messageIndex) => {
             const button = event.target.closest('.generated-image-reroll');
             if (!button) return;
             event.preventDefault();
@@ -1878,15 +2052,11 @@ createApp({
                 + mainText.slice(imageMatch.index + imageMatch[0].length);
             const mainStart = message.content.lastIndexOf(mainText);
             if (mainStart < 0) return;
-            const sourceImage = card.querySelector('img');
-            if (!sourceImage?.src) return;
-
-            const sourceUrl = sourceImage.getAttribute('src') || sourceImage.src;
-            const tagUrlPattern = /([?&]tag=)[\s\S]*?(&token=)/;
-            const nextImageUrl = sourceUrl.replace(
-                tagUrlPattern,
-                (_, start, end) => `${start}${tags.join(', ')}${end}`
-            );
+            const sourceUrl = card.dataset.imageRequest || card.querySelector('img')?.getAttribute('src');
+            if (!sourceUrl) return;
+            const nextImageUrl = new URL(sourceUrl, window.location.href);
+            nextImageUrl.searchParams.set('tag', tags.join(', '));
+            nextImageUrl.searchParams.set('nocache', '1');
 
             const originalContent = message.content;
             const finishLoading = () => {
@@ -1896,8 +2066,8 @@ createApp({
             card.classList.add('is-rerolling');
             button.disabled = true;
 
-            const preloadedImage = new Image();
-            preloadedImage.onload = () => {
+            const job = await loadGeneratedImageCard(card, nextImageUrl.href, { fresh: true });
+            if (job.status === 'done') {
                 if (chatHistory.value[messageIndex] !== message || message.content !== originalContent) {
                     finishLoading();
                     return;
@@ -1909,9 +2079,9 @@ createApp({
                 scheduleChatHistorySave();
                 showToast('已重新生成图片', 'success');
                 nextTick(finishLoading);
-            };
-            preloadedImage.onerror = finishLoading;
-            preloadedImage.src = nextImageUrl;
+                return;
+            }
+            finishLoading();
         };
 
         const updateImageGenRegexState = ({ enableRegex = false } = {}) => {
@@ -3031,7 +3201,6 @@ createApp({
                 msg.reasoning
                 || parseCot(msg.content || '').cot
                 || (Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0)
-                || msg.isEditing_Message
                 || messageUsesHtmlFrame(msg)
                 || messageHasUiTemplateBlocks(msg)
                 || messageHasPendingUiTemplate(msg)
@@ -3062,9 +3231,11 @@ createApp({
         };
 
         // API & Models
-        const getApiEndpoint = (path) => settings.apiUrl.endsWith('/v1')
-            ? `${settings.apiUrl}/${path}`
-            : `${settings.apiUrl}/v1/${path}`;
+        const getApiEndpoint = (path) => {
+            const baseUrl = String(settings.apiUrl || '').replace(/\/+$/, '');
+            const apiUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
+            return `${apiUrl}/${String(path || '').replace(/^\/+/, '')}`;
+        };
 
         const fetchModels = async (isManual = false) => {
             const apiKey = String(settings.apiKey || '').trim();
@@ -3268,9 +3439,7 @@ createApp({
 
         const clearChat = () => {
             confirmAction('确定要清空聊天记录吗？记忆也将一并清空，此操作无法撤销。', () => {
-                abortUiTemplateUpdate();
-                abortVectorBatchExtraction();
-                abortClassicBatchExtraction();
+                abortConversationBackgroundWork();
                 resetChatRenderWindow();
                 chatHistory.value = [];
                 if (currentCharacter.value && currentCharacter.value.first_mes) {
@@ -3352,6 +3521,16 @@ createApp({
             }
         };
 
+        const clearMessageEditState = (message) => {
+            message.isEditing_Message = false;
+            delete message.editMessageContent;
+            delete message.editMessageHeight;
+            delete message.originalCot;
+            delete message.originalSys;
+            delete message.originalUiTemplateUpdate;
+            delete message.originalEditMessageContent;
+        };
+
         const saveEditMessage = async (index) => {
             const msg = chatHistory.value[index];
             if (msg) {
@@ -3367,22 +3546,14 @@ createApp({
                     finalContent = msg.originalCot + '\n\n' + finalContent;
                 }
                 msg.content = finalContent;
-                msg.isEditing_Message = false;
-                delete msg.editMessageContent;
-                delete msg.editMessageHeight;
-                delete msg.originalCot;
-                delete msg.originalSys;
-                delete msg.originalUiTemplateUpdate;
-                delete msg.originalEditMessageContent;
+                clearMessageEditState(msg);
                 if (!contentChanged) {
                     await saveChatHistoryNow();
                     showToast('消息已保存', 'success');
                     return;
                 }
 
-                abortUiTemplateUpdate();
-                abortVectorBatchExtraction();
-                abortClassicBatchExtraction();
+                abortConversationBackgroundWork();
                 const snapshot = await ensureConversationMessageIds();
                 const affectedTurn = snapshot.turns.find(turnInfo =>
                     (turnInfo.sourceIndexes || []).includes(index)
@@ -3403,13 +3574,7 @@ createApp({
         const cancelEditMessage = (index) => {
             const msg = chatHistory.value[index];
             if (msg) {
-                msg.isEditing_Message = false;
-                delete msg.editMessageContent;
-                delete msg.editMessageHeight;
-                delete msg.originalCot;
-                delete msg.originalSys;
-                delete msg.originalUiTemplateUpdate;
-                delete msg.originalEditMessageContent;
+                clearMessageEditState(msg);
             }
         };
 
@@ -3787,9 +3952,7 @@ createApp({
                     ? '确定要删除这条状态消息吗？'
                     : '确定要删除这条 AI 消息吗？该轮的相关项也将一并删除。';
             confirmAction(message, async () => {
-                abortUiTemplateUpdate();
-                abortVectorBatchExtraction();
-                abortClassicBatchExtraction();
+                abortConversationBackgroundWork();
                 const snapshot = await ensureConversationMessageIds();
                 const removedIndexes = new Set([index]);
                 if (deletesUserTurn) {
@@ -3847,9 +4010,7 @@ createApp({
             if (msg.role === 'user') {
                 startRegenerationStatus();
                 // 如果是用户消息，直接基于当前上下文生成（重试/继续）
-                abortUiTemplateUpdate();
-                abortVectorBatchExtraction();
-                abortClassicBatchExtraction();
+                abortConversationBackgroundWork();
                 // 只删除最新一轮的记忆，保留之前的
                 const snapshot = await ensureConversationMessageIds();
                 syncMemoryConversationBindings(snapshot, { backfill: true });
@@ -3863,9 +4024,7 @@ createApp({
                 // 如果是 AI 消息，删除它（及之后）然后重新生成
                 confirmAction('确定要重新生成这条消息吗？该楼层的记忆将被清除。', async () => {
                     startRegenerationStatus();
-                    abortUiTemplateUpdate();
-                    abortVectorBatchExtraction();
-                    abortClassicBatchExtraction();
+                abortConversationBackgroundWork();
                     // 计算被删除区间的 assistant 轮次，只删除 >= 该轮次的记忆
                     const snapshot = await ensureConversationMessageIds();
                     syncMemoryConversationBindings(snapshot, { backfill: true });
@@ -4574,12 +4733,6 @@ createApp({
 
         const getMemoryEmbeddingModel = () => (memorySettings.embeddingModel || '').trim();
 
-        const getOpenAICompatUrl = (endpoint) => {
-            const baseUrl = (settings.apiUrl || '').replace(/\/+$/, '');
-            const apiUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
-            return `${apiUrl}/${endpoint.replace(/^\/+/, '')}`;
-        };
-
         const stripVectorMemoryCode = (text) => {
             if (!text) return '';
 
@@ -4782,7 +4935,7 @@ createApp({
                 content: BUILTIN_PROMPTS.buildClassicSummaryFinalInstruction(job.turn)
             });
 
-            const response = await fetch(getOpenAICompatUrl('chat/completions'), {
+            const response = await fetch(getApiEndpoint('chat/completions'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -4989,7 +5142,7 @@ createApp({
             const normalizedInputs = inputs.map(input => String(input || '').trim());
             if (normalizedInputs.some(input => !input)) throw new Error('嵌入内容不能为空');
 
-            const response = await fetch(getOpenAICompatUrl('embeddings'), {
+            const response = await fetch(getApiEndpoint('embeddings'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -6189,15 +6342,6 @@ createApp({
             return null;
         };
 
-        function getActiveToolInlineProcessText() {
-            for (let index = chatHistory.value.length - 1; index >= 0; index -= 1) {
-                const message = chatHistory.value[index];
-                const toolCall = getCurrentThinkingToolCall(message);
-                if (toolCall) return getToolCallDisplayName(toolCall);
-            }
-            return '';
-        }
-
         const getToolCallReasoningParts = (toolCalls) => (Array.isArray(toolCalls) ? toolCalls : [])
             .map(item => String(item?.reasoning || '').trim())
             .filter(Boolean)
@@ -6815,6 +6959,12 @@ createApp({
             isClassicBatchExtracting.value = false;
         };
 
+        const abortConversationBackgroundWork = () => {
+            abortUiTemplateUpdate();
+            abortVectorBatchExtraction();
+            abortClassicBatchExtraction();
+        };
+
         const startClassicBatchMemoryExtraction = async (options = {}) => {
             const { manual = true } = options;
             if (isClassicBatchExtracting.value || !currentCharacter.value || chatHistory.value.length === 0) return;
@@ -7202,9 +7352,7 @@ createApp({
                 }
             }
             await flushPendingChatHistorySave();
-            abortUiTemplateUpdate();
-            abortVectorBatchExtraction();
-            abortClassicBatchExtraction();
+            abortConversationBackgroundWork();
             return true;
         };
 
@@ -7341,20 +7489,17 @@ createApp({
             const targetArtists = cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
 
             const encodedTargetArtists = encodeURIComponent(targetArtists);
+            const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=nai-diffusion-4-5-full&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
                 regex: '/image###([\\s\\S]*?)###/g',
-                replacement: '<div style="width: 100%; height: auto; max-width: 100%; box-sizing: border-box; padding: 2px; border: 1px solid rgba(255,255,255,0.58); background: rgba(255,255,255,0.32); position: relative; border-radius: 12px; overflow: hidden; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 14px rgba(148,163,184,0.06);"><img src="' + baseUrl + '/generate?tag=$1&token=' + imageGenToken + '&model=nai-diffusion-4-5-full&artist=' + encodedTargetArtists + '&size=' + settings.imageSize + '&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras"  alt="生成图片" style="max-width: 100%; height: auto; width: 100%; display: block; object-fit: contain; border-radius: 9px; transition: transform 0.3s ease;"></div>',
+            replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:rgba(255,255,255,.32);position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
                 promptOnly: false,
                 scope: 'global',
                 enabled: false // Default closed
             };
-            imageGenRegexContent.replacement = imageGenRegexContent.replacement
-                .replace('<div style=', '<div class="generated-image-card" style=')
-                        .replace('</div>', '<div class="generated-image-reroll-loading" aria-hidden="true"><svg class="generated-image-spinner" viewBox="0 0 50 50"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="3"></circle></svg></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>');
-
             // 查找当前是否已存在新命名的正则
             const newRegexIndex = regexScripts.value.findIndex(r => r.name === imageGenRegexName);
 
@@ -7524,9 +7669,7 @@ createApp({
                 }
             }
             if (!isCurrentRequest()) return false;
-            abortVectorBatchExtraction();
-            abortClassicBatchExtraction();
-            abortUiTemplateUpdate();
+            abortConversationBackgroundWork();
             await flushPendingChatHistorySave();
             if (!isCurrentRequest()) return false;
             updateCurrentStoryBranchSummary();
@@ -7988,9 +8131,7 @@ createApp({
             _classicMemoriesLoaded = loadedMemories.summaryLoaded;
 
             // Load Character Specific Data
-            worldInfo.value = getCombinedWorldInfo(char);
-
-            combineRegexScriptsForCharacter(char);
+            applyCharacterScopedResources(char);
             clearStoryBranchTransientContext();
             finishApplyingCharacterScopedData();
 
@@ -8054,12 +8195,6 @@ createApp({
             return cardUtils.toWorldInfoExportEntry(normalized);
         };
 
-        const normalizeCharacterUiTemplates = (char) => {
-            char.uiTemplates = Array.isArray(char.uiTemplates)
-                ? char.uiTemplates.map(template => normalizeUiTemplate({ ...template, scope: 'character' }))
-                : [];
-        };
-
         const getCombinedWorldInfo = (char) => {
             const characterEntries = Array.isArray(char.worldInfo)
                 ? JSON.parse(JSON.stringify(char.worldInfo))
@@ -8071,6 +8206,16 @@ createApp({
                     .map(entry => normalizeWorldInfoEntry({ ...entry, scope: 'global' })),
                 ...characterEntries
             ];
+        };
+
+        const applyCharacterScopedResources = (char) => {
+            worldInfo.value = getCombinedWorldInfo(char);
+            combineRegexScriptsForCharacter(char);
+        };
+
+        const syncWorldInfoToCurrentCharacter = () => {
+            const char = characters.value[currentCharacterIndex.value];
+            if (char) char.worldInfo = JSON.parse(JSON.stringify(worldInfo.value));
         };
 
         const parseWorldInfoKeysText = cardUtils.parseWorldInfoKeysText;
@@ -8597,9 +8742,7 @@ createApp({
                 loadGlobalUiTemplateRuntimeForCharacter(char);
 
                 // Load Char Specifics
-                worldInfo.value = getCombinedWorldInfo(char);
-
-                combineRegexScriptsForCharacter(char);
+                applyCharacterScopedResources(char);
                 finishApplyingCharacterScopedData();
 
                 if (char.recentGenerationTimes) recentGenerationTimes.value = JSON.parse(JSON.stringify(char.recentGenerationTimes));
@@ -8660,6 +8803,8 @@ createApp({
         });
 
         onBeforeUnmount(() => {
+            generatedImageObserver?.disconnect();
+            generatedImageTasks.clear();
             closeMobileMenu();
             document.removeEventListener('fullscreenchange', syncChatFullscreenState);
             document.removeEventListener('webkitfullscreenchange', syncChatFullscreenState);
@@ -8818,6 +8963,14 @@ createApp({
             };
         });
 
+        const applyPersonPresetSelection = (person) => {
+            user.person = person === 'third' ? 'third' : 'second';
+            const secondPersonPreset = presets.value.find(preset => preset.name === '第二人称');
+            const thirdPersonPreset = presets.value.find(preset => preset.name === '第三人称');
+            if (secondPersonPreset) secondPersonPreset.enabled = user.person === 'second';
+            if (thirdPersonPreset) thirdPersonPreset.enabled = user.person === 'third';
+        };
+
         return {
             switchProfile, createNewProfile, deleteProfile, userProfiles, activeProfileId, showProfileDropdown,
             processMainContent, replaceUserNamePlaceholder,
@@ -8842,7 +8995,7 @@ createApp({
             updateModalRef, latestUpdateConfig,
             showConfirmModal, confirmMessage, modelMode, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
-            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
+            user, settings, modelPresetOptions, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength, summaryCompressionRate,
@@ -9079,37 +9232,17 @@ createApp({
             // Regex Methods
             importRegex: (event) => readJsonFileInput(event, data => {
                 const items = Array.isArray(data) ? data : [data];
+                const fallbackScope = currentCharacter.value ? 'character' : 'global';
                 const normalized = items.map(script => {
-                    const s = { ...script };
-                    s.scope = s.scope || (currentCharacter.value ? 'character' : 'global');
-                    if (s.disabled !== undefined) {
-                        s.enabled = !s.disabled;
-                    } else if (s.enabled === undefined) {
-                        s.enabled = true;
-                    }
-                    if (!s.name && s.scriptName) s.name = s.scriptName;
-                    if (!s.regex && s.findRegex) s.regex = s.findRegex;
-
-                    if (s.regex && s.regex.startsWith('/') && s.regex.lastIndexOf('/') > 0) {
-                        const lastSlash = s.regex.lastIndexOf('/');
-                        const potentialFlags = s.regex.substring(lastSlash + 1);
-                        if (/^[gimsuy]*$/.test(potentialFlags)) {
-                            s.flags = potentialFlags;
-                            s.regex = s.regex.substring(1, lastSlash);
-                        }
-                    }
-
-                    if (!s.replacement && s.replaceString) s.replacement = s.replaceString;
-                    if (!s.flags && s.regexFlags) s.flags = s.regexFlags;
-                    if (!s.flags) s.flags = 'g';
-                    if (!s.placement) s.placement = [1, 2];
-                    if (s.markdownOnly === undefined) s.markdownOnly = false;
-                    if (s.promptOnly === undefined) s.promptOnly = false;
-                    if (s.runOnEdit === undefined) s.runOnEdit = false;
-                    if (s.minDepth === undefined) s.minDepth = null;
-                    if (s.maxDepth === undefined) s.maxDepth = null;
-
-                    return normalizeRegexScript(s, s.scope);
+                    const scope = script?.scope || fallbackScope;
+                    const result = cardUtils.normalizeImportedRegexScript(
+                        { ...script, scope },
+                        { fallbackScope: scope, systemNames: systemRegexNames }
+                    );
+                    if (Object.prototype.hasOwnProperty.call(script || {}, 'name')) result.name = script.name;
+                    else if (!script?.scriptName) delete result.name;
+                    if (!Object.prototype.hasOwnProperty.call(script || {}, 'regex') && !script?.findRegex) delete result.regex;
+                    return result;
                 });
 
                 regexScripts.value = [...regexScripts.value, ...normalized];
@@ -9199,9 +9332,7 @@ createApp({
                 if (entries.length > 0) {
                     const normalizedEntries = entries.map(normalizeWorldInfoEntry);
                     worldInfo.value = [...worldInfo.value, ...normalizedEntries];
-                    if (currentCharacterIndex.value !== -1) {
-                        characters.value[currentCharacterIndex.value].worldInfo = JSON.parse(JSON.stringify(worldInfo.value));
-                    }
+                    syncWorldInfoToCurrentCharacter();
                     showToast('世界书导入成功', 'success');
                 }
             }, () => showToast('导入失败: 格式错误', 'error')),
@@ -9260,19 +9391,14 @@ createApp({
                 } else {
                     worldInfo.value.push(data);
                 }
-                // Sync back to current character
-                if (currentCharacterIndex.value !== -1) {
-                    characters.value[currentCharacterIndex.value].worldInfo = JSON.parse(JSON.stringify(worldInfo.value));
-                }
+                syncWorldInfoToCurrentCharacter();
                 showWorldInfoEditor.value = false;
 
             },
             deleteWorldInfo: (index) => {
                 confirmAction('确定要删除这个世界书条目吗？此操作无法撤销。', () => {
                     worldInfo.value.splice(index, 1);
-                    if (currentCharacterIndex.value !== -1) {
-                        characters.value[currentCharacterIndex.value].worldInfo = JSON.parse(JSON.stringify(worldInfo.value));
-                    }
+                    syncWorldInfoToCurrentCharacter();
                     showToast('世界书条目已删除', 'success');
                 });
             },
@@ -9304,19 +9430,7 @@ createApp({
                     return;
                 }
                 user.name = tempUserSetup.name;
-                user.person = tempUserSetup.person; // 保存偏好
-
-                // 应用人称选择到预设
-                const secondPersonPreset = presets.value.find(p => p.name === '第二人称');
-                const thirdPersonPreset = presets.value.find(p => p.name === '第三人称');
-
-                if (user.person === 'second') {
-                    if (secondPersonPreset) secondPersonPreset.enabled = true;
-                    if (thirdPersonPreset) thirdPersonPreset.enabled = false;
-                } else {
-                    if (secondPersonPreset) secondPersonPreset.enabled = false;
-                    if (thirdPersonPreset) thirdPersonPreset.enabled = true;
-                }
+                applyPersonPresetSelection(tempUserSetup.person);
 
                 showUserSetupModal.value = false;
                 saveData();
@@ -9326,21 +9440,8 @@ createApp({
             // Person Toggle Logic
             isSecondPerson: computed(() => user.person !== 'third'),
             togglePerson: (person) => {
-                user.person = person; // 更新偏好
-
-                // 应用到预设
-                const secondPersonPreset = presets.value.find(p => p.name === '第二人称');
-                const thirdPersonPreset = presets.value.find(p => p.name === '第三人称');
-
-                if (person === 'second') {
-                    if (secondPersonPreset) secondPersonPreset.enabled = true;
-                    if (thirdPersonPreset) thirdPersonPreset.enabled = false;
-                    showToast('已切换至第二人称视角', 'success');
-                } else {
-                    if (secondPersonPreset) secondPersonPreset.enabled = false;
-                    if (thirdPersonPreset) thirdPersonPreset.enabled = true;
-                    showToast('已切换至第三人称视角', 'success');
-                }
+                applyPersonPresetSelection(person);
+                showToast(user.person === 'second' ? '已切换至第二人称视角' : '已切换至第三人称视角', 'success');
                 saveData();
             },
 
@@ -9359,4 +9460,9 @@ createApp({
             }
         };
     }
-}).mount('#app');
+});
+
+// 公共弹窗部件需要全局注册，供其他弹窗组件内部直接复用。
+app.component('ModalShell', ModalShell);
+app.component('ModalHeader', ModalHeader);
+app.mount('#app');

@@ -376,10 +376,10 @@
                         :data-role="msg.role"
                         :data-chat-index="index"
                         v-show="!(msg.role === 'assistant' && index === chatHistory.length - 1 && isThinking && !(msg.reasoning || parseCot(msg.content).cot || parseCot(msg.content).main || (msg.toolCalls && msg.toolCalls.length)))"
-                        :class="['flex w-full scroll-reveal-container', settings.immersiveMode ? 'immersive-message-row' : '', msg.isSelf ? 'justify-end' : 'justify-start', msg.skipReveal ? 'reveal-active' : (settings.immersiveMode ? 'scroll-reveal-center' : (msg.isSelf ? 'scroll-reveal-right' : 'scroll-reveal-left'))]"
+                        :class="['flex w-full scroll-reveal-container', settings.immersiveMode ? 'immersive-message-row' : 'standard-message-row', msg.isSelf ? 'justify-end' : 'justify-start', msg.skipReveal ? 'reveal-active' : (settings.immersiveMode ? 'scroll-reveal-center' : (msg.isSelf ? 'scroll-reveal-right' : 'scroll-reveal-left'))]"
                         :style="{ transitionDelay: (displayIndex % 5) * 50 + 'ms' }">
                         <div
-                            :class="['flex md:max-w-[75%] lg:max-w-[70%]', settings.immersiveMode ? 'immersive-message-shell max-w-full' : 'max-w-[99%]', messageUsesWideLayout(msg) ? 'w-full' : '', msg.isSelf ? 'flex-row-reverse' : 'flex-row']">
+                            :class="['flex centered-message-shell max-w-[99%]', settings.immersiveMode ? 'immersive-message-shell' : 'standard-message-shell', messageUsesWideLayout(msg) ? 'w-full' : '', msg.isSelf ? 'flex-row-reverse' : 'flex-row']">
                             <!-- Avatar -->
                             <div v-show="!settings.immersiveMode"
                                 :class="['flex-shrink-0 select-none', msg.shouldAnimate ? 'animate-message-fade-in' : '']">
@@ -408,7 +408,7 @@
                                 </div>
                                 <!-- Message Bubble -->
                                 <div class="group relative"
-                                    :class="{'w-full': messageUsesWideLayout(msg)}">
+                                    :class="{'w-full': messageUsesWideLayout(msg), 'message-edit-group': msg.isEditing_Message}">
                                     <div @click="handleGeneratedImageReroll($event, index)"
                                         :class="['p-0 rounded-2xl shadow-sm text-sm md:text-base leading-relaxed overflow-hidden',
                                         msg.shouldAnimate && !(msg.role === 'assistant' && msg.reasoning) ? 'animate-message-in' : '',
@@ -694,9 +694,9 @@
 
                     <!-- Typing Indicator -->
                     <div v-if="(isGenerating || isRemoteGenerating) && !isReceiving && !isThinking && !hasActiveToolInlineWork"
-                        :class="['flex w-full', settings.immersiveMode ? 'immersive-message-row justify-start' : 'justify-start']">
+                        :class="['flex w-full', settings.immersiveMode ? 'immersive-message-row justify-start' : 'standard-message-row']">
                         <div
-                            :class="['flex flex-row', settings.immersiveMode ? 'immersive-message-shell max-w-[99%]' : 'max-w-[99%] md:max-w-[75%] lg:max-w-[70%]']">
+                            :class="['flex flex-row centered-message-shell max-w-[99%]', settings.immersiveMode ? 'immersive-message-shell' : 'standard-message-shell']">
                             <div v-show="!settings.immersiveMode" class="flex-shrink-0 animate-message-in"
                                 style="animation-delay: 100ms;">
                                 <img :src="currentCharacter?.avatar"
@@ -1058,28 +1058,12 @@
                     </div>
                 </div>
 
-                <!-- Mobile View (Grid) -->
-                <div v-if="!isDesktopCharacterLayout" class="grid grid-cols-2 gap-4">
-                    <character-card v-for="char in displayedCharacters" :key="'mobile-'+char.uuid"
-                        mobile :char="char"
-                        :active="currentCharacter?.uuid === char.uuid"
-                        :loading="switchingCharacterIndex === char.originalIndex"
-                        :batch-mode="isBatchDeleteMode"
-                        :selected="selectedCharacterIndices.has(char.originalIndex)"
-                        :favorite="isCharacterFavorite(char)"
-                        :world-info-count="char.worldInfoCount"
-                        :regex-count="char.regexCount"
-                        @select="isBatchDeleteMode ? toggleCharacterSelection(char.originalIndex) : selectCharacter(char.originalIndex)"
-                        @edit="editCharacter(char.originalIndex)"
-                        @export-card="openCharacterExportModal(char.originalIndex)"
-                        @toggle-favorite="toggleCharacterFavorite(char.originalIndex)">
-                    </character-card>
-                </div>
-
-                <!-- Desktop View (Grid) -->
-                <div v-if="isDesktopCharacterLayout" class="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    <character-card v-for="char in displayedCharacters" :key="char.uuid"
-                        :char="char"
+                <div :class="isDesktopCharacterLayout
+                    ? 'grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
+                    : 'grid grid-cols-2 gap-4'">
+                    <character-card v-for="char in displayedCharacters"
+                        :key="(isDesktopCharacterLayout ? 'desktop-' : 'mobile-') + char.uuid"
+                        :mobile="!isDesktopCharacterLayout" :char="char"
                         :active="currentCharacter?.uuid === char.uuid"
                         :loading="switchingCharacterIndex === char.originalIndex"
                         :batch-mode="isBatchDeleteMode"
@@ -1572,77 +1556,23 @@
 
                                 <!-- Model Configuration Inputs -->
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
-                                    <div class="group">
+                                    <div v-for="preset in modelPresetOptions" :key="preset.field" class="group">
                                         <label
-                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">预设模型①</label>
+                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">{{ preset.label }}</label>
                                         <div class="relative flex-1 group"
-                                            @click="openModelSelector('qualityModel')">
+                                            @click="openModelSelector(preset.field)">
                                             <div
                                                 class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-teal-500 transition-colors pointer-events-none z-10">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor"
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z">
-                                                    </path>
+                                                        stroke-width="2" :d="preset.iconPath"></path>
                                                 </svg>
                                             </div>
                                             <div
                                                 class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl pl-11 pr-4 py-3 text-gray-800 font-medium flex items-center justify-between cursor-pointer hover:bg-white hover:border-teal-300 hover:shadow-md transition-all active:scale-[0.99]">
-                                                <span class="truncate mr-2 font-mono text-sm">{{ settings.qualityModel
+                                                <span class="truncate mr-2 font-mono text-sm">{{ settings[preset.field]
                                                     || '请选择模型' }}</span>
-                                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor"
-                                                    viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                                </svg>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="group">
-                                        <label
-                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">预设模型②</label>
-                                        <div class="relative flex-1 group"
-                                            @click="openModelSelector('balancedModel')">
-                                            <div
-                                                class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-teal-500 transition-colors pointer-events-none z-10">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor"
-                                                    viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3">
-                                                    </path>
-                                                </svg>
-                                            </div>
-                                            <div
-                                                class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl pl-11 pr-4 py-3 text-gray-800 font-medium flex items-center justify-between cursor-pointer hover:bg-white hover:border-teal-300 hover:shadow-md transition-all active:scale-[0.99]">
-                                                <span class="truncate mr-2 font-mono text-sm">{{ settings.balancedModel
-                                                    || '请选择模型' }}</span>
-                                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor"
-                                                    viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                                </svg>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="group">
-                                        <label
-                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">预设模型③</label>
-                                        <div class="relative flex-1 group"
-                                            @click="openModelSelector('fastModel')">
-                                            <div
-                                                class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-teal-500 transition-colors pointer-events-none z-10">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor"
-                                                    viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                                                </svg>
-                                            </div>
-                                            <div
-                                                class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl pl-11 pr-4 py-3 text-gray-800 font-medium flex items-center justify-between cursor-pointer hover:bg-white hover:border-teal-300 hover:shadow-md transition-all active:scale-[0.99]">
-                                                <span class="truncate mr-2 font-mono text-sm">{{ settings.fastModel ||
-                                                    '请选择模型' }}</span>
                                                 <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor"
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
