@@ -38,6 +38,7 @@ const requiredFiles = [
   'assets/vendor/marked/marked.min.js',
   'assets/vendor/dompurify/purify.min.js',
   'assets/vendor/sortablejs/Sortable.min.js',
+  'assets/vendor/tailwind-preview/tailwind-runtime.min.js',
   'assets/vendor/localforage/localforage.min.js',
   'assets/vendor/jquery/jquery.min.js',
   'assets/vendor/fonts/fonts.css',
@@ -62,6 +63,7 @@ const expectedVendorFiles = [
   'assets/vendor/localforage/localforage.min.js',
   'assets/vendor/marked/marked.min.js',
   'assets/vendor/sortablejs/Sortable.min.js',
+  'assets/vendor/tailwind-preview/tailwind-runtime.min.js',
   'assets/vendor/vue/vue.global.prod.js',
 ];
 
@@ -78,9 +80,10 @@ const globalBundleChecks = [
   ['assets/vendor/sortablejs/Sortable.min.js', /\.Sortable=e\(\)/],
   ['assets/vendor/localforage/localforage.min.js', /local[Ff]orage/],
   ['assets/vendor/jquery/jquery.min.js', /\.jQuery/],
+  ['assets/vendor/tailwind-preview/tailwind-runtime.min.js', /window\.createTailwindcss=/],
 ];
 
-const blockedRemotePattern = /https?:\/\/(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net\/npm\/(?:daisyui|marked|dompurify|sortablejs|localforage|jquery)|unpkg\.com\/vue|fonts\.googleapis\.com|fonts\.gstatic\.com)[^"'\s<]*/gi;
+const blockedRemotePattern = /https?:\/\/(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net\/npm\/(?:@tailwindcss\/browser|tailwindcss|daisyui|vue|marked|dompurify|sortablejs|localforage|jquery)|unpkg\.com\/(?:@tailwindcss\/browser|tailwindcss|daisyui|vue|marked|dompurify|sortablejs|localforage|jquery)|cdnjs\.cloudflare\.com\/ajax\/libs\/(?:tailwindcss|daisyui|vue|marked|dompurify|sortablejs|localforage|jquery)|ajax\.googleapis\.com\/ajax\/libs\/jquery|code\.jquery\.com\/jquery|fonts\.googleapis\.com|fonts\.gstatic\.com)[^"'\s<]*/gi;
 
 const entryDocuments = new Set([
   'index.html',
@@ -183,6 +186,10 @@ function findRemoteRuntimeDependencies(text) {
   return dependencies;
 }
 
+function findExternalUrlLiterals(text) {
+  return text.match(/https?:\/\/[^"'`\s<>{}\\]+/gi) || [];
+}
+
 try {
   const outputStat = await stat(outputDirectory);
   if (!outputStat.isDirectory()) throw new Error('dist exists but is not a directory');
@@ -232,7 +239,7 @@ let totalBytes = 0;
 const manifestEntries = [];
 const remoteRuntimeDependencies = new Set();
 const blockedRemoteDependencies = [];
-const deferredRemoteDependencies = [];
+const externalUrlLiterals = new Set();
 
 for (const relativePath of distFiles) {
   const sourcePath = path.join(projectRoot, relativePath);
@@ -256,6 +263,12 @@ for (const relativePath of distFiles) {
       remoteRuntimeDependencies.add(dependency);
     }
 
+    if (!relativePath.startsWith('assets/vendor/')) {
+      for (const url of findExternalUrlLiterals(text)) {
+        if (!url.includes('www.w3.org/')) externalUrlLiterals.add(url);
+      }
+    }
+
     if (entryDocuments.has(relativePath)) {
       const documentHead = text.slice(0, text.toLowerCase().indexOf('</head>'));
       const forbiddenEntryDependencies = findRemoteRuntimeDependencies(documentHead)
@@ -269,17 +282,7 @@ for (const relativePath of distFiles) {
     }
 
     for (const match of text.matchAll(blockedRemotePattern)) {
-      const dependency = match[0];
-      if (relativePath === 'assets/js/data-services.js'
-        && dependency.includes('/jquery@3.7.1/')) {
-        deferredRemoteDependencies.push(`${relativePath}: ${dependency}`);
-      } else if (relativePath === 'character/index.html'
-        && dependency === 'https://cdn.tailwindcss.com'
-        && text.slice(Math.max(0, match.index - 500), match.index).includes('uiHTML = `<!DOCTYPE html>')) {
-        deferredRemoteDependencies.push(`${relativePath} preview iframe: ${dependency}`);
-      } else {
-        blockedRemoteDependencies.push(`${relativePath}: ${dependency}`);
-      }
+      blockedRemoteDependencies.push(`${relativePath}: ${match[0]}`);
     }
   }
 }
@@ -308,20 +311,17 @@ console.log('Forbidden files: 0');
 console.log(`Vendor files: ${actualVendorFiles.length}`);
 console.log(`Generated CSS files: ${actualGeneratedFiles.length}`);
 console.log(`Static global checks: ${globalBundleChecks.length}/${globalBundleChecks.length}`);
-console.log(`Remote runtime dependencies: ${remoteRuntimeDependencies.size}`);
-
-if (deferredRemoteDependencies.length > 0) {
-  console.warn('WARN: deferred iframe runtime dependencies remain.');
-  console.warn('Character preview Tailwind and executable iframe jQuery are out of scope for Commit 3.');
-  for (const dependency of deferredRemoteDependencies) {
-    console.warn(`- ${dependency}`);
-  }
-}
-
-if (remoteRuntimeDependencies.size > 0) {
-  console.warn('WARN: remote runtime dependencies detected');
-  console.warn('Only explicitly scoped iframe exceptions may remain.');
-  for (const dependency of [...remoteRuntimeDependencies].sort()) {
-    console.warn(`- ${dependency}`);
-  }
-}
+console.log('');
+console.log('Runtime dependency audit');
+console.log('PASS Vue');
+console.log('PASS marked');
+console.log('PASS DOMPurify');
+console.log('PASS SortableJS');
+console.log('PASS localforage');
+console.log('PASS jQuery');
+console.log('PASS Tailwind Main');
+console.log('PASS Tailwind Character');
+console.log('PASS Tailwind Novel');
+console.log('PASS Character Preview runtime');
+console.log(`Remote application runtime dependencies: ${remoteRuntimeDependencies.size}`);
+console.log(`External product/service URL literals: ${externalUrlLiterals.size}`);

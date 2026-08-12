@@ -14,6 +14,7 @@ const browserBundles = [
   ['sortablejs/Sortable.min.js', 'sortablejs/Sortable.min.js'],
   ['localforage/dist/localforage.min.js', 'localforage/localforage.min.js'],
   ['jquery/dist/jquery.min.js', 'jquery/jquery.min.js'],
+  ['@mhsdesign/jit-browser-tailwindcss/dist/cdn.min.js', 'tailwind-preview/tailwind-runtime.min.js'],
 ];
 
 const fontFiles = [

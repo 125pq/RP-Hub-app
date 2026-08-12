@@ -1726,6 +1726,8 @@
                 };
                 const normalizeFontFamily = (value) => ['modern', 'serif', 'system'].includes(value) ? value : 'modern';
                 const getWorkshopFontCss = (value = document.documentElement.dataset.appFont) => fontFamilyCssMap[normalizeFontFamily(value)];
+                const getLocalAssetUrl = (relativePath) => new URL(relativePath, window.location.href).href;
+                const previewTailwindRuntimeUrl = getLocalAssetUrl('../assets/vendor/tailwind-preview/tailwind-runtime.min.js');
                 const applyFontFamily = (value) => {
                     document.documentElement.dataset.appFont = normalizeFontFamily(value);
                 };
@@ -2303,7 +2305,90 @@
                         textContent = fullText.replace(htmlMatch[0], '').trim();
                     } else {
                         // 如果没有检测到 HTML 块，则提供一个基础的 HTML 结构，以便注入样式和脚本并显示正文
-                        uiHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><script src="https://cdn.tailwindcss.com"></` + `script></head><body class="bg-base-100 p-4"></body></html>`;
+                        const tailwindRuntime = `
+                            <script src="${previewTailwindRuntimeUrl}"><\/script>
+                            <script>
+                                (function () {
+                                    window.tailwind = window.tailwind || {};
+
+                                    function startTailwindRuntime() {
+                                        if (typeof window.createTailwindcss !== 'function') {
+                                            console.error('Local Tailwind preview runtime failed to load.');
+                                            return;
+                                        }
+
+                                        var compiler = window.createTailwindcss({
+                                            tailwindConfig: window.tailwind.config || {}
+                                        });
+                                        var style = document.createElement('style');
+                                        style.id = 'rp-hub-preview-tailwind';
+                                        document.head.appendChild(style);
+
+                                        var timer = null;
+                                        var compiling = false;
+                                        var rerun = false;
+
+                                        async function compilePreviewStyles() {
+                                            if (compiling) {
+                                                rerun = true;
+                                                return;
+                                            }
+
+                                            compiling = true;
+                                            try {
+                                                compiler.setTailwindConfig(window.tailwind.config || {});
+                                                style.textContent = await compiler.generateStylesFromContent(
+                                                    '@tailwind base;\\n@tailwind components;\\n@tailwind utilities;',
+                                                    [document.documentElement.outerHTML]
+                                                );
+                                            } catch (error) {
+                                                console.error('Failed to compile preview Tailwind styles:', error);
+                                            } finally {
+                                                compiling = false;
+                                                if (rerun) {
+                                                    rerun = false;
+                                                    scheduleCompile();
+                                                }
+                                            }
+                                        }
+
+                                        function scheduleCompile() {
+                                            if (timer !== null) clearTimeout(timer);
+                                            timer = setTimeout(function () {
+                                                timer = null;
+                                                compilePreviewStyles();
+                                            }, 0);
+                                        }
+
+                                        var observer = new MutationObserver(function (mutations) {
+                                            var needsCompile = mutations.some(function (mutation) {
+                                                if (mutation.type === 'attributes') return true;
+                                                return Array.prototype.some.call(mutation.addedNodes, function (node) {
+                                                    return node.nodeType === Node.ELEMENT_NODE
+                                                        && node.id !== 'rp-hub-preview-tailwind';
+                                                });
+                                            });
+                                            if (needsCompile) scheduleCompile();
+                                        });
+
+                                        observer.observe(document.documentElement, {
+                                            attributes: true,
+                                            attributeFilter: ['class'],
+                                            childList: true,
+                                            subtree: true
+                                        });
+                                        scheduleCompile();
+                                    }
+
+                                    if (document.readyState === 'loading') {
+                                        document.addEventListener('DOMContentLoaded', startTailwindRuntime, { once: true });
+                                    } else {
+                                        startTailwindRuntime();
+                                    }
+                                })();
+                            <\/script>
+                        `;
+                        uiHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">${tailwindRuntime}</head><body class="bg-base-100 p-4"></body></html>`;
                         textContent = fullText;
                     }
 

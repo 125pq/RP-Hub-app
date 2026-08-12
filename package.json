@@ -12,6 +12,7 @@
     "@fontsource-variable/lora": "5.2.8",
     "@fontsource/ma-shan-zheng": "5.2.8",
     "@fontsource/noto-serif-sc": "5.2.8",
+    "@mhsdesign/jit-browser-tailwindcss": "0.4.2",
     "daisyui": "4.12.24",
     "dompurify": "3.0.6",
     "jquery": "3.7.1",
