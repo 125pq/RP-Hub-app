@@ -457,7 +457,14 @@
                                         </div>
 
                                         <div v-else class="message-content-wrapper"
-                                            :class="{'w-full': messageUsesWideLayout(msg)}">
+                                            :class="{'w-full': messageUsesWideLayout(msg), 'has-user-images': msg.role === 'user' && Array.isArray(msg.imageAttachments) && msg.imageAttachments.length}">
+                                            <div v-if="msg.role === 'user' && Array.isArray(msg.imageAttachments) && msg.imageAttachments.length"
+                                                :class="['grid gap-1.5 p-1', msg.imageAttachments.length === 1 ? 'grid-cols-1 w-fit' : 'grid-cols-2 w-[min(24rem,78vw)]']">
+                                                <img v-for="(image, imageIndex) in msg.imageAttachments"
+                                                    :key="`${index}-image-${imageIndex}`" :src="image.dataUrl"
+                                                    :class="['block rounded-xl bg-white', msg.imageAttachments.length === 1 ? 'justify-self-start w-auto max-w-[min(24rem,78vw)] h-auto max-h-[26rem] object-contain' : ('w-full ' + (msg.imageAttachments.length === 3 && imageIndex === 0 ? 'col-span-2 h-48 object-cover' : 'h-36 object-cover'))]"
+                                                    :alt="`用户发送的图片 ${imageIndex + 1}`">
+                                            </div>
                                                                                         <!-- Unified Summary Timeline Part -->
                                             <div v-if="hasThinkingOrTools(msg)" class="native-thinking-wrapper">
                                                 <div class="cot-ui native-thinking-card summary-timeline-card"
@@ -728,10 +735,47 @@
                 <div
                     class="absolute bottom-0 left-0 right-0 w-full p-2 md:p-3 z-30 pointer-events-none flex justify-center flex-shrink-0 transition-all duration-300 input-area-mobile">
                     <div
-                        class="w-full max-w-lg pointer-events-auto p-2.5 md:p-3 bg-white/90 backdrop-blur-xl border border-white/40 shadow-lg rounded-3xl ring-1 ring-black/5 transition-all duration-300 flex flex-col input-island">
+                        class="relative w-full max-w-lg md:max-w-[30rem] pointer-events-auto p-2.5 md:p-3 bg-white/90 backdrop-blur-xl border border-white/40 shadow-lg rounded-3xl ring-1 ring-black/5 transition-all duration-300 flex flex-col input-island">
+                        <div v-if="pendingChatImages.length"
+                            class="absolute left-3 bottom-[calc(100%+0.65rem)] z-[2] flex flex-nowrap gap-2.5 w-max max-w-[calc(100%-1.5rem)] overflow-x-auto py-1 pr-1">
+                            <div v-for="image in pendingChatImages" :key="image.id"
+                                class="relative w-24 h-24 md:w-[7.5rem] md:h-[7.5rem] flex-none overflow-hidden rounded-xl bg-transparent shadow-lg"
+                                :title="image.status === 'ready' ? image.description : (image.error || '正在识别图片')">
+                                <img :src="image.dataUrl" :alt="image.name" class="w-full h-full object-cover">
+                                <div v-if="image.status !== 'ready'"
+                                    :class="['absolute inset-0 flex flex-col items-center justify-center gap-1 text-[10px] font-semibold text-white', image.status === 'error' ? 'bg-red-700/75' : 'bg-slate-900/55']">
+                                    <svg v-if="image.status === 'analyzing'" class="generated-image-spinner"
+                                        style="width: 2.75rem; height: 2.75rem" viewBox="0 0 50 50" aria-label="正在识别图片">
+                                        <circle class="generated-image-spinner-path" cx="25" cy="25" r="20"
+                                            fill="none" stroke-width="2"></circle>
+                                    </svg>
+                                    <span v-else>识别失败</span>
+                                </div>
+                                <button type="button" @click.stop="removePendingChatImage(image.id)" title="移除图片"
+                                    class="absolute top-1 right-1 z-[2] flex items-center justify-center w-5 h-5 rounded-full bg-slate-900/70 text-white shadow-sm"
+                                    aria-label="移除图片">
+                                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
                         <div class="relative w-full flex justify-between items-center mb-2 px-1">
                             <!-- Left controls: AutoImage -->
                             <div class="flex items-center gap-2">
+                                <!-- Send Image Button -->
+                                <button type="button" @click="requestChatImageSelection($refs.chatImageInput)"
+                                    :disabled="isConversationBusy"
+                                    class="relative rounded-full w-8 h-8 flex items-center justify-center border transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed bg-white text-gray-500 hover:text-primary-600 hover:bg-gray-50 border-gray-200 shadow-sm"
+                                    :title="`发送图片（${pendingChatImages.length + pendingChatImageReadCount}/3）`">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94a3 3 0 114.243 4.243L8.552 18.32a1.5 1.5 0 01-2.121-2.121l7.693-7.693">
+                                        </path>
+                                    </svg>
+                                </button>
+                                <input ref="chatImageInput" type="file" accept="image/*" multiple class="hidden"
+                                    @change="handleChatImageSelection">
                                 <!-- Auto Image Button -->
                                 <button @click="toggleAutoImageGen"
                                     :class="[isAutoImageGenEnabled ? 'bg-primary-500 text-white shadow-primary-500/30 border-primary-500' : 'bg-white text-gray-500 hover:text-gray-700 hover:bg-gray-50 border-gray-200 shadow-sm']"
@@ -824,67 +868,54 @@
                                         leave-to-class="opacity-0 translate-y-2 scale-95">
                                         <div v-if="showChatModelSelector"
                                             class="absolute bottom-full right-0 mb-3 md:mb-4 z-50 pointer-events-auto w-[min(22rem,calc(100vw-1rem))] md:w-[min(24rem,calc(100vw-2rem))] transform-gpu origin-bottom-right">
-                                            <div
-                                                class="bg-white/95 backdrop-blur-xl border border-gray-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.12)] rounded-2xl p-2 flex flex-col gap-1.5 ring-1 ring-black/5 max-w-full overflow-hidden">
-                                                <button @click="modelMode = 'quality'; showChatModelSelector = false"
-                                                    :class="['w-full min-w-0 px-3.5 py-2.5 rounded-xl text-[13px] md:text-sm font-semibold transition-all duration-200 flex items-center justify-between active:scale-[0.98]', modelMode === 'quality' ? 'bg-primary-50/80 text-primary-700 shadow-sm font-bold' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900']">
-                                                    <span class="truncate min-w-0 flex-1 text-left pr-3"
-                                                        :title="settings.qualityModel">{{ settings.qualityModel }}</span>
-                                                    <svg v-if="modelMode === 'quality'"
-                                                        class="w-4 h-4 text-primary-600 flex-shrink-0" fill="none"
-                                                        stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round"
-                                                            stroke-width="2.5" d="M5 13l4 4L19 7"></path>
-                                                    </svg>
-                                                </button>
-                                                <button @click="modelMode = 'balanced'; showChatModelSelector = false"
-                                                    :class="['w-full min-w-0 px-3.5 py-2.5 rounded-xl text-[13px] md:text-sm font-semibold transition-all duration-200 flex items-center justify-between active:scale-[0.98]', modelMode === 'balanced' ? 'bg-primary-50/80 text-primary-700 shadow-sm font-bold' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900']">
-                                                    <span class="truncate min-w-0 flex-1 text-left pr-3"
-                                                        :title="settings.balancedModel">{{ settings.balancedModel }}</span>
-                                                    <svg v-if="modelMode === 'balanced'"
-                                                        class="w-4 h-4 text-primary-600 flex-shrink-0" fill="none"
-                                                        stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round"
-                                                            stroke-width="2.5" d="M5 13l4 4L19 7"></path>
-                                                    </svg>
-                                                </button>
-                                                <button @click="modelMode = 'fast'; showChatModelSelector = false"
-                                                    :class="['w-full min-w-0 px-3.5 py-2.5 rounded-xl text-[13px] md:text-sm font-semibold transition-all duration-200 flex items-center justify-between active:scale-[0.98]', modelMode === 'fast' ? 'bg-primary-50/80 text-primary-700 shadow-sm font-bold' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900']">
-                                                    <span class="truncate min-w-0 flex-1 text-left pr-3"
-                                                        :title="settings.fastModel">{{ settings.fastModel }}</span>
-                                                    <svg v-if="modelMode === 'fast'"
-                                                        class="w-4 h-4 text-primary-600 flex-shrink-0" fill="none"
-                                                        stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round"
-                                                            stroke-width="2.5" d="M5 13l4 4L19 7"></path>
-                                                    </svg>
-                                                </button>
+                                            <div @click.stop
+                                                class="bg-white/95 backdrop-blur-xl border border-gray-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.12)] rounded-2xl p-3 flex flex-col gap-3 ring-1 ring-black/5 max-w-full overflow-hidden">
+                                                <div class="flex items-center justify-between px-0.5">
+                                                    <span class="text-sm font-bold text-gray-700">聊天模型</span>
+                                                    <span class="text-xs text-gray-400">快捷切换</span>
+                                                </div>
+                                                <div class="flex flex-col gap-1.5">
+                                                    <button v-for="(slot, slotIndex) in chatModelSlots" :key="slot.mode"
+                                                        type="button" @click="selectChatModelSlot(slot)"
+                                                        :disabled="!slot.model"
+                                                        :class="['flex min-w-0 items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all', modelMode === slot.mode && slot.model ? 'border-primary-300 bg-primary-50 text-primary-700 shadow-sm' : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50', !slot.model ? 'cursor-not-allowed opacity-45' : 'active:scale-[0.98]']">
+                                                        <span class="flex-none text-xs font-bold">槽位 {{ slotIndex + 1 }}</span>
+                                                        <span class="min-w-0 flex-1 truncate text-right text-xs font-mono" :title="slot.model">{{ slot.model || '未配置' }}</span>
+                                                    </button>
+                                                </div>
+                                                <div class="border-t border-gray-100 pt-4 space-y-5">
+                                                    <div>
+                                                        <div class="mb-2 flex items-center justify-between">
+                                                            <span class="text-xs font-bold text-gray-500">推理强度</span>
+                                                            <span class="text-xs font-semibold text-gray-500">{{ reasoningEffortLabel }}</span>
+                                                        </div>
+                                                        <input v-model.number="reasoningEffortSlider" type="range" min="0" max="5" step="1"
+                                                            class="compact-range block w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                                                            aria-label="推理强度">
+                                                    </div>
+                                                    <div>
+                                                        <div class="mb-2 flex items-center justify-between">
+                                                            <span class="text-xs font-bold text-gray-500">温度</span>
+                                                            <span class="text-xs font-mono font-semibold text-gray-500 tabular-nums">{{ Number(settings.temperature).toFixed(2) }}</span>
+                                                        </div>
+                                                        <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.01"
+                                                            class="compact-range block w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </transition>
 
                                     <!-- Current Model Toggle Button -->
                                     <button @click.stop="showChatModelSelector = !showChatModelSelector"
-                                        class="px-3.5 py-1.5 rounded-full text-[10px] md:text-xs font-bold transition-all duration-300 flex items-center bg-white hover:bg-gray-50 border border-gray-200 shadow-sm active:scale-95 text-primary-600"
+                                        class="w-8 h-8 rounded-full transition-all duration-300 flex items-center justify-center bg-white text-gray-500 hover:text-gray-700 hover:bg-gray-50 border border-gray-200 shadow-sm active:scale-95"
                                         title="切换模型">
-                                        <svg v-if="modelMode === 'quality'" class="w-3.5 h-3.5 mr-1" fill="none"
-                                            stroke="currentColor" viewBox="0 0 24 24">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                            aria-hidden="true">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z">
+                                                d="M4 6h5m4 0h7M9 4v4M4 12h10m4 0h2m-6-2v4M4 18h3m4 0h9m-13-2v4">
                                             </path>
                                         </svg>
-                                        <svg v-else-if="modelMode === 'balanced'" class="w-3.5 h-3.5 mr-1" fill="none"
-                                            stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3">
-                                            </path>
-                                        </svg>
-                                        <svg v-else class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor"
-                                            viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                                        </svg>
-                                        模型
                                     </button>
                                 </div>
                             </div>
@@ -898,7 +929,8 @@
 
                             <!-- Send/Stop Button -->
                             <div class="flex-shrink-0 flex items-center gap-1">
-                                <button v-if="!isConversationBusy" @click="sendMessage" :disabled="!userInput.trim()"
+                                <button v-if="!isConversationBusy" @click="sendMessage"
+                                    :disabled="(!userInput.trim() && pendingChatImages.length === 0) || isRecognizingImages || pendingChatImages.some(image => image.status !== 'ready')"
                                     class="p-2 md:p-2.5 bg-primary-600 text-white rounded-2xl md:hover:bg-primary-700 md:hover:shadow-lg md:hover:-translate-y-0.5 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all shadow-md flex items-center justify-center w-[44px] h-[44px] md:w-[46px] md:h-[46px]"
                                     title="发送">
                                     <svg class="w-5 h-5 transform rotate-90" fill="none"
@@ -1556,23 +1588,21 @@
 
                                 <!-- Model Configuration Inputs -->
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
-                                    <div v-for="preset in modelPresetOptions" :key="preset.field" class="group">
+                                    <div class="group order-1">
                                         <label
-                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">{{ preset.label }}</label>
-                                        <div class="relative flex-1 group"
-                                            @click="openModelSelector(preset.field)">
+                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">聊天模型</label>
+                                        <div class="relative flex-1 group" @click="openModelSelector('quickModels')">
                                             <div
                                                 class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-teal-500 transition-colors pointer-events-none z-10">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor"
-                                                    viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2" :d="preset.iconPath"></path>
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                        d="M4 6h16M4 12h16M4 18h16"></path>
                                                 </svg>
                                             </div>
                                             <div
                                                 class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl pl-11 pr-4 py-3 text-gray-800 font-medium flex items-center justify-between cursor-pointer hover:bg-white hover:border-teal-300 hover:shadow-md transition-all active:scale-[0.99]">
-                                                <span class="truncate mr-2 font-mono text-sm">{{ settings[preset.field]
-                                                    || '请选择模型' }}</span>
+                                                <span class="truncate mr-2 text-sm">已配置 {{ [settings.qualityModel,
+                                                    settings.balancedModel, settings.fastModel].filter(Boolean).length }} / 3 个槽位</span>
                                                 <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor"
                                                     viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round"
@@ -1581,21 +1611,55 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <!-- 温度：移动端位于预设模型③下方，桌面端位于其右侧 -->
-                                    <div
-                                        class="bg-gray-50/60 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200">
-                                        <div class="flex justify-between items-center mb-3">
+                                    <div class="group order-4 self-start w-full">
+                                        <div class="flex items-center justify-between mb-2 px-1">
                                             <label
                                                 class="text-xs font-bold text-gray-500 uppercase tracking-wider">温度</label>
-                                            <span
-                                                class="text-xs font-mono text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-100">{{
-                                                settings.temperature }}</span>
+                                            <span class="text-xs font-mono font-semibold text-gray-500 tabular-nums">{{
+                                                Number(settings.temperature).toFixed(2) }}</span>
                                         </div>
-                                        <input v-model.number="settings.temperature" type="range" min="0" max="1"
-                                            step="0.01"
-                                            class="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-teal-500 hover:accent-teal-400 transition-all">
+                                        <div
+                                            class="h-12 flex items-center px-4 bg-gray-50/60 border-2 border-gray-100 rounded-xl hover:bg-white hover:border-teal-300 hover:shadow-md transition-all">
+                                            <input v-model.number="settings.temperature" type="range" min="0" max="1"
+                                                step="0.01"
+                                                class="compact-range w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-teal-500 hover:accent-teal-400 transition-all">
+                                        </div>
                                     </div>
-                                    <div class="group col-span-1 md:col-span-2 mt-2">
+                                    <div class="group order-3 self-start w-full">
+                                        <div class="flex items-center justify-between mb-2 px-1">
+                                            <label
+                                                class="text-xs font-bold text-gray-500 uppercase tracking-wider">推理强度</label>
+                                            <span class="text-xs font-semibold text-gray-500">{{ reasoningEffortLabel }}</span>
+                                        </div>
+                                        <div
+                                            class="h-12 flex items-center px-4 bg-gray-50/60 border-2 border-gray-100 rounded-xl hover:bg-white hover:border-teal-300 hover:shadow-md transition-all">
+                                            <input v-model.number="reasoningEffortSlider" type="range" min="0" max="5"
+                                                step="1"
+                                                class="compact-range w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-teal-500 hover:accent-teal-400 transition-all"
+                                                aria-label="推理强度">
+                                        </div>
+                                    </div>
+                                    <div class="group order-2">
+                                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">识图模型</label>
+                                        <div class="relative flex-1 group" @click="openModelSelector('visionModel')">
+                                            <div
+                                                class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-teal-500 transition-colors pointer-events-none z-10">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.269 2.943 9.542 7-1.273 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z M15 12a3 3 0 11-6 0 3 3 0 016 0z">
+                                                    </path>
+                                                </svg>
+                                            </div>
+                                            <div
+                                                class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl pl-11 pr-4 py-3 text-gray-800 font-medium flex items-center justify-between cursor-pointer hover:bg-white hover:border-teal-300 hover:shadow-md transition-all active:scale-[0.99]">
+                                                <span class="truncate mr-2 font-mono text-sm">{{ settings.visionModel || '请选择模型' }}</span>
+                                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="group order-6 col-span-1 md:col-span-2 mt-2">
                                         <button @click="fetchModels(true)"
                                             class="w-full px-4 py-3 bg-white hover:bg-teal-50 text-gray-600 hover:text-teal-700 rounded-lg border border-gray-200 hover:border-teal-200 transition-all shadow-sm active:scale-95 whitespace-nowrap font-medium flex items-center justify-center text-sm"
                                             title="刷新列表">
@@ -2268,7 +2332,7 @@
                                             memorySettings.vectorTopK || 10 }} 个分片</span>
                                     </div>
                                     <input type="range" v-model.number="memorySettings.vectorTopK" min="10" max="20" step="1"
-                                        class="w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                        class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                                 </div>
                                 <div class="settings-field">
                                     <div class="flex justify-between items-center mb-2">
@@ -2284,7 +2348,7 @@
                                             }}</span>
                                     </div>
                                     <input type="range" v-model.number="memorySettings.similarityThreshold" min="40" max="65" step="5"
-                                        class="w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                        class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                                 </div>
                             </template>
 
@@ -2354,7 +2418,7 @@
                                     </span>
                                 </div>
                                 <input type="range" v-model.number="memorySettings.classicConcurrency" min="1" max="10" step="1"
-                                    class="w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                    class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                             </div>
 
                             <!-- Context Compression Settings -->
@@ -2374,7 +2438,7 @@
                                             }}</span>
                                     </div>
                                     <input :key="memorySettings.mode" type="range" v-model.number="keepFloorsSlider" :min="keepFloorsSliderMin" :max="keepFloorsSliderMax" step="2"
-                                        class="w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                        class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                                 </div>
                             </div>
                         </div>
@@ -2585,7 +2649,7 @@
                                         worldInfoSettings.scanDepth }}</span>
                                 </div>
                                 <input type="range" v-model.number="worldInfoSettings.scanDepth" min="0" max="20"
-                                    class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-600">
+                                    class="compact-range w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-600">
                             </div>
                             <!-- Max Scan Depth -->
                             <div>
@@ -2595,7 +2659,7 @@
                                         worldInfoSettings.maxDepth }}</span>
                                 </div>
                                 <input type="range" v-model.number="worldInfoSettings.maxDepth" min="0" max="50"
-                                    class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-600">
+                                    class="compact-range w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-600">
                             </div>
                         </div>
                     </div>
@@ -2670,8 +2734,9 @@
         <model-selector-modal :show="showModelSelector" :target="modelSelectionTarget"
             :search-query="modelSearchQuery" :active-tag="activeModelTag" :tags="modelTags"
             :models="filteredModels"
+            :slot-models="[settings.qualityModel, settings.balancedModel, settings.fastModel]"
             :current-model="modelSelectionTarget === 'memoryEmbeddingModel' ? memorySettings.embeddingModel : (modelSelectionTarget === 'memoryClassicModel' ? memorySettings.classicModel : settings[modelSelectionTarget])"
-            @close="showModelSelector = false" @select="selectModel"
+            @close="showModelSelector = false" @select="selectModel" @select-slots="selectQuickModels"
             @update:search-query="modelSearchQuery = $event"
             @update:active-tag="activeModelTag = $event"></model-selector-modal>
 

@@ -153,6 +153,7 @@
                 model: options.model,
                 messages: options.messages,
                 temperature: options.temperature,
+                ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
                 stream: options.stream,
                 ...(options.stream ? { stream_options: { include_usage: true } } : {})
             }),

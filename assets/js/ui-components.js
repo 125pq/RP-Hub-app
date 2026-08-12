@@ -790,19 +790,52 @@
             activeTag: { type: String, default: 'all' },
             tags: { type: Array, default: () => [] },
             models: { type: Array, default: () => [] },
-            currentModel: { type: String, default: '' }
+            currentModel: { type: String, default: '' },
+            slotModels: { type: Array, default: () => [] }
         },
-        emits: ['close', 'select', 'update:search-query', 'update:active-tag'],
+        emits: ['close', 'select', 'select-slots', 'update:search-query', 'update:active-tag'],
+        data() {
+            return {
+                activeSlot: 0,
+                draftSlotModels: ['', '', '']
+            };
+        },
+        watch: {
+            show(visible) {
+                if (visible && this.target === 'quickModels') {
+                    this.activeSlot = 0;
+                    this.draftSlotModels = [0, 1, 2].map(index => this.slotModels[index] || '');
+                }
+            }
+        },
+        methods: {
+            chooseModel(modelId) {
+                if (this.target !== 'quickModels') {
+                    this.$emit('select', modelId);
+                    return;
+                }
+                this.draftSlotModels[this.activeSlot] = this.draftSlotModels[this.activeSlot] === modelId ? '' : modelId;
+                this.draftSlotModels = [...this.draftSlotModels];
+            }
+        },
         template: `
             <transition name="fade">
                 <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-4"
                     panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-2xl max-h-[90vh] h-[90vh] flex flex-col shadow-2xl transform transition-all scale-100">
                         <div class="p-4 border-b border-gray-100 flex justify-between items-center">
-                            <h3 class="text-lg font-bold text-gray-800">选择模型</h3>
+                            <h3 class="text-lg font-bold text-gray-800">{{ target === 'quickModels' ? '聊天模型' : '选择模型' }}</h3>
                             <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 focus:outline-none transition-colors">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
+                            </button>
+                        </div>
+                        <div v-if="target === 'quickModels'" class="grid grid-cols-3 gap-2 p-4 pb-0">
+                            <button v-for="(_, index) in draftSlotModels" :key="index" type="button"
+                                @click="activeSlot = index"
+                                :class="['min-w-0 rounded-xl border px-3 py-2.5 text-left transition-colors', activeSlot === index ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50']">
+                                <span class="block text-xs font-bold mb-1">槽位 {{ index + 1 }}</span>
+                                <span class="block truncate text-[11px] font-mono" :title="draftSlotModels[index]">{{ draftSlotModels[index] || '未选择' }}</span>
                             </button>
                         </div>
                         <div class="p-4 border-b border-gray-100 flex flex-col gap-3">
@@ -831,16 +864,22 @@
                                 未找到模型或正在加载...
                             </div>
                             <div class="space-y-1">
-                                <button v-for="model in models" :key="model.id" @click="$emit('select', model.id)"
+                                <button v-for="model in models" :key="model.id" @click="chooseModel(model.id)"
                                     class="w-full text-left px-4 py-3 rounded-xl hover:bg-gray-50 hover:shadow-[0_2px_4px_rgba(0,0,0,0.02)] transition-colors flex justify-between items-center group border border-transparent hover:border-gray-100 active:bg-gray-100">
                                     <span class="text-gray-700 font-mono font-medium group-hover:text-primary-600 transition-colors">{{ model.id }}</span>
-                                    <span v-if="currentModel === model.id" class="text-primary-600 bg-primary-50 p-1 rounded-full shadow-sm">
+                                    <span v-if="(target === 'quickModels' ? draftSlotModels[activeSlot] : currentModel) === model.id" class="text-primary-600 bg-primary-50 p-1 rounded-full shadow-sm">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                                         </svg>
                                     </span>
                                 </button>
                             </div>
+                        </div>
+                        <div v-if="target === 'quickModels'" class="flex justify-end gap-2 border-t border-gray-100 p-4">
+                            <button type="button" @click="$emit('close')"
+                                class="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">取消</button>
+                            <button type="button" @click="$emit('select-slots', [...draftSlotModels])"
+                                class="px-4 py-2 rounded-lg bg-primary-600 text-sm font-medium text-white hover:bg-primary-700 transition-colors">选择</button>
                         </div>
                 </modal-shell>
             </transition>`
@@ -2124,7 +2163,7 @@
                                         <input type="range" :value="analysisDepth"
                                             @input="$emit('update:analysis-depth', Number($event.target.value))"
                                             min="4" max="10" step="1"
-                                            class="w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                            class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                                     </div>
                                 </div>
                             </div>

@@ -1367,6 +1367,31 @@
             word-break: break-word;
         }
 
+        .message-content-wrapper.has-user-images > .markdown-body > *:first-child {
+            padding-top: 0.4rem;
+        }
+
+        .message-content-wrapper.has-user-images > .markdown-body > *:last-child {
+            padding-bottom: 0.55rem;
+        }
+
+        .compact-range::-webkit-slider-thumb {
+            width: 13px;
+            height: 13px;
+            border-radius: 999px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #3b82f6;
+        }
+
+        .compact-range::-moz-range-thumb {
+            width: 13px;
+            height: 13px;
+            border: 0;
+            border-radius: 999px;
+            background: #3b82f6;
+        }
+
         .markdown-body {
             display: flex;
             flex-direction: column;
