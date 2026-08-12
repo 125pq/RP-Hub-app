@@ -27,7 +27,47 @@ const requiredFiles = [
   'assets/js/runtime-services.js',
   'assets/js/ui-components.js',
   'assets/js/app.js',
+  'assets/vendor/vue/vue.global.prod.js',
+  'assets/vendor/marked/marked.min.js',
+  'assets/vendor/dompurify/purify.min.js',
+  'assets/vendor/sortablejs/Sortable.min.js',
+  'assets/vendor/localforage/localforage.min.js',
+  'assets/vendor/jquery/jquery.min.js',
+  'assets/vendor/fonts/fonts.css',
 ];
+
+const expectedVendorFiles = [
+  'assets/vendor/dompurify/purify.min.js',
+  'assets/vendor/fonts/fonts.css',
+  'assets/vendor/fonts/lora-latin-wght-italic.woff2',
+  'assets/vendor/fonts/lora-latin-wght-normal.woff2',
+  'assets/vendor/fonts/ma-shan-zheng-chinese-simplified-400-normal.woff2',
+  'assets/vendor/fonts/ma-shan-zheng-latin-400-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-chinese-simplified-300-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-chinese-simplified-400-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-chinese-simplified-600-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-chinese-simplified-700-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-latin-300-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-latin-400-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-latin-600-normal.woff2',
+  'assets/vendor/fonts/noto-serif-sc-latin-700-normal.woff2',
+  'assets/vendor/jquery/jquery.min.js',
+  'assets/vendor/localforage/localforage.min.js',
+  'assets/vendor/marked/marked.min.js',
+  'assets/vendor/sortablejs/Sortable.min.js',
+  'assets/vendor/vue/vue.global.prod.js',
+];
+
+const globalBundleChecks = [
+  ['assets/vendor/vue/vue.global.prod.js', /var Vue=function/],
+  ['assets/vendor/marked/marked.min.js', /g\["marked"\]=f\(\)/],
+  ['assets/vendor/dompurify/purify.min.js', /DOMPurify/],
+  ['assets/vendor/sortablejs/Sortable.min.js', /\.Sortable=e\(\)/],
+  ['assets/vendor/localforage/localforage.min.js', /local[Ff]orage/],
+  ['assets/vendor/jquery/jquery.min.js', /\.jQuery/],
+];
+
+const blockedRemotePattern = /https?:\/\/(?:unpkg\.com\/vue|cdn\.jsdelivr\.net\/npm\/(?:marked|dompurify|sortablejs|localforage|jquery)|fonts\.googleapis\.com|fonts\.gstatic\.com)[^"'\s<]*/gi;
 
 const forbiddenPathSegments = new Set([
   '.git',
@@ -136,6 +176,11 @@ try {
 const distFiles = await listFiles(outputDirectory);
 const distFileSet = new Set(distFiles);
 
+const actualVendorFiles = distFiles.filter((relativePath) => relativePath.startsWith('assets/vendor/'));
+if (actualVendorFiles.join('\n') !== expectedVendorFiles.join('\n')) {
+  throw new Error('Vendor output differs from the exact Commit 2 allowlist.');
+}
+
 const missingRequiredFiles = requiredFiles.filter((relativePath) => !distFileSet.has(relativePath));
 if (missingRequiredFiles.length > 0) {
   throw new Error(`Missing required dist files:\n- ${missingRequiredFiles.join('\n- ')}`);
@@ -161,6 +206,8 @@ if (sourceFiles.join('\n') !== distFiles.join('\n')) {
 let totalBytes = 0;
 const manifestEntries = [];
 const remoteRuntimeDependencies = new Set();
+const blockedRemoteDependencies = [];
+const deferredRemoteDependencies = [];
 
 for (const relativePath of distFiles) {
   const sourcePath = path.join(projectRoot, relativePath);
@@ -183,6 +230,27 @@ for (const relativePath of distFiles) {
     for (const dependency of findRemoteRuntimeDependencies(text)) {
       remoteRuntimeDependencies.add(dependency);
     }
+
+    for (const match of text.matchAll(blockedRemotePattern)) {
+      const dependency = match[0];
+      if (relativePath === 'assets/js/data-services.js'
+        && dependency.includes('/jquery@3.7.1/')) {
+        deferredRemoteDependencies.push(`${relativePath}: ${dependency}`);
+      } else {
+        blockedRemoteDependencies.push(`${relativePath}: ${dependency}`);
+      }
+    }
+  }
+}
+
+if (blockedRemoteDependencies.length > 0) {
+  throw new Error(`Remote dependencies that must be local were found:\n- ${blockedRemoteDependencies.join('\n- ')}`);
+}
+
+for (const [relativePath, expectedGlobalPattern] of globalBundleChecks) {
+  const bundle = await readFile(path.join(outputDirectory, relativePath), 'utf8');
+  if (!expectedGlobalPattern.test(bundle)) {
+    throw new Error(`Browser bundle does not expose the expected global: ${relativePath}`);
   }
 }
 
@@ -196,11 +264,21 @@ console.log(`Bytes: ${totalBytes}`);
 console.log(`Manifest SHA-256: ${manifestHash}`);
 console.log(`Source matches: ${sourceFiles.length}/${sourceFiles.length}`);
 console.log('Forbidden files: 0');
+console.log(`Vendor files: ${actualVendorFiles.length}`);
+console.log(`Static global checks: ${globalBundleChecks.length}/${globalBundleChecks.length}`);
 console.log(`Remote runtime dependencies: ${remoteRuntimeDependencies.size}`);
+
+if (deferredRemoteDependencies.length > 0) {
+  console.warn('WARN: jQuery CDN remains inside the existing executable iframe renderer.');
+  console.warn('The owning business JS file is out of scope for Commit 2.');
+  for (const dependency of deferredRemoteDependencies) {
+    console.warn(`- ${dependency}`);
+  }
+}
 
 if (remoteRuntimeDependencies.size > 0) {
   console.warn('WARN: remote runtime dependencies detected');
-  console.warn('These will be localized in Commit 2/3.');
+  console.warn('Tailwind/DaisyUI and the scoped iframe exception are deferred.');
   for (const dependency of [...remoteRuntimeDependencies].sort()) {
     console.warn(`- ${dependency}`);
   }

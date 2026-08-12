@@ -3,7 +3,19 @@
   "version": "1.8.2",
   "private": true,
   "scripts": {
-    "build:web": "node scripts/build-web.mjs",
+    "prepare:vendor": "node scripts/prepare-vendor.mjs",
+    "build:web": "npm run prepare:vendor && node scripts/build-web.mjs",
     "verify:dist": "node scripts/verify-dist.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/lora": "5.2.8",
+    "@fontsource/ma-shan-zheng": "5.2.8",
+    "@fontsource/noto-serif-sc": "5.2.8",
+    "dompurify": "3.0.6",
+    "jquery": "3.7.1",
+    "localforage": "1.10.0",
+    "marked": "15.0.12",
+    "sortablejs": "1.15.6",
+    "vue": "3.5.18"
   }
 }

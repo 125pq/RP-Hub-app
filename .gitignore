@@ -1,6 +1,7 @@
 # Node and deterministic web build output
 node_modules/
 dist/
+assets/vendor/
 npm-debug.log*
 
 # Local Android and Gradle state (the android project itself will be tracked)
