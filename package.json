@@ -1,0 +1,9 @@
+{
+  "name": "rp-hub-app",
+  "version": "1.8.2",
+  "private": true,
+  "scripts": {
+    "build:web": "node scripts/build-web.mjs",
+    "verify:dist": "node scripts/verify-dist.mjs"
+  }
+}

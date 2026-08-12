@@ -1,0 +1,15 @@
+# Node and deterministic web build output
+node_modules/
+dist/
+npm-debug.log*
+
+# Local Android and Gradle state (the android project itself will be tracked)
+.toolchains/
+android/.gradle/
+android/local.properties
+android/**/build/
+
+# Release signing secrets
+*.keystore
+*.jks
+keystore.properties
