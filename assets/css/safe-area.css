@@ -1,0 +1,181 @@
+:root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-bottom-effective: var(--safe-bottom);
+}
+
+.safe-area-keyboard-open,
+.mobile-keyboard-active {
+    --safe-bottom-effective: 0px;
+}
+
+[data-safe-area="toast"],
+.novel-toast,
+.toast-container-custom {
+    top: calc(1rem + var(--safe-top)) !important;
+    max-width: calc(100vw - var(--safe-left) - var(--safe-right));
+}
+
+.safe-modal-overlay,
+.modal,
+#app > [class~="fixed"][class~="inset-0"][class~="items-center"][class~="justify-center"] {
+    padding-top: max(1rem, var(--safe-top)) !important;
+    padding-right: max(1rem, var(--safe-right)) !important;
+    padding-bottom: max(1rem, var(--safe-bottom-effective)) !important;
+    padding-left: max(1rem, var(--safe-left)) !important;
+}
+
+/* Character workshop: the embedded iframe receives live values from its parent WebView. */
+.navbar {
+    box-sizing: content-box;
+    min-height: 3.5rem;
+    height: 3.5rem;
+    padding-top: var(--safe-top);
+    padding-right: calc(0.75rem + var(--safe-right));
+    padding-left: calc(0.75rem + var(--safe-left));
+}
+
+#app .workshop-input-panel {
+    padding-right: calc(1rem + var(--safe-right));
+    padding-bottom: calc(1rem + var(--safe-bottom-effective));
+    padding-left: calc(1rem + var(--safe-left));
+}
+
+#app .drawer-side .menu {
+    padding-top: calc(1rem + var(--safe-top));
+    padding-right: calc(1rem + var(--safe-right));
+    padding-bottom: calc(1rem + var(--safe-bottom-effective));
+    padding-left: calc(1rem + var(--safe-left));
+}
+
+@media (max-width: 768px) {
+    .chat-header-controls {
+        box-sizing: content-box;
+        min-height: 3rem;
+        height: 3rem;
+        padding-top: var(--safe-top);
+        padding-right: calc(1rem + var(--safe-right));
+        padding-left: calc(1rem + var(--safe-left));
+    }
+
+    .desc-panel {
+        top: calc(3.5rem + var(--safe-top)) !important;
+        right: calc(0.75rem + var(--safe-right)) !important;
+        left: calc(0.75rem + var(--safe-left)) !important;
+        max-height: calc(var(--app-visual-height, 100dvh) - var(--safe-top) - var(--safe-bottom-effective) - 5rem) !important;
+    }
+
+    .management-view {
+        padding-top: calc(1rem + var(--safe-top));
+        padding-right: calc(1rem + var(--safe-right));
+        padding-bottom: calc(1rem + var(--safe-bottom-effective));
+        padding-left: calc(1rem + var(--safe-left));
+    }
+
+    .safe-sidebar-header {
+        box-sizing: content-box;
+        padding-top: var(--safe-top);
+        padding-right: var(--safe-right);
+        padding-left: var(--safe-left);
+    }
+
+    .safe-sidebar-footer {
+        padding-right: calc(0.75rem + var(--safe-right));
+        padding-bottom: calc(0.75rem + var(--safe-bottom-effective));
+        padding-left: calc(0.75rem + var(--safe-left));
+    }
+
+    [data-safe-area="embedded-menu"] {
+        left: var(--safe-left) !important;
+    }
+
+    .input-area-mobile {
+        bottom: calc(var(--keyboard-inset, 0px) + var(--safe-bottom-effective)) !important;
+        padding-right: calc(0.5rem + var(--safe-right)) !important;
+        padding-left: calc(0.5rem + var(--safe-left)) !important;
+    }
+
+    .novel-mobile-header {
+        box-sizing: content-box;
+        padding-top: var(--safe-top);
+        padding-right: calc(1rem + var(--safe-right));
+        padding-left: calc(1rem + var(--safe-left));
+    }
+
+    .novel-main-scroll {
+        padding-top: calc(3.5rem + var(--safe-top));
+        padding-right: var(--safe-right);
+        padding-left: var(--safe-left);
+    }
+
+    .novel-sidebar {
+        padding-top: var(--safe-top);
+        padding-bottom: var(--safe-bottom-effective);
+        padding-left: var(--safe-left);
+    }
+
+    .novel-bottom-controls {
+        bottom: calc(1rem + var(--safe-bottom-effective));
+    }
+
+    .novel-floating-nav {
+        right: calc(1rem + var(--safe-right));
+        bottom: calc(14rem + var(--safe-bottom-effective));
+    }
+
+    .novel-review-button {
+        top: calc(5rem + var(--safe-top));
+        right: calc(1rem + var(--safe-right));
+    }
+}
+
+/* Phones that cross the desktop width breakpoint when rotated still need system-bar clearance. */
+@media (orientation: landscape) and (max-height: 768px) {
+    .chat-header-controls {
+        box-sizing: content-box;
+        min-height: 3rem;
+        height: 3rem;
+        padding-top: var(--safe-top);
+        padding-right: calc(1rem + var(--safe-right));
+        padding-left: 1rem;
+    }
+
+    .input-area-mobile {
+        bottom: calc(var(--keyboard-inset, 0px) + var(--safe-bottom-effective)) !important;
+        padding-right: calc(0.75rem + var(--safe-right)) !important;
+    }
+
+    .app-sidebar {
+        box-sizing: border-box;
+        padding-left: var(--safe-left);
+    }
+
+    .safe-sidebar-header {
+        box-sizing: content-box;
+        padding-top: var(--safe-top);
+    }
+
+    .safe-sidebar-footer {
+        padding-bottom: calc(0.75rem + var(--safe-bottom-effective));
+    }
+
+    .management-view {
+        padding-top: calc(1.5rem + var(--safe-top));
+        padding-right: calc(1.5rem + var(--safe-right));
+        padding-bottom: calc(1.5rem + var(--safe-bottom-effective));
+    }
+
+    .novel-sidebar {
+        box-sizing: border-box;
+        padding-top: var(--safe-top);
+        padding-bottom: var(--safe-bottom-effective);
+        padding-left: var(--safe-left);
+    }
+
+    .novel-floating-nav,
+    .novel-review-button {
+        right: calc(2rem + var(--safe-right));
+    }
+}

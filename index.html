@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <title>RP Hub</title>
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
     <!-- <link rel="icon" href="logo.jpg" type="image/jpeg"> -->
@@ -17,6 +17,7 @@
     <script>
         document.write('<link rel="stylesheet" href="assets/css/styles.css?v=' + new Date().getTime() + '">');
     </script>
+    <link href="assets/css/safe-area.css" rel="stylesheet">
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans selection:bg-primary-200 selection:text-primary-900">
     <svg aria-hidden="true" style="display: none">
@@ -69,7 +70,7 @@
             }
         </component>
         <!-- Toast Notification Container -->
-        <div
+        <div data-safe-area="toast"
             class="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none items-center">
             <transition-group name="list" tag="div" class="toast-stack flex flex-col items-center gap-2">
                 <div v-for="toast in toasts" :key="toast.id"
@@ -230,7 +231,7 @@
                         style="background: linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.4) 20%, rgba(0,0,0,0.25) 40%, rgba(0,0,0,0.15) 60%, rgba(0,0,0,0.06) 80%, rgba(0,0,0,0.02) 95%, rgba(0,0,0,0) 100%); pointer-events: none;">
                     </div>
                     <!-- 实际内容容器 -->
-                    <div class="relative h-12 flex items-center justify-between px-4 pointer-events-auto">
+                    <div class="chat-header-controls relative h-12 flex items-center justify-between px-4 pointer-events-auto">
                         <div class="flex items-center min-w-0">
                             <button v-if="!isChatFullscreen" @click="toggleMobileMenu"
                                 class="md:hidden mr-3 text-white/80 hover:text-white transition-colors flex-shrink-0">
@@ -2751,6 +2752,8 @@
         document.write('<script src="assets/js/data-services.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/runtime-services.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/ui-components.js?v=' + new Date().getTime() + '"><\/script>');
+        document.write('<script src="assets/js/platform-services.js?v=' + new Date().getTime() + '"><\/script>');
+        document.write('<script src="assets/js/safe-area.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\/script>');
     </script>
 </body>

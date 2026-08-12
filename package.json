@@ -7,13 +7,17 @@
     "build:css": "node scripts/build-css.mjs",
     "build:web": "npm run prepare:vendor && npm run build:css && node scripts/build-web.mjs",
     "verify:dist": "node scripts/verify-dist.mjs",
+    "test:platform": "node scripts/test-platform-services.mjs",
     "android:sync": "npm run build:web && npx cap sync android",
     "android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-debug.ps1",
     "android:open": "npx cap open android"
   },
   "dependencies": {
     "@capacitor/android": "7.6.8",
+    "@capacitor/app": "7.1.2",
+    "@capacitor/browser": "7.0.5",
     "@capacitor/core": "7.6.8",
+    "@capacitor/share": "7.0.4",
     "@fontsource-variable/lora": "5.2.8",
     "@fontsource/ma-shan-zheng": "5.2.8",
     "@fontsource/noto-serif-sc": "5.2.8",

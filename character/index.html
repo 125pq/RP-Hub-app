@@ -64,6 +64,7 @@
             min-height: 0;
         }
 
+
         .workshop-layout,
         .workshop-content,
         .workshop-main {
@@ -225,7 +226,7 @@
 
                 #app .workshop-scroll {
                     overflow: visible;
-                    padding-bottom: calc(7rem + env(safe-area-inset-bottom));
+                    padding-bottom: calc(7rem + var(--safe-bottom-effective));
                 }
 
                 #app .workshop-input-panel {
@@ -233,7 +234,7 @@
                     right: 0;
                     bottom: 0;
                     left: 0;
-                    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+                    padding-bottom: calc(1rem + var(--safe-bottom-effective));
                 }
 
                 #app * {
@@ -291,6 +292,7 @@
             }
         }
     </style>
+    <link href="../assets/css/safe-area.css" rel="stylesheet">
 </head>
 
 <body class="flex flex-col overflow-hidden bg-base-200/30">

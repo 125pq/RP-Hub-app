@@ -1374,6 +1374,100 @@ const app = createApp({
             showCharacterExportModal.value = true;
         };
 
+        let removePlatformBackListener = () => {};
+        let removePlatformStateListener = () => {};
+        let isNativeAppActive = true;
+
+        const closeBooleanPanel = (panel) => {
+            if (!panel.value) return false;
+            panel.value = false;
+            return true;
+        };
+
+        const handlePlatformBackButton = async () => {
+            if (globalConfirmModal.value.show) {
+                if (typeof globalConfirmModal.value.onCancel === 'function') {
+                    globalConfirmModal.value.onCancel();
+                } else {
+                    globalConfirmModal.value.show = false;
+                }
+                return true;
+            }
+            if (showConfirmModal.value) {
+                handleCancel();
+                return true;
+            }
+
+            const modalPanels = [
+                showStoryBranchNameEditor,
+                showStoryBranchModal,
+                showContextViewerModal,
+                showCharacterExportModal,
+                showExportModal,
+                showActiveToolEditor,
+                showWorldInfoEditor,
+                showRegexEditor,
+                showUiTemplateEditor,
+                showPresetEditor,
+                showCharacterEditor,
+                showAddCharacterMenu,
+                showModelSelector,
+                showNoMemoryNeededModal
+            ];
+            if (modalPanels.some(closeBooleanPanel)) return true;
+
+            // The setup and auto-image dialogs intentionally have no dismiss action.
+            if (showUserSetupModal.value || showAutoImageGenModal.value) return true;
+
+            if (document.querySelector('[role="listbox"]')) {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+                return true;
+            }
+
+            const transientPanels = [
+                showChatModelSelector,
+                showProfileDropdown,
+                showApiProviderSelector,
+                showInstructionPanel,
+                showTokenUsageTimeFilter,
+                showDescriptionPanel
+            ];
+            if (transientPanels.some(closeBooleanPanel)) return true;
+            if (settingsHelpTopic.value) {
+                settingsHelpTopic.value = '';
+                return true;
+            }
+
+            if (isMobileSidebarOpen) {
+                closeMobileMenu();
+                return true;
+            }
+
+            const settingsPanels = [
+                showWorldInfoSettings,
+                showMemorySettings,
+                showActiveToolSettings,
+                showUiTemplateSettings
+            ];
+            if (settingsPanels.some(closeBooleanPanel)) return true;
+
+            if (currentView.value !== 'chat') {
+                currentView.value = 'chat';
+                return true;
+            }
+
+            return false;
+        };
+
+        const initializePlatformAdapters = async () => {
+            const platformServices = window.PlatformServices;
+            if (!platformServices) return;
+            removePlatformBackListener = await platformServices.onBackButton(handlePlatformBackButton);
+            removePlatformStateListener = await platformServices.onAppStateChange(({ isActive }) => {
+                isNativeAppActive = isActive;
+            });
+        };
+
         const confirmCharacterExport = (type) => {
             showCharacterExportModal.value = false;
             if (characterToExportIndex.value !== null) {
@@ -8948,6 +9042,7 @@ const app = createApp({
             window.addEventListener('orientationchange', handleMobileOrientationChange, { passive: true });
             window.addEventListener('resize', handleMobileViewportResize, { passive: true });
             scheduleMobileVisualViewportSync({ force: true });
+            await initializePlatformAdapters();
 
             // --- 全局点击外部区域收起面板 ---
             document.addEventListener('click', (e) => {
@@ -8985,6 +9080,8 @@ const app = createApp({
             window.removeEventListener('resize', handleMobileViewportResize);
             if (mobileViewportRaf) cancelAnimationFrame(mobileViewportRaf);
             clearTimeout(mobileKeyboardBlurTimer);
+            removePlatformBackListener();
+            removePlatformStateListener();
         });
         // 解析并截断生成的包含 HTML UI 的正文，避免闪屏问题
         const processMainContent = (mainText, isGeneratingState) => {

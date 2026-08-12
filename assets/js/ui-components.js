@@ -346,7 +346,7 @@
 
             <div class="app-sidebar fixed inset-y-0 left-0 z-50 w-72 md:w-72 bg-white/95 border-r border-gray-200/80 transform transition-all duration-300 md:relative md:translate-x-0 flex flex-col shadow-2xl md:shadow-sm md:rounded-none rounded-r-3xl overflow-hidden"
                 :class="collapsed ? 'md:w-16' : 'md:w-72'">
-                <div class="h-16 flex items-center border-b border-gray-100/80 bg-white/70 backdrop-blur-xl transition-all duration-300"
+                <div class="safe-sidebar-header h-16 flex items-center border-b border-gray-100/80 bg-white/70 backdrop-blur-xl transition-all duration-300"
                     :class="collapsed ? 'justify-center px-0' : 'justify-between px-6'">
                     <div v-show="!collapsed" class="app-logo relative inline-flex items-baseline gap-1.5 pr-1 min-w-0">
                         <span class="text-[21px] font-extrabold text-gray-800 tracking-[0.08em] leading-none">RP</span>
@@ -445,7 +445,7 @@
                     </button>
                 </div>
 
-                <div class="p-3 border-t border-gray-100/80 bg-white/70 backdrop-blur-xl">
+                <div class="safe-sidebar-footer p-3 border-t border-gray-100/80 bg-white/70 backdrop-blur-xl">
                     <div class="flex items-center transition-all" :class="collapsed ? 'justify-center' : 'rounded-2xl border border-gray-200/70 bg-gray-50/80 px-3 py-2 shadow-sm'">
                         <div class="w-10 h-10 rounded-2xl overflow-hidden shadow-sm flex-shrink-0 ring-2 ring-white">
                             <img v-if="user?.avatar" :src="user.avatar" class="w-full h-full object-cover">
@@ -496,8 +496,14 @@
             loadingText: String
         },
         emits: ['load', 'menu'],
+        methods: {
+            handleLoad(event) {
+                window.RPHubSafeArea?.syncFrame(event.currentTarget);
+                this.$emit('load');
+            }
+        },
         template: `
-            <button @click="$emit('menu')"
+            <button @click="$emit('menu')" data-safe-area="embedded-menu"
                 class="md:hidden absolute left-0 top-1/2 transform -translate-y-1/2 z-20 pl-2 pr-1.5 py-3 bg-white/90 backdrop-blur-md text-gray-600 text-xs font-medium rounded-r-xl shadow-lg border border-l-0 border-gray-200 active:scale-95 transition-all flex flex-col items-center gap-1">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
@@ -514,7 +520,7 @@
                         <div class="text-gray-500 font-medium">{{ loadingText }}</div>
                     </div>
                 </div>
-                <iframe :src="src" @load="$emit('load')" class="absolute inset-0 w-full h-full border-0"
+                <iframe :src="src" @load="handleLoad" class="absolute inset-0 w-full h-full border-0"
                     allow="clipboard-write"
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"></iframe>
             </div>`
@@ -595,7 +601,7 @@
         },
         emits: ['close'],
         template: `
-            <div :class="['fixed inset-0 flex items-center justify-center', overlayClass]"
+            <div :class="['safe-modal-overlay fixed inset-0 flex items-center justify-center', overlayClass]"
                 @click.self="closeOnBackdrop && $emit('close')">
                 <div :class="panelClass"><slot></slot></div>
             </div>`
