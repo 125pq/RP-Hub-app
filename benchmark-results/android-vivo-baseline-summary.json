@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "testDate": "2026-08-13",
+  "sourceCommit": "50e2d54",
+  "device": "vivo V2505A",
+  "android": "16 (API 36)",
+  "webView": "150.0.7871.183",
+  "apkVersion": "0.1.0 (versionCode 1)",
+  "measurementApkSha256": "3e9903081d739e939211c3b2ba7581aa43e7b0f87370b1a769d5ca1839c9fd0f",
+  "finalApkSha256": "3ac023dd5fdcfb109bad9dea5c9b5976e3adba68b511a5e064b851deea201952",
+  "conditions": {
+    "state": "warm app",
+    "startThermalStatus": 2,
+    "startBatteryCelsius": 40.6,
+    "endThermalStatus": 2,
+    "endBatteryCelsius": 38.9,
+    "warmupRunsPerScenario": 1,
+    "recordedRunsPerScenario": 5,
+    "networkChunkCount": 144,
+    "networkChunkIntervalMs": 10,
+    "streamFlushIntervalMs": 60
+  },
+  "mixed20MessageMedian": [
+    { "sizeKb": 2, "flushes": 29, "totalMs": 1772.1, "flushMedianMs": 14.2, "flushP95Ms": 18.7, "finalByteToStableDomMs": 35.6, "longTasks": 0, "rafOver33ms": 0, "renderMarkdownTotalMs": 102.0, "parseCotPrefixEntries": 29, "renderPrefixEntries": 41 },
+    { "sizeKb": 8, "flushes": 34, "totalMs": 2102.3, "flushMedianMs": 18.3, "flushP95Ms": 25.4, "finalByteToStableDomMs": 45.4, "longTasks": 0, "rafOver33ms": 0, "renderMarkdownTotalMs": 229.1, "parseCotPrefixEntries": 34, "renderPrefixEntries": 67 },
+    { "sizeKb": 32, "flushes": 42, "totalMs": 2572.1, "flushMedianMs": 19.8, "flushP95Ms": 34.6, "finalByteToStableDomMs": 50.4, "longTasks": 0, "rafOver33ms": 7, "renderMarkdownTotalMs": 403.8, "parseCotPrefixEntries": 42, "renderPrefixEntries": 84 },
+    { "sizeKb": 64, "flushes": 55, "totalMs": 3504.8, "flushMedianMs": 21.6, "flushP95Ms": 31.2, "finalByteToStableDomMs": 66.9, "longTasks": 3, "rafOver33ms": 25, "renderMarkdownTotalMs": 627.0, "parseCotPrefixEntries": 55, "renderPrefixEntries": 110 }
+  ],
+  "verdicts": {
+    "finding1": "CONFIRMED",
+    "finding4": "PARTIALLY CONFIRMED",
+    "memoryImpact": "Cache growth confirmed; retained heap impact not quantified reliably."
+  },
+  "privacy": "Only synthetic benchmark content is represented. Raw runs and traces are gitignored."
+}

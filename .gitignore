@@ -12,6 +12,10 @@ android/local.properties
 android/**/build/
 debug_apk/
 
+# Raw device benchmark captures and DevTools traces (commit summaries only)
+benchmark-results/raw/
+benchmark-results/traces/
+
 # Release signing secrets
 *.keystore
 *.jks

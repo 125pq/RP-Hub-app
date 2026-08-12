@@ -1581,6 +1581,7 @@ const app = createApp({
         };
 
         const saveChatHistoryNow = (storyScopeId = getCurrentStoryBranchScopeId(), history = chatHistory.value) => {
+            if (window.__RPH_PERF__?.active) return Promise.resolve();
             if (chatHistorySaveTimer) {
                 clearTimeout(chatHistorySaveTimer);
                 chatHistorySaveTimer = null;
@@ -1632,6 +1633,7 @@ const app = createApp({
         };
 
         const saveMemorySettingsNow = async () => {
+            if (window.__RPH_PERF__?.active) return;
             if (!_initComplete) return;
             if (!getMainDb()) await initDB();
             await setStoredValue('memory_settings', cloneForStorage(memorySettings), { clone: false });
@@ -1661,6 +1663,7 @@ const app = createApp({
         };
 
         const saveData = async (options = {}) => {
+            if (window.__RPH_PERF__?.active) return;
             const { saveMemories = true, saveCharacters = true } = options;
             try {
                 if (!getMainDb()) await initDB();
@@ -3187,7 +3190,7 @@ const app = createApp({
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
         };
-        const processRegex = (text, options = {}) => {
+        const processRegexImpl = (text, options = {}) => {
             if (!text) return '';
             // options: { isDisplay, isPrompt, role, depth }
             const { isDisplay = false, isPrompt = false, role = null, depth = 0 } = options;
@@ -3266,6 +3269,12 @@ const app = createApp({
             });
             return result;
         };
+        const processRegex = (text, options = {}) => {
+            const perf = window.__RPH_PERF__;
+            return perf?.active
+                ? perf.measure('processRegex', () => processRegexImpl(text, options))
+                : processRegexImpl(text, options);
+        };
         const {
             clearCaches: clearMessageRenderCaches,
             contentUsesHtmlFrame,
@@ -3302,7 +3311,7 @@ const app = createApp({
             && activeUiTemplates.value.length > 0
         );
 
-        const messageUsesWideLayout = (msg) => {
+        const messageUsesWideLayoutImpl = (msg) => {
             if (!msg) return false;
             return !!(
                 msg.reasoning
@@ -3312,6 +3321,12 @@ const app = createApp({
                 || messageHasUiTemplateBlocks(msg)
                 || messageHasPendingUiTemplate(msg)
             );
+        };
+        const messageUsesWideLayout = (msg) => {
+            const perf = window.__RPH_PERF__;
+            return perf?.active
+                ? perf.measure('messageUsesWideLayout', () => messageUsesWideLayoutImpl(msg))
+                : messageUsesWideLayoutImpl(msg);
         };
 
         const collapseNativeReasoning = (message) => {
@@ -4752,6 +4767,8 @@ const app = createApp({
             };
 
             const appendAssistantText = (message, field, text) => {
+                const perfStartedAt = window.__RPH_PERF__?.active ? performance.now() : null;
+                try {
                 if (!message || !text) return;
                 const isContinuation = continuingAssistantMessage && message.id === continuingAssistantMessage.id;
                 const startedKey = field === 'reasoning' ? 'continuationReasoningStarted' : 'continuationContentStarted';
@@ -4783,6 +4800,11 @@ const app = createApp({
                     promoteActiveToolCallsFromAssistant(message);
                 }
                 if (isContinuation) activeToolContinuationHasResponse.value = true;
+                } finally {
+                    if (perfStartedAt !== null) {
+                        window.__RPH_PERF__.recordFunction('appendAssistantText', performance.now() - perfStartedAt);
+                    }
+                }
             };
 
             const appendAssistantReasoning = (message, text) => {
@@ -4859,6 +4881,11 @@ const app = createApp({
                             appendAssistantText(assistantMessage, 'content', content);
                             isThinking.value = false;
                             collapseNativeReasoning(assistantMessage);
+                        }
+                        if (window.__RPH_PERF__?.active) {
+                            window.__RPH_PERF__.trackDomStabilization(
+                                nextTick().then(() => new Promise(resolve => requestAnimationFrame(resolve)))
+                            );
                         }
                     }
                 });
@@ -6670,7 +6697,7 @@ const app = createApp({
 
         const getTimelineCharCount = (text) => Array.from(String(text || '')).length;
 
-        const getTimelineSteps = (message) => {
+        const getTimelineStepsImpl = (message) => {
             const steps = [];
             const isLastMessage = chatHistory.value && chatHistory.value[chatHistory.value.length - 1] === message;
             const isGeneratingMessage = isLastMessage && (isGenerating.value || isRemoteGenerating.value);
@@ -6728,6 +6755,12 @@ const app = createApp({
             }
 
             return steps;
+        };
+        const getTimelineSteps = (message) => {
+            const perf = window.__RPH_PERF__;
+            return perf?.active
+                ? perf.measure('getTimelineSteps', () => getTimelineStepsImpl(message))
+                : getTimelineStepsImpl(message);
         };
 
         const stripActiveToolCallsFromAssistant = (message, toolCalls) => {
@@ -9447,6 +9480,12 @@ const app = createApp({
             handleAvatarUpload, importCharacter,
             createPreset, editPreset, savePreset, deletePreset,
             renderMarkdown, messageUsesWideLayout, parseCot, closeCharacterEditor: () => showCharacterEditor.value = false,
+            __perfSetChatRenderLimit: limit => { if (window.__RPH_PERF__?.enabled) chatRenderLimit.value = limit; },
+            __perfClearCaches: () => {
+                if (!window.__RPH_PERF__?.enabled) return;
+                clearMessageRenderCaches();
+                window.RPHubUtils.clearParseCotCache?.();
+            },
             openExportModal: (type) => {
                 exportType.value = type;
                 selectedExportIndices.value.clear();
@@ -9759,4 +9798,5 @@ const app = createApp({
 // 公共弹窗部件需要全局注册，供其他弹窗组件内部直接复用。
 app.component('ModalShell', ModalShell);
 app.component('ModalHeader', ModalHeader);
-app.mount('#app');
+const appInstance = app.mount('#app');
+window.__RPH_PERF__?.attachApp?.(appInstance);

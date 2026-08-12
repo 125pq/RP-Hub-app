@@ -16,7 +16,7 @@ const generateUUID = () => {
 };
 
 const parseCotCache = new Map();
-const parseCot = (text) => {
+const parseCotImpl = (text) => {
     if (!text) return { cot: '', main: '', sys: '', isFinished: false };
     if (parseCotCache.has(text)) return parseCotCache.get(text);
 
@@ -62,6 +62,19 @@ const parseCot = (text) => {
     }
     return result;
 };
+const parseCot = (text) => {
+    const perf = window.__RPH_PERF__;
+    return perf?.active ? perf.measure('parseCot', () => parseCotImpl(text)) : parseCotImpl(text);
+};
+window.__RPH_PERF__?.registerCacheReader?.('parseCotCache', () => {
+    let keyChars = 0;
+    let valueChars = 0;
+    parseCotCache.forEach((value, key) => {
+        keyChars += typeof key === 'string' ? key.length : 0;
+        valueChars += (value?.cot?.length || 0) + (value?.main?.length || 0) + (value?.sys?.length || 0);
+    });
+    return { entries: parseCotCache.size, approxKeyChars: keyChars, approxValueChars: valueChars };
+});
 
 const compressImage = (source, maxWidth = 300, quality = 0.7) => new Promise((resolve) => {
     const image = new Image();
@@ -209,6 +222,7 @@ const extractApiErrorMessage = (payload, fallbackStatus = '') => {
 };
 
 window.RPHubUtils = {
+    clearParseCotCache: () => parseCotCache.clear(),
     compressImage,
     defaultAvatar,
     extractApiErrorMessage,
