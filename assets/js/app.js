@@ -3538,6 +3538,10 @@ const app = createApp({
             }
         };
         const requestChatImageSelection = (input) => {
+            if (!settings.apiKey || !settings.visionModel) {
+                showToast('请先在设置中配置识图模型', 'warning');
+                return;
+            }
             if (pendingChatImages.value.length + pendingChatImageReadCount.value >= MAX_CHAT_IMAGES) {
                 showToast(`单次最多上传 ${MAX_CHAT_IMAGES} 张图片`, 'warning');
                 return;
@@ -3550,10 +3554,6 @@ const app = createApp({
             const selectedFiles = Array.from(input.files || []);
             input.value = '';
             if (selectedFiles.length === 0 || availableSlots <= 0) return;
-            if (!settings.apiKey || !settings.visionModel) {
-                showToast('请先在设置中选择识图模型并配置 API Key', 'warning');
-                return;
-            }
 
             const imageFiles = selectedFiles.filter(file => file.type.startsWith('image/') && file.size <= 20 * 1024 * 1024);
             const files = imageFiles.slice(0, availableSlots);
