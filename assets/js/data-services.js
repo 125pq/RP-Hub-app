@@ -1746,7 +1746,11 @@ ${content}
                 return;
             }
             if (!templatesById.has(id)) {
-                issues.push(`${location}使用了未知模板ID“${id}”`);
+                const validIds = [...templatesById.keys()];
+                const expected = validIds.length === 1
+                    ? `，当前模板ID应为“${validIds[0]}”`
+                    : `，可用模板ID：${validIds.map(value => `“${value}”`).join('、')}`;
+                issues.push(`${location}使用了未知模板ID“${id}”${expected}`);
                 return;
             }
             if (!receivedById.has(id)) receivedById.set(id, []);
