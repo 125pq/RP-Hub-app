@@ -1,0 +1,97 @@
+name: Sync upstream RP-Hub
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure permanent release signing key
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RPHUB_RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RPHUB_RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RPHUB_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RPHUB_RELEASE_KEY_PASSWORD }}
+        run: |
+          test -n "$RELEASE_KEYSTORE_BASE64"
+          test -n "$RELEASE_STORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          test -n "$RELEASE_KEY_PASSWORD"
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/rphub-release.jks"
+          {
+            echo "RPHUB_RELEASE_STORE_FILE=$RUNNER_TEMP/rphub-release.jks"
+            echo "RPHUB_RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD"
+            echo "RPHUB_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+            echo "RPHUB_RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Fetch, merge, and reapply categorized hooks
+        run: node scripts/upstream-sync/sync-upstream.mjs --prepare-only
+
+      - name: Verify adapter and upstream hooks
+        run: node scripts/upstream-sync/verify.mjs
+
+      - name: Verify hook idempotence
+        run: node scripts/upstream-sync/tests/reapply-idempotence.mjs
+
+      - name: Run JavaScript and Web tests
+        run: |
+          npm run test:platform
+          npm run test:performance
+          npm run build:web
+          npm run verify:dist
+
+      - name: Sync Capacitor and build Android release
+        run: |
+          npx cap sync android
+          ./android/gradlew --project-dir android testDebugUnitTest assembleRelease
+
+      - name: Check final diff
+        run: |
+          git diff --check
+          git diff --cached --check
+
+      - name: Commit and push successful sync
+        shell: bash
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No upstream changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          upstream_sha="$(git rev-parse --short upstream/main)"
+          git commit -m "chore(sync): merge upstream RP-Hub ${upstream_sha} and reapply local patches"
+          git push origin HEAD:main
