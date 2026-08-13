@@ -24,7 +24,7 @@ function run(command, commandArgs = [], options = {}) {
     const child = spawn(command, commandArgs, {
       cwd: projectRoot,
       env: options.env || process.env,
-      shell: false,
+      shell: process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(command),
       stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
     });
     let stdout = '';
@@ -151,7 +151,7 @@ try {
   }
   completed = true;
 } finally {
-  if (!completed && dryRun && await mergeInProgress()) {
+  if (!completed && await mergeInProgress()) {
     await git(['merge', '--abort'], { allowFailure: true });
   }
 }

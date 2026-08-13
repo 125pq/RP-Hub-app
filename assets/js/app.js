@@ -102,8 +102,6 @@ const {
     managedPresets: BUILTIN_PRESETS
 } = window.RPHubBuiltinPresets;
 const {
-    UI_TEMPLATE_UPDATES_CLOSE_TAG,
-    UI_TEMPLATE_UPDATES_OPEN_TAG,
     UI_TEMPLATE_UPDATES_PATTERN,
     applyUiTemplateUpdateListToTemplate,
     cloneUiObject,
@@ -934,8 +932,37 @@ const app = createApp({
             if (role === 'assistant') return 'bg-purple-100 text-purple-700 border-purple-200';
             return 'bg-red-100 text-red-700 border-red-200';
         };
+        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
+        const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
+        const blockedStyleWordPattern = /极其/g;
+        const loggedBlockedStyleFragments = new Set();
+        const filterBlockedStyleText = (text, { log = false } = {}) => {
+            const source = String(text || '');
+            const removedFragments = [];
+            const structuredIndexes = ['<ui_template_updates>', '{"updates"']
+                .map(marker => source.lastIndexOf(marker))
+                .filter(index => index >= 0);
+            const structuredIndex = structuredIndexes.length ? Math.min(...structuredIndexes) : source.length;
+            const filtered = cardUtils.transformUnprotectedText(source.slice(0, structuredIndex), part => part
+                .replace(blockedStyleSentencePattern, match => { removedFragments.push(match.trim()); return ''; })
+                .replace(paleFingerClausePattern, match => { removedFragments.push(match.trim()); return ''; })
+                .replace(blockedStyleWordPattern, match => { removedFragments.push(match); return ''; })
+                .replace(/^[ \t]*[，,；;]+/gm, '')
+                .replace(/[，,；;]{2,}/g, marks => marks.at(-1))
+                .replace(/[，,；;]+([。！？!?])/g, '$1')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n'));
+            if (log) {
+                const newFragments = removedFragments.filter(fragment => fragment && !loggedBlockedStyleFragments.has(fragment));
+                newFragments.forEach(fragment => loggedBlockedStyleFragments.add(fragment));
+                if (newFragments.length) console.info(`[文风过滤] 已过滤 ${newFragments.length} 处`, newFragments);
+            }
+            return filtered + source.slice(structuredIndex);
+        };
         const getPostprocessedChatMessages = (messages = chatHistory.value, options = {}) => (
-            postprocessChatHistory(messages, options)
+            postprocessChatHistory(messages, options).map(message => message.role === 'assistant'
+                ? { ...message, content: filterBlockedStyleText(message.content) }
+                : message)
         );
         const buildConversationTurnSnapshot = (messages = chatHistory.value, options = {}) => (
             createConversationTurnSnapshot(messages, options)
@@ -2427,8 +2454,6 @@ const app = createApp({
 
             return replaceUserNamePlaceholder(BUILTIN_PROMPTS.buildMainModelUiTemplatePrompt({
                 templatePayload,
-                openTag: UI_TEMPLATE_UPDATES_OPEN_TAG,
-                closeTag: UI_TEMPLATE_UPDATES_CLOSE_TAG,
                 userName: user.name
             }));
         };
@@ -2459,13 +2484,14 @@ const app = createApp({
 
             let updates = [];
             try {
-                const parsed = parseUiTemplateUpdateJson(match[1]);
+                const updateJson = match[1] || match[2];
+                const parsed = parseUiTemplateUpdateJson(updateJson);
                 updates = normalizeUiTemplateUpdateList(parsed, templates);
             } catch (e) {
                 const reason = e instanceof SyntaxError
                     ? `JSON格式错误：${e.message}`
                     : e.message;
-                return recordFailure(e?.jsonSource || match[1], reason);
+                return recordFailure(e?.jsonSource || match[1] || match[2], reason);
             }
 
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));
@@ -2604,6 +2630,10 @@ const app = createApp({
         const stripUiTemplateContextInjection = (text) => String(text || '')
             .replace(/<ui_template_state_context>[\s\S]*?<\/ui_template_state_context>/gi, '')
             .replace(/<ui_template_state_context>[\s\S]*$/gi, '');
+
+        const stripNextResponsePrompt = (text) => String(text || '')
+            .replace(/<next_response>[\s\S]*?<\/next_response>/gi, '')
+            .replace(/<next_response>[\s\S]*$/gi, '');
 
         const buildUiTemplateContextSystemPrompt = () => {
             if (!settings.uiTemplateEnabled || !settings.uiTemplateInjectContext || settings.uiTemplateMainModelAnalysis) return '';
@@ -3270,7 +3300,7 @@ const app = createApp({
                     console.error(`Regex error in script "${script.name || 'Unnamed'}":`, e.message);
                 }
             });
-            return result;
+            return role === 'assistant' ? filterBlockedStyleText(result) : result;
         };
         const processRegex = (text, options = {}) => {
             const perf = window.__RPH_PERF__;
@@ -3957,7 +3987,10 @@ const app = createApp({
                 const failedTemplateIds = new Set();
                 const pendingTemplateUpdates = [];
 
-                const normalizeUiTemplateUpdates = (parsed) => {
+                const normalizeUiTemplateUpdates = (parsed, template) => {
+                    if (Array.isArray(parsed?.updates)) {
+                        return normalizeUiTemplateUpdateList(parsed, [template]);
+                    }
                     if (Array.isArray(parsed)) {
                         return [{ variables: parsed, reason: '' }];
                     }
@@ -3997,6 +4030,7 @@ const app = createApp({
                                     {
                                         role: 'system',
                                         content: replaceUserNamePlaceholder(BUILTIN_PROMPTS.buildUiTemplateAnalysisSystemPrompt({
+                                            templateId: template.id,
                                             userInfo: buildUserInfoPrompt(),
                                             currentVariableJson,
                                             variableSchemaText,
@@ -4019,7 +4053,7 @@ const app = createApp({
                         if (!isCurrentRun()) return;
                         let content = data.choices?.[0]?.message?.content || '';
                         const parsed = parseUiTemplateUpdateJson(content);
-                        const updates = normalizeUiTemplateUpdates(parsed);
+                        const updates = normalizeUiTemplateUpdates(parsed, template);
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
                             model,
@@ -4393,6 +4427,23 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
+        const appendNextResponsePrompt = (messageList, { cotEnabled = false, writingStylePrompt = '' } = {}) => {
+            const target = [...messageList].reverse().find(message => (
+                message?.role === 'user'
+                && Array.isArray(message._sourceIndexes)
+                && message._sourceIndexes.length > 0
+            ));
+            if (!target) return;
+
+            const prompt = BUILTIN_PROMPTS.buildNextResponsePrompt({
+                cotEnabled,
+                writingStylePrompt,
+                uiTemplateEnabled: settings.uiTemplateEnabled
+                    && settings.uiTemplateMainModelAnalysis
+                    && activeUiTemplates.value.length > 0
+            });
+            target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
+        };
         let _wasCancelled = false;
         const generateResponse = async (startTime = null, options = {}) => {
             const reuseGeneratingState = options.reuseGeneratingState === true;
@@ -4450,9 +4501,13 @@ const app = createApp({
             const enabledPresets = presets.value
                 .map(normalizePreset)
                 .filter(p => p.enabled && p.content.trim());
+            const writingStylePresets = enabledPresets.filter(p => p.name === BUILTIN_PRESETS.writingStyle.name);
             const cotPresets = enabledPresets.filter(p => p.name === 'COT');
-            const systemPresets = enabledPresets.filter(p => p.role === 'system' && p.name !== 'COT');
-            const messagePresets = enabledPresets.filter(p => p.name !== 'COT' && (p.role === 'user' || p.role === 'assistant'));
+            const systemPresets = enabledPresets.filter(p => p.name !== 'COT'
+                && (p.role === 'system' || p.name === BUILTIN_PRESETS.writingStyle.name));
+            const messagePresets = enabledPresets.filter(p => p.name !== 'COT'
+                && p.name !== BUILTIN_PRESETS.writingStyle.name
+                && (p.role === 'user' || p.role === 'assistant'));
             const systemPresetPrompt = systemPresets
                 .filter(p => p.name === '破限')
                 .map(p => p.content)
@@ -4482,8 +4537,6 @@ const app = createApp({
             if (otherPresets.length > 0) {
                 systemPromptParts.push(`[System Presets]\n${otherPresets.map(p => p.content).join('\n\n---\n\n')}`);
             }
-
-            systemPromptParts.push(BUILTIN_PROMPTS.stylePriority);
 
             // 5. Character pre-dialogue context (user side)
             const characterPreludeParts = [];
@@ -4652,7 +4705,7 @@ const app = createApp({
                     const cleanSourceContent = (source) => {
                         // Remove CoT content from history messages before sending to AI.
                         const parsedData = parseCot(source.content || '');
-                        let content = stripDisabledImageGenContext(stripUiTemplateContextInjection(parsedData.main));
+                        let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateContextInjection(parsedData.main)));
                         if (source.role === 'user') content = appendMessageImageDescriptions(source, content);
                         if (settings.uiTemplateEnabled
                             && settings.uiTemplateMainModelAnalysis
@@ -4686,6 +4739,14 @@ const app = createApp({
                 .filter(m => String(m.content || '').trim())
             );
             appendPendingUiTemplateCorrection(messages);
+            appendNextResponsePrompt(messages, {
+                cotEnabled: cotPresets.length > 0,
+                writingStylePrompt: writingStylePresets
+                    .map(preset => preset.content
+                        .replace(/^\s*<writing_style>\s*/i, '')
+                        .replace(/\s*<\/writing_style>\s*$/i, ''))
+                    .join('\n\n')
+            });
 
             let selectedVectorMemories = [];
             if (memorySettings.enabled
@@ -4958,6 +5019,7 @@ const app = createApp({
                     chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: error.message });
                 }
             } finally {
+                if (assistantMessage?.content) filterBlockedStyleText(assistantMessage.content, { log: true });
                 if (continuationToolCall && continuationToolCall.status === 'continuing') {
                     continuationToolCall.status = 'done';
                 }
@@ -5027,7 +5089,7 @@ const app = createApp({
         const stripVectorMemoryCode = (text) => {
             if (!text) return '';
 
-            let result = stripUiTemplateUpdateBlock(stripUiTemplateContextInjection(text))
+            let result = stripNextResponsePrompt(stripUiTemplateUpdateBlock(stripUiTemplateContextInjection(text)))
                 .replace(/<image>[\s\S]*?<\/image>/gi, '')
                 .replace(/```[\s\S]*?```/g, '')
                 .replace(/~~~[\s\S]*?~~~/g, '')

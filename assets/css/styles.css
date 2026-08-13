@@ -1631,8 +1631,8 @@
             }
 
             .centered-message-shell {
-                width: min(56rem, 72%);
-                max-width: min(56rem, 72%) !important;
+                width: 50vw;
+                max-width: 50vw !important;
             }
 
             .immersive-message-row {

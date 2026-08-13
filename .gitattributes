@@ -1,0 +1,3 @@
+*.js whitespace=cr-at-eol
+*.mjs whitespace=cr-at-eol
+*.html whitespace=cr-at-eol
