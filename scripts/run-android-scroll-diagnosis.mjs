@@ -6,6 +6,7 @@ for (let index = 2; index < process.argv.length; index += 2) args.set(process.ar
 const websocketUrl = args.get('--websocket');
 const outputPath = args.get('--output');
 const action = args.get('--action') || 'snapshot';
+const targetName = args.get('--target-name');
 const navigate = args.get('--navigate') === 'yes';
 const normalMode = ['normal-smoke', 'ime-smoke', 'lifecycle-status'].includes(action);
 if (!websocketUrl) throw new Error('Missing --websocket');
@@ -97,7 +98,8 @@ const traceSummary = events => {
 
 let result;
 if (action === 'select-target') {
-  result = await evaluate('window.__RPH_SCROLL_PERF__.selectTargetCharacter("黎明之契")');
+  if (!targetName) throw new Error('Missing --target-name for select-target');
+  result = await evaluate(`window.__RPH_SCROLL_PERF__.selectTargetCharacter(${JSON.stringify(targetName)})`);
 } else if (action === 'snapshot') {
   result = await evaluate('window.__RPH_SCROLL_PERF__.snapshot()');
 } else if (action === 'load-earlier') {

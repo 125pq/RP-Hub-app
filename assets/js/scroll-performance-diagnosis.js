@@ -161,7 +161,7 @@
 
         return {
             capturedAt: new Date().toISOString(),
-            targetCharacterActive: String(app.currentCharacter?.name || '').trim().includes('黎明之契'),
+            targetCharacterActive: !!app.currentCharacter,
             streamingActive: !!(app.isGenerating || app.isRemoteGenerating || app.isReceiving || app.isThinking),
             history: app.chatHistory?.length ?? null,
             displayed: app.displayedChatMessages?.length ?? null,

@@ -11,6 +11,8 @@
     "test:performance": "node scripts/test-performance-benchmark.mjs && node scripts/test-offscreen-iframe-lifecycle.mjs && node scripts/test-streaming-flush.mjs",
     "android:sync": "npm run build:web && npx cap sync android",
     "android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-debug.ps1",
+    "android:rc": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-release.ps1 -Target rc",
+    "android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-release.ps1 -Target production",
     "android:open": "npx cap open android"
   },
   "dependencies": {

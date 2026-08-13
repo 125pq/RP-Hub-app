@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file('../keystore.properties')
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
+def signingValue = { String propertyName, String environmentName ->
+    signingProperties.getProperty(propertyName) ?: System.getenv(environmentName)
+}
+
+def releaseStoreFile = signingValue('storeFile', 'RPHUB_RELEASE_STORE_FILE')
+def releaseStorePassword = signingValue('storePassword', 'RPHUB_RELEASE_STORE_PASSWORD')
+def releaseKeyAlias = signingValue('keyAlias', 'RPHUB_RELEASE_KEY_ALIAS')
+def releaseKeyPassword = signingValue('keyPassword', 'RPHUB_RELEASE_KEY_PASSWORD')
+def hasReleaseSigning = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every { it }
+
 android {
     namespace "io.github.pq125.rphub"
     compileSdk rootProject.ext.compileSdkVersion
@@ -9,6 +25,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "0.1.0"
+        manifestPlaceholders = [appLabel: 'RP Hub']
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +33,40 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            debuggable false
             minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+        releaseCandidate {
+            initWith release
+            applicationIdSuffix '.rc'
+            versionNameSuffix '-rc.1'
+            manifestPlaceholders = [appLabel: 'RP Hub RC']
+            matchingFallbacks = ['release']
+        }
+    }
+
+    applicationVariants.configureEach { variant ->
+        if (variant.buildType.name in ['release', 'releaseCandidate'] && !hasReleaseSigning) {
+            variant.assembleProvider.configure {
+                doFirst {
+                    throw new GradleException('Release signing is not configured. Copy keystore.properties.example to keystore.properties or set the RPHUB_RELEASE_* environment variables.')
+                }
+            }
         }
     }
 }

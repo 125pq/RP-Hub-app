@@ -11,6 +11,7 @@ android/.gradle/
 android/local.properties
 android/**/build/
 debug_apk/
+release_apk/
 
 # Raw device benchmark captures and DevTools traces (commit summaries only)
 benchmark-results/raw/
