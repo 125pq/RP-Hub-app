@@ -380,6 +380,7 @@ const app = createApp({
         // IntersectionObserver for lazy loading images or other visibility triggers could go here
 
         let scrollRevealObserver = null;
+        const perfObservedRevealElements = window.__RPH_PERF__?.enabled ? new WeakSet() : null;
         const initScrollReveal = () => {
             if (window.IntersectionObserver) {
                 scrollRevealObserver = new IntersectionObserver((entries) => {
@@ -402,6 +403,7 @@ const app = createApp({
                 newEls.forEach(el => {
                     if (el instanceof HTMLElement && !el.classList.contains('reveal-active')) {
                         scrollRevealObserver.observe(el);
+                        perfObservedRevealElements?.add(el);
                     }
                 });
             }
@@ -9481,6 +9483,13 @@ const app = createApp({
             createPreset, editPreset, savePreset, deletePreset,
             renderMarkdown, messageUsesWideLayout, parseCot, closeCharacterEditor: () => showCharacterEditor.value = false,
             __perfSetChatRenderLimit: limit => { if (window.__RPH_PERF__?.enabled) chatRenderLimit.value = limit; },
+            __perfLoadEarlierChatMessages: batchSize => window.__RPH_PERF__?.enabled
+                ? loadEarlierChatMessages(batchSize)
+                : Promise.resolve(),
+            __perfGetChatRenderLimit: () => window.__RPH_PERF__?.enabled ? chatRenderLimit.value : null,
+            __perfGetScrollRevealObservedCount: () => window.__RPH_PERF__?.enabled
+                ? (messageElements.value || []).filter(el => perfObservedRevealElements?.has(el)).length
+                : null,
             __perfClearCaches: () => {
                 if (!window.__RPH_PERF__?.enabled) return;
                 clearMessageRenderCaches();
@@ -9800,3 +9809,4 @@ app.component('ModalShell', ModalShell);
 app.component('ModalHeader', ModalHeader);
 const appInstance = app.mount('#app');
 window.__RPH_PERF__?.attachApp?.(appInstance);
+window.__RPH_SCROLL_PERF__?.attachApp?.(appInstance);

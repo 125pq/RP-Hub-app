@@ -608,6 +608,63 @@
         return { off: await sampleFrames(false), onIdle: await sampleFrames(true), metric: 'rAF interval ms' };
     };
 
+    const startDiagnosticSession = () => {
+        if (active) throw new Error('A performance session is already active');
+        active = true;
+        functionSamples.clear();
+        pendingDom.clear();
+        runState = {
+            flushes: [],
+            longTasks: [],
+            longTaskSupported: false,
+            heapBefore: performance.memory?.usedJSHeapSize ?? null,
+            heapPeak: performance.memory?.usedJSHeapSize ?? null
+        };
+        runState.longTaskSupported = startLongTaskObserver();
+        startFrameMonitor();
+        return now();
+    };
+
+    const stopDiagnosticSession = () => {
+        if (!active || !runState) throw new Error('No performance session is active');
+        stopObservers();
+        const intervals = [...(frameMonitor?.intervals || [])];
+        const longTasks = [...runState.longTasks];
+        const functions = Object.fromEntries([...functionSamples].map(([name, samples]) => [
+            name,
+            roundSummary(summarize(samples))
+        ]));
+        const result = {
+            metric: 'rAF frame-delay estimate; not SurfaceFlinger FPS',
+            raf: {
+                ...roundSummary(summarize(intervals)),
+                over16_7: intervals.filter(value => value > 16.7).length,
+                over25: intervals.filter(value => value > 25).length,
+                over33_3: intervals.filter(value => value > 33.3).length,
+                over50: intervals.filter(value => value > 50).length,
+                over100: intervals.filter(value => value > 100).length,
+                over250: intervals.filter(value => value > 250).length,
+                estimatedDelayedFrameRatio: intervals.length
+                    ? round(intervals.filter(value => value > 16.7).length / intervals.length)
+                    : null
+            },
+            longTasks: {
+                supported: runState.longTaskSupported,
+                ...roundSummary(summarize(longTasks))
+            },
+            functions,
+            heap: performance.memory ? {
+                before: runState.heapBefore,
+                after: performance.memory.usedJSHeapSize,
+                peak: runState.heapPeak
+            } : null
+        };
+        active = false;
+        runState = null;
+        frameMonitor = null;
+        return result;
+    };
+
     const api = {
         enabled: true,
         get active() { return active; },
@@ -618,6 +675,8 @@
         endFlush,
         measure,
         measureIdleOverhead,
+        startDiagnosticSession,
+        stopDiagnosticSession,
         getStreamMaxLatencyMs: () => streamMaxLatencyOverride,
         recordStreamDelta,
         recordFunction,
