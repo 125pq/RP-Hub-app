@@ -1611,15 +1611,15 @@ ${content}
         return typeof schema === 'string' ? schema : JSON.stringify(schema, null, 2);
     };
 
-    const UI_TEMPLATE_UPDATES_OPEN_TAG = '<ui_template_updates>';
-    const UI_TEMPLATE_UPDATES_CLOSE_TAG = '</ui_template_updates>';
-    const UI_TEMPLATE_UPDATES_PATTERN = /<ui_template_updates\b[^>]*>([\s\S]*?)<\/ui_template_updates>/i;
+    const UI_TEMPLATE_UPDATES_PATTERN = /<ui_template_updates\b[^>]*>([\s\S]*?)<\/ui_template_updates>|(\{\s*"updates"\s*:[\s\S]*$)/i;
     const UI_TEMPLATE_UPDATES_STRIP_PATTERN = /<ui_template_updates\b[^>]*>[\s\S]*?<\/ui_template_updates>/gi;
     const UI_TEMPLATE_UPDATES_OPEN_STRIP_PATTERN = /<ui_template_updates\b[^>]*>[\s\S]*$/i;
+    const UI_TEMPLATE_UPDATES_JSON_STRIP_PATTERN = /\{\s*"updates"\s*:[\s\S]*$/i;
 
     const stripUiTemplateUpdateBlock = (text) => String(text || '')
         .replace(UI_TEMPLATE_UPDATES_STRIP_PATTERN, '')
         .replace(UI_TEMPLATE_UPDATES_OPEN_STRIP_PATTERN, '')
+        .replace(UI_TEMPLATE_UPDATES_JSON_STRIP_PATTERN, '')
         .trimEnd();
 
     const createDetailedJsonSyntaxError = (error, content) => {
@@ -1654,6 +1654,8 @@ ${content}
 
     const parseUiTemplateUpdateJson = (rawContent) => {
         const normalizedContent = String(rawContent || '')
+            .replace(/^<ui_template_updates\b[^>]*>\s*/i, '')
+            .replace(/\s*<\/ui_template_updates>$/i, '')
             .replace(/^```(?:json)?\s*/i, '')
             .replace(/```\s*$/i, '')
             .trim();
@@ -1866,8 +1868,6 @@ ${content}
     };
 
     window.RPHubUiTemplateUtils = {
-        UI_TEMPLATE_UPDATES_CLOSE_TAG,
-        UI_TEMPLATE_UPDATES_OPEN_TAG,
         UI_TEMPLATE_UPDATES_PATTERN,
         applyUiTemplateUpdateListToTemplate,
         buildExecutableHtmlDocument,

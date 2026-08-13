@@ -1921,41 +1921,14 @@
                     </div>
                 </div>
 
-                <div class="mb-6 rounded-2xl border border-gray-200 bg-white shadow-sm">
-                    <div class="grid grid-cols-2">
-                        <div class="relative border-r border-gray-100 p-4 md:p-5">
-                            <div class="flex items-center gap-2 text-[11px] font-medium text-gray-400">
-                                <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>
-                                <div class="flex items-center"><span>输入</span>
-                                    <settings-help topic="totalInputTokens" :open-topic="helpTopic" label="查看总输入 Token 说明" icon-class=""
-                                        popover-class="token-usage-help-popover" @toggle="$emit('update:help-topic', $event)">
-                                        汇总当前类型和时间筛选范围内，API 返回的输入 Token 减去缓存读取 Token。右侧灰色数字单独显示缓存读取 Token。
-                                    </settings-help>
-                                </div>
-                            </div>
-                            <div class="mt-2 flex items-end gap-1 font-mono leading-none">
-                                <span class="text-lg font-bold text-gray-800">{{ formatAggregate(stats.inputTokens, stats.inputTokensReports) }}</span>
-                                <span class="inline-flex items-center gap-0.5 text-base font-normal text-gray-500/80">
-                                    <svg class="h-4 w-4 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
-                                    {{ formatAggregate(stats.cacheReadTokens, stats.cacheReadTokensReports) }}
-                                </span>
-                            </div>
-                        </div>
-                        <div class="relative p-4 md:p-5">
-                            <div class="flex items-center gap-2 text-[11px] font-medium text-gray-400">
-                                <span class="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>
-                                <div class="flex items-center"><span>输出</span>
-                                    <settings-help topic="totalOutputTokens" :open-topic="helpTopic" label="查看总输出 Token 说明" icon-class=""
-                                        popover-class="token-usage-help-popover is-right" @toggle="$emit('update:help-topic', $event)">
-                                        汇总当前类型和时间筛选范围内，API 实际返回的输出 Token。没有返回用量的字段按 0 统计。
-                                    </settings-help>
-                                </div>
-                            </div>
-                            <div class="mt-2 flex items-end gap-1 font-mono leading-none">
-                                <span class="text-lg font-bold text-gray-800">{{ formatAggregate(stats.outputTokens, stats.outputTokensReports) }}</span>
-                            </div>
-                        </div>
+                <div class="relative mb-6 flex items-center justify-between gap-4 rounded-2xl border border-primary-100 bg-white px-4 py-3.5 shadow-sm md:px-5">
+                    <div class="flex min-w-0 items-center text-base font-semibold text-gray-700"><span>总用量</span>
+                        <settings-help topic="totalTokens" :open-topic="helpTopic" label="查看总用量说明" icon-class=""
+                            popover-class="token-usage-help-popover" @toggle="$emit('update:help-topic', $event)">
+                            汇总当前类型和时间筛选范围内，输入 Token（包括缓存读取）与输出 Token 的总和。
+                        </settings-help>
                     </div>
+                    <span class="flex-none whitespace-nowrap font-mono text-xl font-bold tracking-tight text-gray-800">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</span>
                 </div>
 
                 <div class="flex items-center justify-between mb-3">
