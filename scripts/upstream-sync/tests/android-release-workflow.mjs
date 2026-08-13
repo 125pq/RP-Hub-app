@@ -26,6 +26,7 @@ assert.match(workflow, /Prepare mirrored release notes/);
 assert.match(workflow, /secrets\.GITEE_TOKEN/);
 assert.match(workflow, /api\/v5\/repos\/pq125pq\/rp-hub-app/);
 assert.match(workflow, /releases\/\$release_id\/attach_files/);
+assert.match(workflow, /type == "object" and \.id != null/);
 assert.match(workflow, /timeout-minutes: 15/);
 assert.match(workflow, /--max-time 600/);
 assert.doesNotMatch(workflow, /push --force/);

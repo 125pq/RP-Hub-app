@@ -236,7 +236,7 @@ jobs:
             --header "Authorization: Bearer $GITEE_TOKEN" \
             "$api/releases/tags/$ANDROID_TAG")"
 
-          if [ "$status" = "404" ]; then
+          if [ "$status" = "404" ] || { [ "$status" = "200" ] && ! jq -e 'type == "object" and .id != null' "$release_json" >/dev/null; }; then
             curl --silent --show-error --fail-with-body \
               --connect-timeout 20 --max-time 60 \
               --header "Authorization: Bearer $GITEE_TOKEN" \
