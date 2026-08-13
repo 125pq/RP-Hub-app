@@ -8,10 +8,12 @@
 
     const encoder = new TextEncoder();
     const TARGET_SIZES = Object.freeze([2, 8, 32, 64]);
-    const SCENARIO_TYPES = Object.freeze(['plain', 'markdown', 'cot', 'regex', 'mixed']);
+    const SCENARIO_TYPES = Object.freeze(['plain', 'markdown', 'cot', 'regex', 'mixed', 'rp-paragraph']);
     const NETWORK_CHUNK_COUNT = 144;
     const NETWORK_CHUNK_INTERVAL_MS = 10;
     const STREAM_FLUSH_INTERVAL_MS = 60;
+    const STREAM_MAX_VISIBLE_LATENCY_MS = 350;
+    const STREAM_MIN_VISIBLE_GAP_MS = 80;
     const cacheReaders = new Map();
     const pendingDom = new Set();
     const functionSamples = new Map();
@@ -23,6 +25,8 @@
     let runState = null;
     let longTaskObserver = null;
     let frameMonitor = null;
+    let streamMaxLatencyOverride = null;
+    const pendingStreamArrivals = [];
 
     const now = () => performance.now();
     const utf8Bytes = (text) => encoder.encode(String(text || '')).byteLength;
@@ -77,6 +81,16 @@
             '- 站牌在风里轻响',
             '`车次 RPH-17` 已经进站。',
             ''
+        ].join('\n'),
+        'rp-paragraph': [
+            '她缓缓抬起头，窗外的雨正沿着玻璃向下滑落。远处钟楼传来低沉的回声，她没有立刻开口，只把手中的旧信轻轻折好。',
+            '',
+            '“我以为你不会来了。”她望向门口，语气平静，却仍能听见那一点没有藏好的期待。壁炉里的木柴发出细碎声响。',
+            '',
+            '你向前走了一步，把沾着雨水的外套挂在椅背上。长久以来准备好的解释忽然显得多余，最后只剩一句很轻的道歉。',
+            '',
+            '她沉默片刻，终于把另一把椅子拉开。故事没有因此结束，它只是从这个雨夜开始，换了一种更缓慢、也更诚实的写法。',
+            ''
         ].join('\n')
     };
 
@@ -113,7 +127,9 @@
             codePoints: Array.from(content).length,
             networkChunkCount: NETWORK_CHUNK_COUNT,
             networkChunkIntervalMs: NETWORK_CHUNK_INTERVAL_MS,
-            streamFlushIntervalMs: STREAM_FLUSH_INTERVAL_MS
+            streamFlushIntervalMs: STREAM_FLUSH_INTERVAL_MS,
+            streamMaxVisibleLatencyMs: STREAM_MAX_VISIBLE_LATENCY_MS,
+            streamMinVisibleGapMs: STREAM_MIN_VISIBLE_GAP_MS
         });
     };
 
@@ -170,18 +186,33 @@
         }
     };
 
-    const beginFlush = (delta) => {
+    const beginFlush = (delta, reason = 'unknown') => {
         if (!active) return null;
+        let remainingBytes = utf8Bytes(delta?.content) + utf8Bytes(delta?.reasoning);
+        const arrivalTimes = [];
+        while (remainingBytes > 0 && pendingStreamArrivals.length) {
+            const arrival = pendingStreamArrivals.shift();
+            arrivalTimes.push(arrival.at);
+            remainingBytes -= arrival.bytes;
+        }
         const token = {
             id: ++flushSequence,
             startedAt: now(),
             callbackEndAt: null,
             domStableAt: null,
-            deltaBytes: utf8Bytes(delta?.content) + utf8Bytes(delta?.reasoning)
+            deltaBytes: utf8Bytes(delta?.content) + utf8Bytes(delta?.reasoning),
+            reason,
+            arrivalTimes
         };
         currentFlush = token;
         runState.flushes.push(token);
         return token;
+    };
+
+    const recordStreamDelta = (delta) => {
+        if (!active) return;
+        const bytes = utf8Bytes(delta?.content) + utf8Bytes(delta?.reasoning);
+        if (bytes > 0) pendingStreamArrivals.push({ at: now(), bytes });
     };
 
     const endFlush = (token) => {
@@ -327,8 +358,6 @@
         app.settings.uiTemplateEnabled = false;
         app.settings.uiTemplateMainModelAnalysis = false;
         app.settings.autoImageGen = false;
-        app.settings.apiKey = 'synthetic-not-sent';
-        app.settings.model = 'synthetic-stream';
         app.memorySettings.enabled = false;
         app.__perfSetChatRenderLimit(20);
         app.__perfClearCaches();
@@ -349,6 +378,16 @@
             .filter(flush => flush.callbackEndAt !== null)
             .map(flush => flush.callbackEndAt - flush.startedAt);
         const frames = frameMonitor?.intervals || [];
+        const displayStaleness = runState.flushes.flatMap(flush => {
+            const visibleAt = flush.domStableAt ?? flush.callbackEndAt;
+            return Number.isFinite(visibleAt)
+                ? flush.arrivalTimes.map(arrivalAt => visibleAt - arrivalAt)
+                : [];
+        });
+        const flushReasons = runState.flushes.reduce((counts, flush) => {
+            counts[flush.reason] = (counts[flush.reason] || 0) + 1;
+            return counts;
+        }, {});
         const functionProfile = Object.fromEntries([...functionSamples].map(([name, samples]) => [name, roundSummary(summarize(samples))]));
         const finalMessage = app.chatHistory[app.chatHistory.length - 1];
         const caches = readCaches();
@@ -369,7 +408,11 @@
             networkChunkCount: fixture.networkChunkCount,
             networkChunkIntervalMs: fixture.networkChunkIntervalMs,
             streamFlushIntervalMs: fixture.streamFlushIntervalMs,
+            streamMaxVisibleLatencyMs: streamMaxLatencyOverride || STREAM_MAX_VISIBLE_LATENCY_MS,
+            streamMinVisibleGapMs: STREAM_MIN_VISIBLE_GAP_MS,
             flushCount: runState.flushes.length,
+            flushReasons,
+            displayStalenessMs: roundSummary(summarize(displayStaleness)),
             totalDurationMs: round(stableAt - startedAt),
             flushRenderMs: roundSummary(summarize(renderLatencies)),
             flushCallbackMs: roundSummary(summarize(callbackDurations)),
@@ -400,12 +443,14 @@
         return result;
     };
 
-    const runOnce = async ({ type, sizeKb, historyCount = 20 }) => {
+    const runOnce = async ({ type, sizeKb, historyCount = 20, streamMaxLatencyMs = null }) => {
         if (!app) throw new Error('RP-Hub app has not attached to the benchmark harness');
         if (active) throw new Error('A benchmark run is already active');
         active = true;
         functionSamples.clear();
         pendingDom.clear();
+        pendingStreamArrivals.length = 0;
+        streamMaxLatencyOverride = Number.isFinite(Number(streamMaxLatencyMs)) ? Number(streamMaxLatencyMs) : null;
         flushSequence = 0;
         runState = { flushes: [], longTasks: [], longTaskSupported: false, startedAt: null, cacheBefore: null, heapBefore: null, heapPeak: null };
         const fixture = await prepareRun({ type, sizeKb, historyCount });
@@ -432,12 +477,16 @@
             stopObservers();
             active = false;
             currentFlush = null;
+            streamMaxLatencyOverride = null;
+            pendingStreamArrivals.length = 0;
         }
     };
 
     const aggregateRuns = (runs) => {
         const field = (selector) => runs.map(selector).filter(Number.isFinite);
         const sumFunction = (name) => runs.map(run => run.functions[name]?.total || 0);
+        const countFunction = (name) => runs.map(run => run.functions[name]?.count || 0);
+        const flushReasonNames = [...new Set(runs.flatMap(run => Object.keys(run.flushReasons || {})))];
         return {
             samples: runs.length,
             totalDurationMs: roundSummary(summarize(field(run => run.totalDurationMs))),
@@ -446,9 +495,20 @@
             flushP95Ms: roundSummary(summarize(field(run => run.flushRenderMs.p95))),
             flushMaxMs: roundSummary(summarize(field(run => run.flushRenderMs.max))),
             finalByteToStableDomMs: roundSummary(summarize(field(run => run.finalByteToStableDomMs))),
+            displayStalenessMedianMs: roundSummary(summarize(field(run => run.displayStalenessMs.median))),
+            displayStalenessP95Ms: roundSummary(summarize(field(run => run.displayStalenessMs.p95))),
+            displayStalenessMaxMs: roundSummary(summarize(field(run => run.displayStalenessMs.max))),
             longTaskCount: roundSummary(summarize(field(run => run.longTasks.count))),
             longTaskTotalMs: roundSummary(summarize(field(run => run.longTasks.total))),
             rafOver33_3: roundSummary(summarize(field(run => run.raf.over33_3))),
+            flushReasons: Object.fromEntries(flushReasonNames.map(reason => [
+                reason,
+                roundSummary(summarize(field(run => run.flushReasons?.[reason] || 0)))
+            ])),
+            functionCallCounts: Object.fromEntries(
+                ['parseCot', 'processRegex', 'marked.parse', 'DOMPurify.sanitize', 'renderMarkdown', 'messageUsesWideLayout', 'getTimelineSteps', 'appendAssistantText']
+                    .map(name => [name, roundSummary(summarize(countFunction(name)))])
+            ),
             functionTotalsMs: Object.fromEntries(
                 ['parseCot', 'processRegex', 'marked.parse', 'DOMPurify.sanitize', 'renderMarkdown', 'messageUsesWideLayout', 'getTimelineSteps', 'appendAssistantText']
                     .map(name => [name, roundSummary(summarize(sumFunction(name)))])
@@ -456,6 +516,10 @@
             cacheEntries: Object.fromEntries([...cacheReaders.keys()].map(name => [
                 name,
                 roundSummary(summarize(field(run => run.caches[name]?.entries)))
+            ])),
+            cacheEntryDelta: Object.fromEntries([...cacheReaders.keys()].map(name => [
+                name,
+                roundSummary(summarize(field(run => run.cacheEntryDelta?.[name])))
             ])),
             allOutputsMatch: runs.every(run => run.outputMatches)
         };
@@ -482,13 +546,13 @@
                 for (const type of types) {
                     for (let warmup = 0; warmup < warmupRuns; warmup++) {
                         for (const sizeKb of orders[warmup % orders.length].filter(size => sizes.includes(size))) {
-                            await runOnce({ type, sizeKb, historyCount });
+                            await runOnce({ type, sizeKb, historyCount, streamMaxLatencyMs: options.streamMaxLatencyMs });
                         }
                     }
                     for (let iteration = 0; iteration < recordedRuns; iteration++) {
                         const order = orders[iteration % orders.length].filter(size => sizes.includes(size));
                         for (const sizeKb of order) {
-                            const result = await runOnce({ type, sizeKb, historyCount });
+                            const result = await runOnce({ type, sizeKb, historyCount, streamMaxLatencyMs: options.streamMaxLatencyMs });
                             rawRuns.push({ ...result, iteration: iteration + 1 });
                         }
                     }
@@ -516,6 +580,8 @@
                 networkChunkCount: NETWORK_CHUNK_COUNT,
                 networkChunkIntervalMs: NETWORK_CHUNK_INTERVAL_MS,
                 streamFlushIntervalMs: STREAM_FLUSH_INTERVAL_MS,
+                streamMaxVisibleLatencyMs: options.streamMaxLatencyMs || STREAM_MAX_VISIBLE_LATENCY_MS,
+                streamMinVisibleGapMs: STREAM_MIN_VISIBLE_GAP_MS,
                 warmupRuns,
                 recordedRuns,
                 orderStrategy: 'interleaved Latin-style fixed orders'
@@ -552,6 +618,8 @@
         endFlush,
         measure,
         measureIdleOverhead,
+        getStreamMaxLatencyMs: () => streamMaxLatencyOverride,
+        recordStreamDelta,
         recordFunction,
         registerCacheReader,
         runOnce,

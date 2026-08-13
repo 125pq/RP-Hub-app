@@ -8,7 +8,7 @@
     "build:web": "npm run prepare:vendor && npm run build:css && node scripts/build-web.mjs",
     "verify:dist": "node scripts/verify-dist.mjs",
     "test:platform": "node scripts/test-platform-services.mjs",
-    "test:performance": "node scripts/test-performance-benchmark.mjs",
+    "test:performance": "node scripts/test-performance-benchmark.mjs && node scripts/test-streaming-flush.mjs",
     "android:sync": "npm run build:web && npx cap sync android",
     "android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-debug.ps1",
     "android:open": "npx cap open android"

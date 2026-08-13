@@ -54,7 +54,77 @@
         };
     };
 
-    const STREAM_RENDER_INTERVAL = 60;
+    const STREAM_MAX_VISIBLE_LATENCY_MS = 350;
+    const STREAM_MIN_VISIBLE_GAP_MS = 80;
+
+    const createStreamingBoundaryTracker = () => {
+        let insideFence = false;
+        let fenceMarker = '';
+        let insideThink = false;
+        let insideCot = false;
+        let linePrefix = '';
+        let fenceHandledOnLine = false;
+        let recent = '';
+        let previousWasNewline = false;
+
+        const scan = (text) => {
+            let paragraphBoundary = false;
+            let semanticBlockClosed = false;
+
+            for (const char of String(text || '')) {
+                if (char === '\n') {
+                    if (previousWasNewline && !insideFence && !insideThink && !insideCot) {
+                        paragraphBoundary = true;
+                    }
+                    previousWasNewline = true;
+                    linePrefix = '';
+                    fenceHandledOnLine = false;
+                } else if (char !== '\r') {
+                    previousWasNewline = false;
+                    if (linePrefix.length < 8) linePrefix += char;
+                }
+
+                if (!fenceHandledOnLine && char !== '\r' && char !== '\n') {
+                    const fence = linePrefix.match(/^ {0,3}(`{3,}|~{3,})$/);
+                    if (fence) {
+                        fenceHandledOnLine = true;
+                        const marker = fence[1][0];
+                        if (!insideFence) {
+                            insideFence = true;
+                            fenceMarker = marker;
+                        } else if (marker === fenceMarker) {
+                            insideFence = false;
+                            fenceMarker = '';
+                        }
+                    }
+                }
+
+                recent = `${recent}${char}`.slice(-16).toLowerCase();
+                if (insideFence) continue;
+                if (recent.endsWith('<think>')) insideThink = true;
+                if (recent.endsWith('<cot>')) insideCot = true;
+                if (recent.endsWith('</think>')) {
+                    insideThink = false;
+                    semanticBlockClosed = true;
+                }
+                if (recent.endsWith('</cot>')) {
+                    insideCot = false;
+                    semanticBlockClosed = true;
+                }
+            }
+
+            return paragraphBoundary || semanticBlockClosed;
+        };
+
+        return { scan };
+    };
+
+    const getStreamMaxVisibleLatency = () => {
+        const benchmarkValue = Number(window.__RPH_PERF__?.getStreamMaxLatencyMs?.());
+        return Number.isFinite(benchmarkValue) && benchmarkValue >= 50
+            ? benchmarkValue
+            : STREAM_MAX_VISIBLE_LATENCY_MS;
+    };
 
     const readStreamingResponse = async (response, onDelta) => {
         const reader = response.body.getReader();
@@ -64,15 +134,35 @@
         let pendingContent = '';
         let pendingReasoning = '';
         let flushPromise = Promise.resolve();
+        let publishTimer = null;
+        let publishTimerDueAt = null;
+        let publishTimerReason = null;
+        let pendingSince = null;
+        let paragraphBoundaryPending = false;
+        let lastPublishAt = -Infinity;
+        const contentBoundaries = createStreamingBoundaryTracker();
+        const reasoningBoundaries = createStreamingBoundaryTracker();
+        const maxVisibleLatencyMs = getStreamMaxVisibleLatency();
 
-        const flushPending = () => {
+        const clearPublishTimer = () => {
+            if (publishTimer !== null) clearTimeout(publishTimer);
+            publishTimer = null;
+            publishTimerDueAt = null;
+            publishTimerReason = null;
+        };
+
+        const flushPending = (reason) => {
             if (!pendingContent && !pendingReasoning) return;
+            clearPublishTimer();
             const delta = { content: pendingContent, reasoning: pendingReasoning };
             pendingContent = '';
             pendingReasoning = '';
+            pendingSince = null;
+            paragraphBoundaryPending = false;
+            lastPublishAt = performance.now();
             flushPromise = flushPromise.then(async () => {
                 const perf = window.__RPH_PERF__;
-                const token = perf?.active ? perf.beginFlush(delta) : null;
+                const token = perf?.active ? perf.beginFlush(delta, reason) : null;
                 try {
                     await onDelta?.(delta);
                 } finally {
@@ -81,7 +171,45 @@
             });
         };
 
-        const flushInterval = setInterval(flushPending, STREAM_RENDER_INTERVAL);
+        const schedulePublish = () => {
+            if (pendingSince === null) return;
+            const currentTime = performance.now();
+            const maxLatencyDueAt = pendingSince + maxVisibleLatencyMs;
+            const paragraphDueAt = paragraphBoundaryPending
+                ? Math.max(currentTime, lastPublishAt + STREAM_MIN_VISIBLE_GAP_MS)
+                : Infinity;
+            const reason = paragraphDueAt <= maxLatencyDueAt ? 'paragraph' : 'max-latency';
+            const dueAt = Math.min(paragraphDueAt, maxLatencyDueAt);
+
+            if (dueAt <= currentTime) {
+                flushPending(reason);
+                return;
+            }
+            if (publishTimer !== null && publishTimerDueAt <= dueAt) return;
+            clearPublishTimer();
+            publishTimerDueAt = dueAt;
+            publishTimerReason = reason;
+            publishTimer = setTimeout(() => {
+                const scheduledReason = publishTimerReason;
+                publishTimer = null;
+                publishTimerDueAt = null;
+                publishTimerReason = null;
+                flushPending(scheduledReason);
+            }, Math.max(0, dueAt - currentTime));
+        };
+
+        const queueDelta = (chunk) => {
+            if (!chunk.content && !chunk.reasoning) return;
+            window.__RPH_PERF__?.recordStreamDelta?.(chunk);
+            if (pendingSince === null) pendingSince = performance.now();
+            pendingContent += chunk.content;
+            pendingReasoning += chunk.reasoning;
+            const contentBoundary = contentBoundaries.scan(chunk.content);
+            const reasoningBoundary = reasoningBoundaries.scan(chunk.reasoning);
+            const hasBoundary = contentBoundary || reasoningBoundary;
+            if (hasBoundary) paragraphBoundaryPending = true;
+            schedulePublish();
+        };
 
         try {
             while (true) {
@@ -98,8 +226,7 @@
                     try {
                         const chunk = parseSsePayload(payload, response.status);
                         usage = getApiUsagePayload(chunk.data) || usage;
-                        pendingContent += chunk.content;
-                        pendingReasoning += chunk.reasoning;
+                        queueDelta(chunk);
                     } catch (error) {
                         if (error.isApiError) throw error;
                         if (/error/i.test(payload)) throw new Error(formatApiErrorMessage(response.status, payload));
@@ -107,11 +234,15 @@
                     }
                 }
             }
-            flushPending();
+            flushPending('final');
             await flushPromise;
             return { content: '', reasoning: '', usage };
+        } catch (error) {
+            flushPending(error?.name === 'AbortError' ? 'abort' : 'error');
+            await flushPromise;
+            throw error;
         } finally {
-            clearInterval(flushInterval);
+            clearPublishTimer();
         }
     };
 
