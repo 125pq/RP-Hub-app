@@ -209,8 +209,11 @@ jobs:
           test -n "$GITHUB_PUSH_TOKEN"
           mirror_dir="$RUNNER_TEMP/android-latest"
           mkdir -p "$mirror_dir"
-          cp "$APK_PATH" "$mirror_dir/$APK_NAME"
-          gitee_apk_url="https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/${APK_NAME}"
+          split -b 4m -d -a 3 "$APK_PATH" "$mirror_dir/$APK_NAME.part-"
+          gitee_parts="$(find "$mirror_dir" -maxdepth 1 -type f -name "$APK_NAME.part-*" -printf '%f\n' \
+            | sort \
+            | sed 's#^#https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/#' \
+            | jq -R . | jq -s .)"
           github_apk_url="https://github.com/${{ github.repository }}/releases/download/${ANDROID_TAG}/${APK_NAME}"
           jq -n \
             --arg versionName "$VERSION_NAME" \
@@ -218,18 +221,18 @@ jobs:
             --arg tag "$ANDROID_TAG" \
             --rawfile notes "$RELEASE_NOTES_PATH" \
             --arg apkName "$APK_NAME" \
-            --arg giteeApkUrl "$gitee_apk_url" \
+            --argjson giteeParts "$gitee_parts" \
             --arg githubApkUrl "$github_apk_url" \
             --argjson apkSize "$(stat -c %s "$APK_PATH")" \
             --arg apkSha256 "$APK_SHA256" \
-            '{schemaVersion: 1, versionName: $versionName, versionCode: $versionCode, tag: $tag, notes: $notes, apk: {name: $apkName, urls: [$giteeApkUrl, $githubApkUrl], size: $apkSize, sha256: $apkSha256}}' \
+            '{schemaVersion: 1, versionName: $versionName, versionCode: $versionCode, tag: $tag, notes: $notes, apk: {name: $apkName, sources: [$giteeParts, [$githubApkUrl]], size: $apkSize, sha256: $apkSha256}}' \
             > "$mirror_dir/android-update.json"
 
           git -C "$mirror_dir" init
           git -C "$mirror_dir" checkout -b android-latest
           git -C "$mirror_dir" config user.name "github-actions[bot]"
           git -C "$mirror_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C "$mirror_dir" add "$APK_NAME" android-update.json
+          git -C "$mirror_dir" add "$APK_NAME".part-* android-update.json
           git -C "$mirror_dir" commit -m "release: publish Android ${ANDROID_TAG} distribution"
           mirror_sha="$(git -C "$mirror_dir" rev-parse HEAD)"
           git -C "$mirror_dir" remote add origin https://github.com/${{ github.repository }}.git

@@ -142,7 +142,7 @@ final class AppUpdateManager {
                 version.code,
                 body,
                 expectedName,
-                java.util.Collections.singletonList(url),
+                java.util.Collections.singletonList(java.util.Collections.singletonList(url)),
                 asset.optLong("size", -1L),
                 sha
             );
@@ -162,8 +162,8 @@ final class AppUpdateManager {
         String apkName = apk.getString("name");
         String expectedName = "RP-Hub-" + versionName + "-release.apk";
         String sha = AppUpdateRelease.normalizeSha256(apk.getString("sha256"));
-        List<String> downloadUrls = manifestDownloadUrls(apk);
-        if (!expectedName.equals(apkName) || sha == null || downloadUrls.isEmpty()) {
+        List<List<String>> downloadSources = manifestDownloadSources(apk);
+        if (!expectedName.equals(apkName) || sha == null || downloadSources.isEmpty()) {
             throw new JSONException("更新清单 APK 信息无效");
         }
         return new AppUpdateRelease(
@@ -171,22 +171,28 @@ final class AppUpdateManager {
             versionCode,
             json.optString("notes", ""),
             apkName,
-            downloadUrls,
+            downloadSources,
             apk.optLong("size", -1L),
             sha
         );
     }
 
-    private static List<String> manifestDownloadUrls(JSONObject apk) throws JSONException {
-        LinkedHashSet<String> urls = new LinkedHashSet<>();
-        JSONArray values = apk.optJSONArray("urls");
-        if (values == null) throw new JSONException("更新清单缺少 APK 下载地址");
-        for (int index = 0; index < values.length(); index++) {
-            String value = values.optString(index, "");
-            if (!isAllowedDownloadUrl(value)) throw new JSONException("更新清单包含不安全的 APK 地址");
-            urls.add(value);
+    private static List<List<String>> manifestDownloadSources(JSONObject apk) throws JSONException {
+        List<List<String>> sources = new ArrayList<>();
+        JSONArray values = apk.optJSONArray("sources");
+        if (values == null) throw new JSONException("更新清单缺少 APK 下载源");
+        for (int sourceIndex = 0; sourceIndex < values.length(); sourceIndex++) {
+            JSONArray parts = values.optJSONArray(sourceIndex);
+            if (parts == null || parts.length() == 0) throw new JSONException("更新清单下载源为空");
+            LinkedHashSet<String> urls = new LinkedHashSet<>();
+            for (int partIndex = 0; partIndex < parts.length(); partIndex++) {
+                String value = parts.optString(partIndex, "");
+                if (!isAllowedDownloadUrl(value)) throw new JSONException("更新清单包含不安全的 APK 地址");
+                urls.add(value);
+            }
+            sources.add(new ArrayList<>(urls));
         }
-        return new ArrayList<>(urls);
+        return sources;
     }
 
     private void showUpdateDialog(AppUpdateRelease release) {
@@ -236,27 +242,27 @@ final class AppUpdateManager {
 
     private void downloadAndVerify(AppUpdateRelease release, File destination) throws Exception {
         Exception lastError = null;
-        for (int index = 0; index < release.apkUrls.size(); index++) {
-            String url = release.apkUrls.get(index);
+        for (int index = 0; index < release.apkSources.size(); index++) {
+            List<String> parts = release.apkSources.get(index);
             sourceSwitchRequested.set(false);
-            publishSourceStatus(index + 1, release.apkUrls.size());
+            publishSourceStatus(index + 1, release.apkSources.size());
             try {
-                downloadAndVerifyFromUrl(release, destination, url, index < release.apkUrls.size() - 1);
-                Log.i(TAG, "Verified APK source: " + url);
+                downloadAndVerifyFromParts(release, destination, parts, index < release.apkSources.size() - 1);
+                Log.i(TAG, "Verified APK source with " + parts.size() + " part(s)");
                 return;
             } catch (Exception error) {
                 if (downloadCancelled.get()) throw error;
                 lastError = error;
-                Log.i(TAG, "APK source failed, trying next: " + url + " (" + error.getMessage() + ")");
+                Log.i(TAG, "APK source failed, trying next (" + error.getMessage() + ")");
             }
         }
         throw new IOException("所有 APK 下载源均失败", lastError);
     }
 
-    private void downloadAndVerifyFromUrl(
+    private void downloadAndVerifyFromParts(
         AppUpdateRelease release,
         File destination,
-        String downloadUrl,
+        List<String> partUrls,
         boolean switchWhenSlow
     ) throws Exception {
         File parent = destination.getParentFile();
@@ -265,31 +271,33 @@ final class AppUpdateManager {
         if (temporary.exists() && !temporary.delete()) throw new IOException("无法清理旧下载");
 
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        HttpURLConnection connection = openConnectionFollowingRedirects(downloadUrl);
-        long total = connection.getContentLengthLong();
         long downloaded = 0L;
         long startedAt = android.os.SystemClock.elapsedRealtime();
-        try (InputStream input = new BufferedInputStream(connection.getInputStream());
-             FileOutputStream output = new FileOutputStream(temporary)) {
+        try (FileOutputStream output = new FileOutputStream(temporary)) {
             byte[] buffer = new byte[64 * 1024];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (downloadCancelled.get() || Thread.currentThread().isInterrupted()) throw new IOException("下载已取消");
-                if (sourceSwitchRequested.get()) throw new IOException("用户切换下载源");
-                output.write(buffer, 0, count);
-                digest.update(buffer, 0, count);
-                downloaded += count;
-                long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
-                long bytesPerSecond = downloaded * 1000L / Math.max(1L, elapsed);
-                publishProgress(downloaded, total > 0 ? total : release.apkSize, bytesPerSecond);
-                if (switchWhenSlow && elapsed >= SLOW_SOURCE_GRACE_MS
-                    && bytesPerSecond < MIN_DOWNLOAD_BYTES_PER_SECOND) {
-                    throw new IOException("当前下载源速度过慢（" + (bytesPerSecond / 1024L) + " KB/s），正在切换");
+            for (String partUrl : partUrls) {
+                HttpURLConnection connection = openConnectionFollowingRedirects(partUrl);
+                try (InputStream input = new BufferedInputStream(connection.getInputStream())) {
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        if (downloadCancelled.get() || Thread.currentThread().isInterrupted()) throw new IOException("下载已取消");
+                        if (sourceSwitchRequested.get()) throw new IOException("用户切换下载源");
+                        output.write(buffer, 0, count);
+                        digest.update(buffer, 0, count);
+                        downloaded += count;
+                        long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
+                        long bytesPerSecond = downloaded * 1000L / Math.max(1L, elapsed);
+                        publishProgress(downloaded, release.apkSize, bytesPerSecond);
+                        if (switchWhenSlow && elapsed >= SLOW_SOURCE_GRACE_MS
+                            && bytesPerSecond < MIN_DOWNLOAD_BYTES_PER_SECOND) {
+                            throw new IOException("当前下载源速度过慢（" + (bytesPerSecond / 1024L) + " KB/s），正在切换");
+                        }
+                    }
+                } finally {
+                    connection.disconnect();
                 }
             }
             output.getFD().sync();
-        } finally {
-            connection.disconnect();
         }
 
         String actualSha = toHex(digest.digest());

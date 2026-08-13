@@ -25,6 +25,8 @@ assert.match(workflow, /upstream_notes[\s\S]*printf '%s\\n'/);
 assert.match(workflow, /Prepare mirrored release notes/);
 assert.match(workflow, /secrets\.GITEE_TOKEN/);
 assert.match(workflow, /refs\/heads\/android-latest/);
+assert.match(workflow, /split -b 4m/);
+assert.match(workflow, /sources: \[\$giteeParts, \[\$githubApkUrl\]\]/);
 assert.match(workflow, /remote_mirror\/pull/);
 assert.match(workflow, /access_token=\$GITEE_TOKEN/);
 assert.match(workflow, /push --force origin HEAD:refs\/heads\/android-latest/);
@@ -34,7 +36,8 @@ assert.match(updater, /GITEE_UPDATE_MANIFEST/);
 assert.match(updater, /Update metadata source: Gitee mirror branch/);
 assert.match(updater, /Update metadata source: GitHub API fallback/);
 assert.match(updater, /parseUpdateManifest/);
-assert.match(updater, /optJSONArray\("urls"\)/);
+assert.match(updater, /optJSONArray\("sources"\)/);
+assert.match(updater, /downloadAndVerifyFromParts/);
 for (const publicProxy of ['ghfast.top', 'gh-proxy.com', 'ghproxy.net', 'cdn.jsdelivr.net', 'cdn.staticdelivr.com']) {
   assert.doesNotMatch(updater, new RegExp(publicProxy.replace('.', '\\.')));
 }

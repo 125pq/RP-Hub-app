@@ -15,7 +15,7 @@ final class AppUpdateRelease {
     final long versionCode;
     final String notes;
     final String apkName;
-    final List<String> apkUrls;
+    final List<List<String>> apkSources;
     final long apkSize;
     final String sha256;
 
@@ -24,7 +24,7 @@ final class AppUpdateRelease {
         long versionCode,
         String notes,
         String apkName,
-        List<String> apkUrls,
+        List<List<String>> apkSources,
         long apkSize,
         String sha256
     ) {
@@ -32,7 +32,7 @@ final class AppUpdateRelease {
         this.versionCode = versionCode;
         this.notes = notes == null || notes.trim().isEmpty() ? "本次更新未提供说明。" : notes.trim();
         this.apkName = apkName;
-        this.apkUrls = apkUrls;
+        this.apkSources = apkSources;
         this.apkSize = apkSize;
         this.sha256 = normalizeSha256(sha256);
     }
