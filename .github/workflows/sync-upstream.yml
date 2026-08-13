@@ -177,7 +177,7 @@ jobs:
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
           UPDATE_MANIFEST_PATH: ${{ steps.update_manifest.outputs.manifest_path }}
         run: |
-          if gh release view "$ANDROID_TAG" >/dev/null 2>&1; then
+          if gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Android Release $ANDROID_TAG already exists; skipping duplicate publication"
             exit 0
           fi
