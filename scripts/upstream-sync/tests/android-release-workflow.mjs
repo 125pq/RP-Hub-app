@@ -22,16 +22,18 @@ assert.match(workflow, /gh release create[\s\S]*--latest/);
 assert.match(workflow, /APK SHA-256/);
 assert.match(workflow, /repos\/STA1N156\/RP-Hub\/releases\/tags\/\$\{UPSTREAM_RELEASE_TAG\}/);
 assert.match(workflow, /upstream_notes[\s\S]*printf '%s\\n'/);
-assert.match(workflow, /Generate mirrored update manifest/);
-assert.match(workflow, /gitee\.com\/pq125pq\/rp-hub-app\/raw\/latest/);
+assert.match(workflow, /Prepare mirrored release notes/);
 assert.match(workflow, /secrets\.GITEE_TOKEN/);
-assert.match(workflow, /HEAD:refs\/heads\/latest/);
-assert.match(workflow, /git -C "\$mirror_dir" push --force gitee/);
-assert.doesNotMatch(workflow, /git push --force (?:origin|gitee) HEAD:main/);
-assert.match(updater, /GITEE_UPDATE_MANIFEST/);
-assert.match(updater, /Update metadata source: Gitee latest branch/);
+assert.match(workflow, /api\/v5\/repos\/pq125pq\/rp-hub-app/);
+assert.match(workflow, /releases\/\$release_id\/attach_files/);
+assert.match(workflow, /timeout-minutes: 15/);
+assert.match(workflow, /--max-time 600/);
+assert.doesNotMatch(workflow, /push --force/);
+assert.match(updater, /GITEE_RELEASE_API/);
+assert.match(updater, /Update metadata source: Gitee Release/);
 assert.match(updater, /Update metadata source: GitHub API fallback/);
-assert.match(updater, /optJSONArray\("urls"\)/);
+assert.match(updater, /parseGiteeRelease/);
+assert.match(updater, /githubFallback/);
 for (const publicProxy of ['ghfast.top', 'gh-proxy.com', 'ghproxy.net', 'cdn.jsdelivr.net', 'cdn.staticdelivr.com']) {
   assert.doesNotMatch(updater, new RegExp(publicProxy.replace('.', '\\.')));
 }
