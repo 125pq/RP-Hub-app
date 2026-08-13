@@ -23,8 +23,8 @@ android {
         applicationId "io.github.pq125.rphub"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode 10802
+        versionName "1.8.2"
         manifestPlaceholders = [appLabel: 'RP Hub']
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

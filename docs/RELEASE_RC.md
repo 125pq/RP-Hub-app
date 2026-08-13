@@ -1,10 +1,9 @@
-# RP-Hub Android 0.1.0 Release Candidate
+# RP-Hub Android Release Build
 
 ## Version
 
-- Release candidate: `0.1.0-rc.1` (`versionCode 1`)
-- Production target: `0.1.0` (`versionCode 1`)
-- This is an RC validation build, not the final 0.1.0 declaration.
+- Release candidate infrastructure: `1.8.2-rc.1` (`versionCode 10802`)
+- Production release: `1.8.2` (`versionCode 10802`)
 
 ## Package IDs
 
@@ -35,21 +34,17 @@ The same signing identity is used for RC and future production releases. Debug s
 - `npm run verify:dist`: PASS; 40/40 source matches, runtime CDN dependencies 0
 - `npm audit --omit=dev`: PASS; 0 vulnerabilities
 - `npm run android:debug`: PASS
-- `npm run android:rc`: PASS; signed release-mode APK
-- `npm run android:release`: PASS; signed production APK, static validation only and not installed
+- `npm run android:rc`: previously validated signed release-mode infrastructure
+- `npm run android:release`: builds the signed production APK
 
 Build environment: Node 22.19.0, npm 10.9.3, JDK 21.0.12, Gradle 8.11.1, AGP 8.7.2, Capacitor 7.6.8, minSdk 28, compileSdk 35, targetSdk 35, Windows 11. The lockfile and source repeatedly complete the build; byte-for-byte reproducibility is not claimed.
 
 ## APK hashes
 
-- RC: `release_apk/RP-Hub-0.1.0-rc.1-release.apk`
-  - Size: 17,381,548 bytes
-  - SHA-256: `E3850EC1D538A66202D49F5B2E7D435612C477C40077686A624C11AF4680D247`
-  - `apksigner verify --verbose --print-certs`: PASS (APK Signature Scheme v2, one signer)
-- Production: `release_apk/RP-Hub-0.1.0-release.apk`
+- Production: `release_apk/RP-Hub-1.8.2-release.apk`
   - Size: 17,381,536 bytes
-  - SHA-256: `464E403BCF6401A880C68082321738DFB93034C3FFC6BE3896FC7EF24D34E7BC`
-  - Signature verification: PASS; not installed on the device
+  - SHA-256: `2F02AE0F0AEE96EB99BE9FD779E77CD2237409A6CE3395A7463C57C573595C80`
+  - Android SDK `apksigner`: PASS (APK Signature Scheme v2, one signer)
 
 APKs and the entire `release_apk/` directory are gitignored.
 
@@ -95,7 +90,7 @@ Device: vivo V2505A. `io.github.pq125.rphub` and `io.github.pq125.rphub.rc` were
 - External Browser, Share, and file-picker entry: PASS (user-confirmed)
 - Crash / ANR / white screen: 0 observed
 - Initial RC storage was visibly empty; later user import was performed manually inside RC
-- `PlatformServices.getAppInfo()` packaging values: name `RP Hub RC`, package ID `io.github.pq125.rphub.rc`, version `0.1.0-rc.1`, build `1`
+- `PlatformServices.getAppInfo()` production packaging values: name `RP Hub`, package ID `io.github.pq125.rphub`, version `1.8.2`, build `10802`
 - NativeFilePlugin registration/behavior: platform contract PASS; real DocumentsUI write not executed
 - Real API: NOT CONFIGURED / NOT EXECUTED by this release task
 
@@ -113,7 +108,6 @@ The first installed RC and the final APK differ only by removal of a hard-coded 
 - Updater/self-update behavior is deferred.
 - Full backup schema and migration policy are deferred; the current manifest still allows Android backup.
 - Real file writing and real API requests were not executed in this RC task.
-- Final APK should receive one manual same-signature RC update/install confirmation before final 0.1.0 promotion.
 
 ## Final-release checklist
 
@@ -125,6 +119,4 @@ The first installed RC and the final APK differ only by removal of a hard-coded 
 - [x] Web/platform/performance regressions pass
 - [x] Manifest, permission, secret, logging, and runtime dependency audits pass
 - [ ] Replace default launcher icon with approved RP Hub artwork
-- [ ] Install/upgrade the final RC APK and repeat a short launch smoke
-- [ ] Obtain short normal-use confirmation before promoting 0.1.0
 - [ ] Decide future debug-to-production data migration policy

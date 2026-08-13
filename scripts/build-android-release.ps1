@@ -57,7 +57,7 @@ if ($env:JAVA_TOOL_OPTIONS -notmatch 'javax\.net\.ssl\.trustStoreType=') {
 
 $variant = if ($Target -eq 'rc') { 'ReleaseCandidate' } else { 'Release' }
 $sourceFolder = if ($Target -eq 'rc') { 'releaseCandidate' } else { 'release' }
-$outputName = if ($Target -eq 'rc') { 'RP-Hub-0.1.0-rc.1-release.apk' } else { 'RP-Hub-0.1.0-release.apk' }
+$outputName = if ($Target -eq 'rc') { 'RP-Hub-1.8.2-rc.1-release.apk' } else { 'RP-Hub-1.8.2-release.apk' }
 
 Write-Output "BUILD_TARGET=$Target"
 Write-Output "JAVA_HOME=$jdkHome"
