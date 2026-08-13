@@ -73,7 +73,7 @@ jobs:
       - name: Sync Capacitor and build Android release
         run: |
           npx cap sync android
-          ./android/gradlew --project-dir android testDebugUnitTest assembleRelease
+          bash android/gradlew --project-dir android testDebugUnitTest assembleRelease
 
       - name: Check final diff
         run: |
