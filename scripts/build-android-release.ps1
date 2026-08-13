@@ -66,7 +66,8 @@ try {
 
     $outputDirectory = Join-Path $projectRoot 'release_apk'
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $outputApk = Join-Path $outputDirectory 'RP-Hub-1.8.2-release.apk'
+    $versionName = if ($env:RPHUB_VERSION_NAME) { $env:RPHUB_VERSION_NAME } else { '1.8.3-2' }
+    $outputApk = Join-Path $outputDirectory "RP-Hub-$versionName-release.apk"
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
 
     $apksigner = Join-Path $androidSdk 'build-tools\35.0.0\apksigner.bat'

@@ -20,6 +20,9 @@
         constructor(host) {
             super(host);
             this.externalLinkHandlerInstalled = false;
+            this.securePasteInstalled = false;
+            this.securePasteObserver = null;
+            this.securePasteMenu = null;
         }
 
         isNative() {
@@ -178,10 +181,121 @@
             this.openExternalUrl(url.href).catch(error => console.error('Failed to open external URL:', error));
         };
 
+        closeSecurePasteMenu() {
+            this.securePasteMenu?.remove?.();
+            this.securePasteMenu = null;
+        }
+
+        showSecurePasteMenu(input, clientX, clientY) {
+            this.closeSecurePasteMenu();
+            const menu = this.global.document.createElement('button');
+            menu.type = 'button';
+            menu.className = 'rphub-native-paste-menu';
+            menu.textContent = '粘贴';
+            menu.setAttribute('aria-label', '从系统剪贴板粘贴');
+            menu.style.left = `${Math.max(8, Math.min(clientX - 28, this.global.innerWidth - 72))}px`;
+            menu.style.top = `${Math.max(8, clientY - 52)}px`;
+            menu.addEventListener('pointerdown', event => {
+                event.preventDefault();
+                event.stopPropagation();
+            });
+            menu.addEventListener('click', async event => {
+                event.preventDefault();
+                event.stopPropagation();
+                try {
+                    const response = await this.invokeNative('NativeClipboard', 'readText');
+                    const value = response?.result?.value ?? '';
+                    if (response.supported && value) {
+                        input.value = String(value);
+                        input.dispatchEvent(new this.global.Event('input', { bubbles: true }));
+                        input.dispatchEvent(new this.global.Event('change', { bubbles: true }));
+                        this.global.navigator?.vibrate?.(30);
+                    }
+                } catch (error) {
+                    console.error('Failed to paste into secure input:', error);
+                } finally {
+                    this.closeSecurePasteMenu();
+                }
+            });
+            this.global.document.body.appendChild(menu);
+            this.securePasteMenu = menu;
+        }
+
+        decorateSecurePasteInput(input) {
+            if (!input || input.dataset.rphubNativePaste === 'true') return;
+            input.dataset.rphubNativePaste = 'true';
+            let timer = null;
+            let startX = 0;
+            let startY = 0;
+            const cancelTimer = () => {
+                if (timer !== null) this.global.clearTimeout(timer);
+                timer = null;
+            };
+            input.addEventListener('pointerdown', event => {
+                cancelTimer();
+                this.closeSecurePasteMenu();
+                startX = event.clientX;
+                startY = event.clientY;
+                timer = this.global.setTimeout(() => {
+                    timer = null;
+                    this.showSecurePasteMenu(input, startX, startY);
+                }, 550);
+            });
+            input.addEventListener('pointermove', event => {
+                if (Math.abs(event.clientX - startX) > 12 || Math.abs(event.clientY - startY) > 12) cancelTimer();
+            });
+            input.addEventListener('pointerup', cancelTimer);
+            input.addEventListener('pointercancel', cancelTimer);
+            input.addEventListener('blur', cancelTimer);
+            input.addEventListener('contextmenu', event => {
+                event.preventDefault();
+                cancelTimer();
+                this.showSecurePasteMenu(input, event.clientX || startX, event.clientY || startY);
+            });
+        }
+
+        decorateSecurePasteInputs(root) {
+            if (root?.matches?.('input[type="password"]')) this.decorateSecurePasteInput(root);
+            root?.querySelectorAll?.('input[type="password"]').forEach(input => this.decorateSecurePasteInput(input));
+        }
+
+        installSecurePasteSupport() {
+            if (this.securePasteInstalled || !this.global.document?.documentElement) return;
+            this.securePasteInstalled = true;
+            const style = this.global.document.createElement('style');
+            style.id = 'rphub-android-secure-paste-style';
+            style.textContent = `
+                .rphub-native-paste-menu {
+                    position: fixed; z-index: 2147483647; min-width: 3.5rem; min-height: 2.25rem;
+                    padding: 0.45rem 0.75rem; border: 0; border-radius: 0.5rem;
+                    background: #263238; color: #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+                    font-size: 0.875rem; font-weight: 500; line-height: 1;
+                }
+            `;
+            this.global.document.head?.appendChild(style);
+            this.decorateSecurePasteInputs(this.global.document);
+            this.global.document.addEventListener('pointerdown', event => {
+                if (!event.target?.closest?.('.rphub-native-paste-menu')) this.closeSecurePasteMenu();
+            }, true);
+            if (typeof this.global.MutationObserver === 'function') {
+                this.securePasteObserver = new this.global.MutationObserver(records => {
+                    for (const record of records) {
+                        record.addedNodes.forEach(node => {
+                            if (node.nodeType === 1) this.decorateSecurePasteInputs(node);
+                        });
+                    }
+                });
+                this.securePasteObserver.observe(this.global.document.documentElement, { childList: true, subtree: true });
+            }
+        }
+
         initialize() {
-            if (this.externalLinkHandlerInstalled || !this.global.document?.addEventListener) return;
-            this.externalLinkHandlerInstalled = true;
-            this.global.document.addEventListener('click', this.handleExternalLinkClick, true);
+            if (!this.global.document?.addEventListener) return;
+            if (!this.externalLinkHandlerInstalled) {
+                this.externalLinkHandlerInstalled = true;
+                this.global.document.addEventListener('click', this.handleExternalLinkClick, true);
+            }
+            this.installSecurePasteSupport();
         }
     }
 

@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(NativeFilePlugin.class);
+        registerPlugin(NativeClipboardPlugin.class);
         super.onCreate(savedInstanceState);
         appUpdateManager = new AppUpdateManager(this);
         if (savedInstanceState == null) appUpdateManager.checkOnColdStart();

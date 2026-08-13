@@ -3,7 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-export function androidReleaseMetadata(upstreamTag) {
+export function androidReleaseMetadata(upstreamTag, revision = 0) {
   const match = String(upstreamTag || '').match(/^v?(\d+)\.(\d+)\.(\d+)$/);
   if (!match) throw new Error(`Upstream release tag is not a supported semantic version: ${upstreamTag || '(empty)'}`);
   const [, majorText, minorText, patchText] = match;
@@ -11,11 +11,16 @@ export function androidReleaseMetadata(upstreamTag) {
   const minor = Number(minorText);
   const patch = Number(patchText);
   if (minor > 99 || patch > 99) throw new Error(`Android versionCode requires minor and patch below 100: ${upstreamTag}`);
-  const versionCode = major * 10000 + minor * 100 + patch;
+  const numericRevision = Number(revision);
+  if (!Number.isInteger(numericRevision) || numericRevision < 0 || numericRevision > 99) {
+    throw new Error(`Android release revision must be an integer from 0 through 99: ${revision}`);
+  }
+  const versionCode = (major * 10000 + minor * 100 + patch) * 100 + numericRevision;
   if (!Number.isSafeInteger(versionCode) || versionCode < 1 || versionCode > 2100000000) {
     throw new Error(`Android versionCode is outside the supported range: ${versionCode}`);
   }
-  const versionName = `${major}.${minor}.${patch}`;
+  const baseVersionName = `${major}.${minor}.${patch}`;
+  const versionName = numericRevision > 0 ? `${baseVersionName}-${numericRevision}` : baseVersionName;
   return {
     versionName,
     versionCode: String(versionCode),

@@ -45,6 +45,10 @@ for (const method of ['isNative', 'getPlatform', 'openExternalUrl', 'share', 'ex
   assert.match(android, new RegExp(`\\b${method}\\s*\\(`), `Android adapter missing ${method}`);
 }
 assert.match(android, /class AndroidAdapter extends platform\.BrowserAdapter/);
+assert.match(android, /invokeNative\('NativeClipboard', 'readText'\)/, 'Android secure paste must use the native clipboard');
+assert.match(android, /input\[type="password"\]/, 'Android secure paste must preserve password inputs');
+assert.match(android, /rphub-native-paste-menu/, 'Android secure paste needs a contextual action');
+assert.match(await read('android/app/src/main/java/io/github/pq125/rphub/MainActivity.java'), /registerPlugin\(NativeClipboardPlugin\.class\)/);
 
 const scanRoots = ['assets/js', 'character', 'novel'];
 const candidates = [];
