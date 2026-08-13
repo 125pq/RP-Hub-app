@@ -66,3 +66,17 @@ node scripts/upstream-sync/tests/reapply-idempotence.mjs
 - `RPHUB_RELEASE_KEY_PASSWORD`
 
 keystore 只会解码到 GitHub Runner 的临时目录，不会写入仓库或构建产物目录。
+
+可以使用仓库提供的 PowerShell 脚本读取现有 `keystore.properties` 并配置四项 Secrets。先执行只检查、不上传的演练：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-github-release-secrets.ps1 -WhatIf
+```
+
+确认仓库、配置文件和永久 keystore 路径正确后正式上传：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-github-release-secrets.ps1
+```
+
+脚本通过标准输入向 GitHub CLI 传递 Secret，不会打印密码或 keystore 的 Base64 内容；结束时只检查四个 Secret 名称是否存在。
