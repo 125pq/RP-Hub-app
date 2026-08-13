@@ -3,7 +3,10 @@ package io.github.pq125.rphub;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
+import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.util.Base64;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
@@ -18,12 +21,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @CapacitorPlugin(name = "NativeFile")
 public class NativeFilePlugin extends Plugin {
 
     private static final Pattern MIME_PATTERN = Pattern.compile("^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$");
+    private static final Pattern MISPLACED_JSON_COPY_SUFFIX = Pattern.compile("^(.*)(\\.jsonl?)\\((\\d+)\\)$", Pattern.CASE_INSENSITIVE);
     private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
     private final Object stateLock = new Object();
     private boolean saveReserved;
@@ -97,9 +102,10 @@ public class NativeFilePlugin extends Plugin {
 
         fileExecutor.execute(() -> {
             try {
-                OutputStream stream = getContext().getContentResolver().openOutputStream(uri, "wt");
+                Uri outputUri = normalizeDuplicateDocumentName(uri);
+                OutputStream stream = getContext().getContentResolver().openOutputStream(outputUri, "wt");
                 if (stream == null) throw new IOException("Document provider returned no output stream");
-                SaveSession newSession = new SaveSession(UUID.randomUUID().toString(), uri, stream);
+                SaveSession newSession = new SaveSession(UUID.randomUUID().toString(), outputUri, stream);
                 synchronized (stateLock) {
                     session = newSession;
                     saveReserved = false;
@@ -245,6 +251,45 @@ public class NativeFilePlugin extends Plugin {
     static String sanitizeFilename(String value) {
         if (value == null) return "";
         return value.trim().replaceAll("[\\x00-\\x1F\\x7F/\\\\:*?\"<>|]", "_");
+    }
+
+    static String normalizeDuplicateFilename(String filename) {
+        if (filename == null) return null;
+        Matcher matcher = MISPLACED_JSON_COPY_SUFFIX.matcher(filename);
+        return matcher.matches()
+            ? matcher.group(1) + "(" + matcher.group(3) + ")" + matcher.group(2)
+            : filename;
+    }
+
+    private Uri normalizeDuplicateDocumentName(Uri uri) {
+        String currentName = null;
+        try (Cursor cursor = getContext().getContentResolver().query(
+            uri,
+            new String[] { OpenableColumns.DISPLAY_NAME },
+            null,
+            null,
+            null
+        )) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameColumn >= 0) currentName = cursor.getString(nameColumn);
+            }
+        } catch (RuntimeException ignored) {
+            return uri;
+        }
+
+        String normalizedName = normalizeDuplicateFilename(currentName);
+        if (normalizedName == null || normalizedName.equals(currentName)) return uri;
+        try {
+            Uri renamedUri = DocumentsContract.renameDocument(
+                getContext().getContentResolver(),
+                uri,
+                normalizedName
+            );
+            return renamedUri == null ? uri : renamedUri;
+        } catch (IOException | RuntimeException ignored) {
+            return uri;
+        }
     }
 
     static String normalizeMimeType(String value) {
