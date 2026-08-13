@@ -82,7 +82,7 @@ try {
 
     $outputDirectory = Join-Path $projectRoot 'debug_apk'
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $outputApk = Join-Path $outputDirectory 'RP-Hub-0.1.0-debug.apk'
+    $outputApk = Join-Path $outputDirectory 'RP-Hub-1.8.2-debug.apk'
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
 
     $apk = Get-Item -LiteralPath $outputApk

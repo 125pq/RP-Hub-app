@@ -50,6 +50,30 @@
     padding-left: calc(1rem + var(--safe-left));
 }
 
+/* Main chat on tablets/desktop-width WebViews: keep the existing fixed layers,
+   but offset their controls from every edge-to-edge system-bar inset. */
+@media (min-width: 769px) {
+    .safe-sidebar-header {
+        box-sizing: content-box;
+        padding-top: var(--safe-top);
+    }
+
+    .chat-header-controls {
+        box-sizing: content-box;
+        min-height: 3rem;
+        height: 3rem;
+        padding-top: var(--safe-top);
+        padding-right: calc(1rem + var(--safe-right));
+        padding-left: calc(1rem + var(--safe-left));
+    }
+
+    .input-area-mobile {
+        bottom: calc(var(--keyboard-inset, 0px) + var(--safe-bottom-effective)) !important;
+        padding-right: calc(0.75rem + var(--safe-right)) !important;
+        padding-left: calc(0.75rem + var(--safe-left)) !important;
+    }
+}
+
 @media (max-width: 768px) {
     .chat-header-controls {
         box-sizing: content-box;
@@ -139,12 +163,13 @@
         height: 3rem;
         padding-top: var(--safe-top);
         padding-right: calc(1rem + var(--safe-right));
-        padding-left: 1rem;
+        padding-left: calc(1rem + var(--safe-left));
     }
 
     .input-area-mobile {
         bottom: calc(var(--keyboard-inset, 0px) + var(--safe-bottom-effective)) !important;
         padding-right: calc(0.75rem + var(--safe-right)) !important;
+        padding-left: calc(0.75rem + var(--safe-left)) !important;
     }
 
     .app-sidebar {

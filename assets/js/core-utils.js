@@ -895,19 +895,19 @@ window.RPHubUtils = {
         }
     };
 
-    const getPlatformServices = () => {
-        if (window.PlatformServices) return window.PlatformServices;
+    const getPlatformAdapter = () => {
+        if (window.platformAdapter) return window.platformAdapter;
         try {
-            if (window.parent !== window && window.parent.PlatformServices) return window.parent.PlatformServices;
+            if (window.parent !== window && window.parent.platformAdapter) return window.parent.platformAdapter;
         } catch {}
         return null;
     };
 
     const saveGeneratedFile = async (data, filename, options = {}) => {
         const mimeType = String(options.mimeType || data?.type || 'application/octet-stream');
-        const platformServices = getPlatformServices();
-        if (platformServices?.saveFile) {
-            const result = await platformServices.saveFile({ data, filename, mimeType });
+        const adapter = getPlatformAdapter();
+        if (adapter?.exportFile) {
+            const result = await adapter.exportFile({ data, filename, mimeType });
             if (result?.supported === false) throw new Error('当前平台不支持文件保存');
             return result;
         }
@@ -929,6 +929,7 @@ window.RPHubUtils = {
         getImageStyleArtists,
         imageUrlToPngBytes,
         injectPngTextChunk,
+        getPlatformAdapter,
         saveGeneratedFile,
         normalizeImportedRegexScript,
         normalizeRegexScript,

@@ -44,6 +44,11 @@ android {
         }
     }
     buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+            manifestPlaceholders = [appLabel: 'RP Hub Debug']
+        }
         release {
             debuggable false
             minifyEnabled false
@@ -51,17 +56,10 @@ android {
             signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
-        releaseCandidate {
-            initWith release
-            applicationIdSuffix '.rc'
-            versionNameSuffix '-rc.1'
-            manifestPlaceholders = [appLabel: 'RP Hub RC']
-            matchingFallbacks = ['release']
-        }
     }
 
     applicationVariants.configureEach { variant ->
-        if (variant.buildType.name in ['release', 'releaseCandidate'] && !hasReleaseSigning) {
+        if (variant.buildType.name == 'release' && !hasReleaseSigning) {
             variant.assembleProvider.configure {
                 doFirst {
                     throw new GradleException('Release signing is not configured. Copy keystore.properties.example to keystore.properties or set the RPHUB_RELEASE_* environment variables.')

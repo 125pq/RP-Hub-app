@@ -1,9 +1,3 @@
-param(
-    [Parameter(Mandatory = $true)]
-    [ValidateSet('rc', 'production')]
-    [string]$Target
-)
-
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -55,11 +49,7 @@ if ($env:JAVA_TOOL_OPTIONS -notmatch 'javax\.net\.ssl\.trustStoreType=') {
     $env:JAVA_TOOL_OPTIONS = (($env:JAVA_TOOL_OPTIONS, '-Djavax.net.ssl.trustStoreType=Windows-ROOT') | Where-Object { $_ }) -join ' '
 }
 
-$variant = if ($Target -eq 'rc') { 'ReleaseCandidate' } else { 'Release' }
-$sourceFolder = if ($Target -eq 'rc') { 'releaseCandidate' } else { 'release' }
-$outputName = if ($Target -eq 'rc') { 'RP-Hub-1.8.2-rc.1-release.apk' } else { 'RP-Hub-1.8.2-release.apk' }
-
-Write-Output "BUILD_TARGET=$Target"
+Write-Output "BUILD_TARGET=production"
 Write-Output "JAVA_HOME=$jdkHome"
 Write-Output "ANDROID_HOME=$androidSdk"
 
@@ -68,15 +58,15 @@ try {
     & npm.cmd run android:sync
     if ($LASTEXITCODE -ne 0) { throw 'Capacitor Android sync failed.' }
 
-    & (Join-Path $androidRoot 'gradlew.bat') --project-dir $androidRoot clean "assemble$variant"
-    if ($LASTEXITCODE -ne 0) { throw "Android $Target release build failed." }
+    & (Join-Path $androidRoot 'gradlew.bat') --project-dir $androidRoot clean assembleRelease
+    if ($LASTEXITCODE -ne 0) { throw 'Android production release build failed.' }
 
-    $sourceApk = Join-Path $androidRoot "app\build\outputs\apk\$sourceFolder\app-$sourceFolder.apk"
+    $sourceApk = Join-Path $androidRoot 'app\build\outputs\apk\release\app-release.apk'
     if (-not (Test-Path -LiteralPath $sourceApk)) { throw "Release APK was not created: $sourceApk" }
 
     $outputDirectory = Join-Path $projectRoot 'release_apk'
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $outputApk = Join-Path $outputDirectory $outputName
+    $outputApk = Join-Path $outputDirectory 'RP-Hub-1.8.2-release.apk'
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
 
     $apksigner = Join-Path $androidSdk 'build-tools\35.0.0\apksigner.bat'

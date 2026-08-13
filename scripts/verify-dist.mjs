@@ -36,6 +36,7 @@ const requiredFiles = [
   'assets/js/runtime-services.js',
   'assets/js/ui-components.js',
   'assets/js/platform-services.js',
+  'assets/js/rphub-android-adapter.js',
   'assets/js/safe-area.js',
   'assets/js/app.js',
   'assets/vendor/vue/vue.global.prod.js',

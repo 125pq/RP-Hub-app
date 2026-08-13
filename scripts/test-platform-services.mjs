@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const source = await readFile(new URL('../assets/js/platform-services.js', import.meta.url), 'utf8');
+const platformSource = await readFile(new URL('../assets/js/platform-services.js', import.meta.url), 'utf8');
+const androidSource = await readFile(new URL('../assets/js/rphub-android-adapter.js', import.meta.url), 'utf8');
 const toPlainObject = value => JSON.parse(JSON.stringify(value));
+
+assert.doesNotMatch(platformSource, /\bCapacitor\b|NativeFile/, 'generic platform facade must not contain Android bridge details');
+assert.match(androidSource, /\bCapacitor\b/);
+assert.match(androidSource, /NativeFile/);
 
 function createDocument(readyState = 'complete') {
   const listeners = new Map();
@@ -25,17 +30,20 @@ function loadPlatformServices(overrides = {}) {
   const window = {
     Blob,
     Uint8Array,
+    atob,
     btoa,
     console,
     document,
     location: new URL('https://app.example/index.html'),
     navigator: {},
     open: () => ({ opener: {} }),
+    setTimeout,
     ...overrides,
   };
   const context = vm.createContext({ Blob, URL, Uint8Array, window });
-  vm.runInContext(source, context, { filename: 'platform-services.js' });
-  return { document, services: window.PlatformServices, window };
+  vm.runInContext(platformSource, context, { filename: 'platform-services.js' });
+  vm.runInContext(androidSource, context, { filename: 'rphub-android-adapter.js' });
+  return { document, services: window.platformAdapter, window, context };
 }
 
 {
@@ -49,10 +57,11 @@ function loadPlatformServices(overrides = {}) {
 
   assert.equal(services.isNative(), false);
   assert.equal(services.getPlatform(), 'web');
+  assert.equal(services, window.PlatformServices, 'legacy PlatformServices alias must share the singleton');
   assert.equal((await services.share({ text: 'test' })).supported, false);
   const downloads = [];
   window.RPHubCardUtils = { downloadBlob: (blob, filename) => downloads.push({ blob, filename }) };
-  const webSave = await services.saveFile({ filename: '测试.json', mimeType: 'application/json', data: '{"ok":true}' });
+  const webSave = await services.exportFile({ filename: '测试.json', mimeType: 'application/json', data: '{"ok":true}' });
   assert.equal(webSave.cancelled, false);
   assert.equal(downloads[0].filename, '测试.json');
   assert.equal(await downloads[0].blob.text(), '{"ok":true}');
@@ -71,6 +80,12 @@ function loadPlatformServices(overrides = {}) {
   assert.deepEqual(toPlainObject(states), [{ isActive: false, state: 'background' }]);
   removeState();
   assert.equal(typeof await services.onBackButton(() => true), 'function');
+  assert.equal(typeof services.pickFile, 'function');
+  assert.equal(typeof services.importFile, 'function');
+  assert.equal(await services.readFile(new Blob(['imported']), 'text'), 'imported');
+
+  const encoded = await services.blobToBase64(new Blob(['adapter'], { type: 'text/plain' }));
+  assert.equal(await services.base64ToBlob(encoded, 'text/plain').text(), 'adapter');
 
   window.navigator.share = async options => options;
   const shareResult = await services.share({ title: 'RP Hub', text: 'test' });
@@ -129,7 +144,7 @@ function loadPlatformServices(overrides = {}) {
     },
   };
   const document = createDocument();
-  const { services } = loadPlatformServices({
+  const { services, context, window } = loadPlatformServices({
     Capacitor: {
       Plugins: plugins,
       getPlatform: () => 'android',
@@ -140,6 +155,10 @@ function loadPlatformServices(overrides = {}) {
 
   assert.equal(services.isNative(), true);
   assert.equal(services.getPlatform(), 'android');
+  assert.equal((await services.invokeNative('MissingPlugin', 'missingMethod')).supported, false);
+  const nativeImplementation = window.RPHubPlatform.getImplementation();
+  vm.runInContext(androidSource, context, { filename: 'rphub-android-adapter.js' });
+  assert.equal(window.RPHubPlatform.getImplementation(), nativeImplementation, 'Android adapter initialization must be idempotent');
   await services.openExternalUrl('https://example.com/native');
   assert.deepEqual(toPlainObject(calls.browser[0]), { url: 'https://example.com/native' });
 
@@ -151,7 +170,7 @@ function loadPlatformServices(overrides = {}) {
   });
 
   const boundaryText = `${'a'.repeat((256 * 1024) - 1)}😺\n中文`;
-  const fileResult = await services.saveFile({
+  const fileResult = await services.exportFile({
     filename: '聊天:备份.jsonl',
     mimeType: 'application/jsonl; charset=utf-8',
     data: boundaryText,
@@ -251,4 +270,4 @@ function loadPlatformServices(overrides = {}) {
   assert.deepEqual(toPlainObject(cancelled), { supported: true, cancelled: true });
 }
 
-console.log('PlatformServices browser fallback, native file chunks, cancellation, and error contracts: PASS');
+console.log('PlatformAdapter browser fallback, Android bridge, file chunks, cancellation, and singleton contracts: PASS');

@@ -1990,14 +1990,14 @@
                         content += `===========================\n剧情摘要汇总\n===========================\n\n${summaries}`;
                     }
                     
-                    let platformServices = window.PlatformServices;
+                    let adapter = window.platformAdapter;
                     try {
-                        if (!platformServices && window.parent !== window) platformServices = window.parent.PlatformServices;
+                        if (!adapter && window.parent !== window) adapter = window.parent.platformAdapter;
                     } catch {}
-                    if (platformServices?.saveFile) {
+                    if (adapter?.exportFile) {
                         let result;
                         try {
-                            result = await platformServices.saveFile({
+                            result = await adapter.exportFile({
                                 data: content,
                                 filename: `${novel.value.title || '小说导出'}.txt`,
                                 mimeType: 'text/plain'

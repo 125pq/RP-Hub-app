@@ -7,12 +7,12 @@
     "build:css": "node scripts/build-css.mjs",
     "build:web": "npm run prepare:vendor && npm run build:css && node scripts/build-web.mjs",
     "verify:dist": "node scripts/verify-dist.mjs",
-    "test:platform": "node scripts/test-platform-services.mjs",
+    "test:syntax": "node --check assets/js/platform-services.js && node --check assets/js/rphub-android-adapter.js && node --check assets/js/core-utils.js && node --check assets/js/app.js",
+    "test:platform": "npm run test:syntax && node scripts/test-platform-services.mjs && node scripts/test-safe-area-layout.mjs",
     "test:performance": "node scripts/test-performance-benchmark.mjs && node scripts/test-offscreen-iframe-lifecycle.mjs && node scripts/test-streaming-flush.mjs",
     "android:sync": "npm run build:web && npx cap sync android",
     "android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-debug.ps1",
-    "android:rc": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-release.ps1 -Target rc",
-    "android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-release.ps1 -Target production",
+    "android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-release.ps1",
     "android:open": "npx cap open android"
   },
   "dependencies": {

@@ -257,7 +257,7 @@ public class NativeFilePlugin extends Plugin {
         if (filename == null) return null;
         Matcher matcher = MISPLACED_JSON_COPY_SUFFIX.matcher(filename);
         return matcher.matches()
-            ? matcher.group(1) + "(" + matcher.group(3) + ")" + matcher.group(2)
+            ? matcher.group(1).replaceFirst("\\s+$", "") + " (" + matcher.group(3) + ")" + matcher.group(2)
             : filename;
     }
 

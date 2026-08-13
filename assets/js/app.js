@@ -1462,10 +1462,10 @@ const app = createApp({
         };
 
         const initializePlatformAdapters = async () => {
-            const platformServices = window.PlatformServices;
-            if (!platformServices) return;
-            removePlatformBackListener = await platformServices.onBackButton(handlePlatformBackButton);
-            removePlatformStateListener = await platformServices.onAppStateChange(({ isActive }) => {
+            const adapter = window.platformAdapter;
+            if (!adapter) return;
+            removePlatformBackListener = await adapter.onBackButton(handlePlatformBackButton);
+            removePlatformStateListener = await adapter.onAppStateChange(({ isActive }) => {
                 isNativeAppActive = isActive;
             });
         };
