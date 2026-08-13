@@ -225,7 +225,7 @@ jobs:
             --arg githubApkUrl "$github_apk_url" \
             --argjson apkSize "$(stat -c %s "$APK_PATH")" \
             --arg apkSha256 "$APK_SHA256" \
-            '{schemaVersion: 1, versionName: $versionName, versionCode: $versionCode, tag: $tag, notes: $notes, apk: {name: $apkName, sources: [$giteeParts, [$githubApkUrl]], size: $apkSize, sha256: $apkSha256}}' \
+            '{schemaVersion: 1, versionName: $versionName, versionCode: $versionCode, tag: $tag, notes: $notes, apk: {name: $apkName, sources: [[$githubApkUrl], $giteeParts], size: $apkSize, sha256: $apkSha256}}' \
             > "$mirror_dir/android-update.json"
 
           git -C "$mirror_dir" init

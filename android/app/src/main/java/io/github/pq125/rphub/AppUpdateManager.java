@@ -100,23 +100,32 @@ final class AppUpdateManager {
 
     private AppUpdateRelease fetchLatestRelease() throws IOException, JSONException {
         Exception lastError = null;
+        AppUpdateRelease githubRelease = null;
         try {
-            AppUpdateRelease release = parseUpdateManifest(
-                new JSONObject(readUtf8(GITEE_UPDATE_MANIFEST, MAX_RESPONSE_BYTES))
-            );
-            Log.i(TAG, "Update metadata source: Gitee mirror branch");
-            return release;
+            githubRelease = parseGitHubRelease(new JSONObject(readUtf8(LATEST_RELEASE_API, MAX_RESPONSE_BYTES)));
         } catch (IOException | JSONException error) {
             lastError = error;
         }
         try {
-            AppUpdateRelease release = parseGitHubRelease(new JSONObject(readUtf8(LATEST_RELEASE_API, MAX_RESPONSE_BYTES)));
-            if (release != null) {
-                Log.i(TAG, "Update metadata source: GitHub API fallback");
-                return release;
+            AppUpdateRelease mirrorRelease = parseUpdateManifest(
+                new JSONObject(readUtf8(GITEE_UPDATE_MANIFEST, MAX_RESPONSE_BYTES))
+            );
+            if (githubRelease == null) {
+                Log.i(TAG, "Update metadata source: Gitee mirror fallback");
+                return mirrorRelease;
             }
+            if (githubRelease.versionCode == mirrorRelease.versionCode
+                && githubRelease.sha256.equals(mirrorRelease.sha256)) {
+                Log.i(TAG, "Update metadata source: GitHub API with Gitee download fallback");
+                return mirrorRelease;
+            }
+            Log.i(TAG, "Gitee mirror metadata differs; using GitHub only");
         } catch (IOException | JSONException error) {
             lastError = error;
+        }
+        if (githubRelease != null) {
+            Log.i(TAG, "Update metadata source: GitHub API");
+            return githubRelease;
         }
         if (lastError instanceof IOException) throw (IOException) lastError;
         throw new IOException("所有更新源均不可用", lastError);
