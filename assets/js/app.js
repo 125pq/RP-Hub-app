@@ -933,6 +933,7 @@ const app = createApp({
         const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
         const blockedStyleWordPattern = /极其/g;
+        const quotedDialoguePattern = /(“[\s\S]*?”|『[\s\S]*?』|"[\s\S]*?")/g;
         const loggedBlockedStyleFragments = new Set();
         const filterBlockedStyleText = (text, { log = false } = {}) => {
             const source = String(text || '');
@@ -942,14 +943,17 @@ const app = createApp({
                 .filter(index => index >= 0);
             const structuredIndex = structuredIndexes.length ? Math.min(...structuredIndexes) : source.length;
             const filtered = cardUtils.transformUnprotectedText(source.slice(0, structuredIndex), part => part
-                .replace(blockedStyleSentencePattern, match => { removedFragments.push(match.trim()); return ''; })
-                .replace(paleFingerClausePattern, match => { removedFragments.push(match.trim()); return ''; })
-                .replace(blockedStyleWordPattern, match => { removedFragments.push(match); return ''; })
-                .replace(/^[ \t]*[，,；;]+/gm, '')
-                .replace(/[，,；;]{2,}/g, marks => marks.at(-1))
-                .replace(/[，,；;]+([。！？!?])/g, '$1')
-                .replace(/[ \t]+\n/g, '\n')
-                .replace(/\n{3,}/g, '\n\n'));
+                .split(quotedDialoguePattern)
+                .map((fragment, index) => index % 2 ? fragment : fragment
+                    .replace(blockedStyleSentencePattern, match => { removedFragments.push(match.trim()); return ''; })
+                    .replace(paleFingerClausePattern, match => { removedFragments.push(match.trim()); return ''; })
+                    .replace(blockedStyleWordPattern, match => { removedFragments.push(match); return ''; })
+                    .replace(/^[ \t]*[，,；;]+/gm, '')
+                    .replace(/[，,；;]{2,}/g, marks => marks.at(-1))
+                    .replace(/[，,；;]+([。！？!?])/g, '$1')
+                    .replace(/[ \t]+\n/g, '\n')
+                    .replace(/\n{3,}/g, '\n\n'))
+                .join(''));
             if (log) {
                 const newFragments = removedFragments.filter(fragment => fragment && !loggedBlockedStyleFragments.has(fragment));
                 newFragments.forEach(fragment => loggedBlockedStyleFragments.add(fragment));
