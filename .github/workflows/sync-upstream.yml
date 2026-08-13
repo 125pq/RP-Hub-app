@@ -113,6 +113,37 @@ jobs:
           echo "sha256=$apk_sha256" >> "$GITHUB_OUTPUT"
           echo "APK_SHA256=$apk_sha256"
 
+      - name: Generate mirrored update manifest
+        id: update_manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.android_release.outputs.version_name }}
+          VERSION_CODE: ${{ steps.android_release.outputs.version_code }}
+          ANDROID_TAG: ${{ steps.android_release.outputs.android_tag }}
+          APK_NAME: ${{ steps.android_release.outputs.apk_name }}
+          APK_PATH: ${{ steps.apk.outputs.apk_path }}
+          APK_SHA256: ${{ steps.apk.outputs.sha256 }}
+          UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
+        run: |
+          upstream_notes="$(gh api "repos/STA1N156/RP-Hub/releases/tags/${UPSTREAM_RELEASE_TAG}" --jq '.body // ""')"
+          manifest_path="$RUNNER_TEMP/android-update.json"
+          gitee_apk_url="https://gitee.com/pq125pq/rp-hub-app/raw/latest/${APK_NAME}"
+          github_apk_url="https://github.com/${{ github.repository }}/releases/download/${ANDROID_TAG}/${APK_NAME}"
+          jq -n \
+            --arg versionName "$VERSION_NAME" \
+            --argjson versionCode "$VERSION_CODE" \
+            --arg tag "$ANDROID_TAG" \
+            --arg notes "$upstream_notes" \
+            --arg apkName "$APK_NAME" \
+            --arg giteeApkUrl "$gitee_apk_url" \
+            --arg githubApkUrl "$github_apk_url" \
+            --argjson apkSize "$(stat -c %s "$APK_PATH")" \
+            --arg apkSha256 "$APK_SHA256" \
+            '{schemaVersion: 1, versionName: $versionName, versionCode: $versionCode, tag: $tag, notes: $notes, apk: {name: $apkName, url: $giteeApkUrl, urls: [$giteeApkUrl, $githubApkUrl], size: $apkSize, sha256: $apkSha256}}' \
+            > "$manifest_path"
+          echo "manifest_path=$manifest_path" >> "$GITHUB_OUTPUT"
+
       - name: Check final diff
         run: |
           git diff --check
@@ -144,6 +175,7 @@ jobs:
           APK_PATH: ${{ steps.apk.outputs.apk_path }}
           APK_SHA256: ${{ steps.apk.outputs.sha256 }}
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
+          UPDATE_MANIFEST_PATH: ${{ steps.update_manifest.outputs.manifest_path }}
         run: |
           if gh release view "$ANDROID_TAG" >/dev/null 2>&1; then
             echo "Android Release $ANDROID_TAG already exists; skipping duplicate publication"
@@ -151,21 +183,28 @@ jobs:
           fi
 
           notes_file="$RUNNER_TEMP/android-release-notes.md"
-          cat > "$notes_file" <<EOF
-          基于 RP-Hub ${UPSTREAM_RELEASE_TAG}。
-
-          - Android / Capacitor 封装
-          - 本地离线运行依赖
-          - SAF 文件导入与导出
-          - Android safe-area、Back、Share、Browser 适配
-          - paragraph-aware streaming 性能优化
-          - 复杂 UI 角色卡离屏动画暂停，改善长聊天滚动性能
-          - 使用永久 release key 签名
-
-          已知问题：默认 Capacitor 图标及少量 UX polish 后续处理。
-
-          APK SHA-256：$APK_SHA256
-          EOF
+          upstream_notes="$(jq -r '.notes' "$UPDATE_MANIFEST_PATH")"
+          {
+            echo "## 上游 RP-Hub ${UPSTREAM_RELEASE_TAG} 更新说明"
+            echo
+            printf '%s\n' "$upstream_notes"
+            echo
+            echo "## Android 构建说明"
+            echo
+            echo "- Android / Capacitor 封装"
+            echo "- 本地离线运行依赖"
+            echo "- SAF 文件导入与导出"
+            echo "- Android safe-area、Back、Share、Browser 适配"
+            echo "- paragraph-aware streaming 性能优化"
+            echo "- 复杂 UI 角色卡离屏动画暂停，改善长聊天滚动性能"
+            echo "- 使用永久 release key 签名"
+            echo
+            echo "已知问题：默认 Capacitor 图标及少量 UX polish 后续处理。"
+            echo
+            echo "## APK 校验"
+            echo
+            echo "APK SHA-256：\`$APK_SHA256\`"
+          } > "$notes_file"
 
           gh release create "$ANDROID_TAG" "$APK_PATH" \
             --repo "${{ github.repository }}" \
@@ -173,3 +212,39 @@ jobs:
             --title "$RELEASE_TITLE" \
             --notes-file "$notes_file" \
             --latest
+
+      - name: Publish latest APK mirror to Gitee
+        shell: bash
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USERNAME: pq125pq
+          APK_PATH: ${{ steps.apk.outputs.apk_path }}
+          APK_NAME: ${{ steps.android_release.outputs.apk_name }}
+          UPDATE_MANIFEST_PATH: ${{ steps.update_manifest.outputs.manifest_path }}
+          ANDROID_TAG: ${{ steps.android_release.outputs.android_tag }}
+        run: |
+          test -n "$GITEE_TOKEN"
+          mirror_dir="$RUNNER_TEMP/gitee-latest"
+          mkdir -p "$mirror_dir"
+          cp "$APK_PATH" "$mirror_dir/$APK_NAME"
+          cp "$UPDATE_MANIFEST_PATH" "$mirror_dir/android-update.json"
+
+          git -C "$mirror_dir" init
+          git -C "$mirror_dir" checkout -b latest
+          git -C "$mirror_dir" config user.name "github-actions[bot]"
+          git -C "$mirror_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$mirror_dir" add "$APK_NAME" android-update.json
+          git -C "$mirror_dir" commit -m "release: mirror Android ${ANDROID_TAG}"
+          git -C "$mirror_dir" remote add gitee https://gitee.com/pq125pq/rp-hub-app.git
+
+          askpass="$RUNNER_TEMP/gitee-askpass.sh"
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'case "$1" in' \
+            '  *Username*) printf "%s\\n" "$GITEE_USERNAME" ;;' \
+            '  *Password*) printf "%s\\n" "$GITEE_TOKEN" ;;' \
+            '  *) exit 1 ;;' \
+            'esac' > "$askpass"
+          chmod 700 "$askpass"
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git -C "$mirror_dir" push --force gitee HEAD:refs/heads/latest
