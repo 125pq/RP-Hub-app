@@ -7,7 +7,7 @@ const websocketUrl = args.get('--websocket');
 const outputPath = args.get('--output');
 const action = args.get('--action') || 'snapshot';
 const navigate = args.get('--navigate') === 'yes';
-const normalMode = action === 'normal-smoke';
+const normalMode = ['normal-smoke', 'ime-smoke', 'lifecycle-status'].includes(action);
 if (!websocketUrl) throw new Error('Missing --websocket');
 if (!outputPath) throw new Error('Missing --output');
 
@@ -112,23 +112,56 @@ if (action === 'select-target') {
   result = await evaluate(`(() => {
     const container = document.querySelector('[data-rph-chat-container]') || document.querySelector('[data-chat-index]')?.parentElement;
     const viewport = container?.getBoundingClientRect();
-    const totals = { visible: { iframe: 0, animations: 0, runningAnimations: 0, activeMedia: 0 }, offscreen: { iframe: 0, animations: 0, runningAnimations: 0, activeMedia: 0 }, unreadable: 0 };
+    const createBucket = () => ({ iframe: 0, animations: 0, running: 0, paused: 0, finished: 0, other: 0, activeMedia: 0, lifecycle: { ACTIVE: 0, NEAR: 0, OFFSCREEN: 0, unregistered: 0 }, suspended: 0 });
+    const totals = { visible: createBucket(), offscreen: createBucket(), unreadable: 0 };
     document.querySelectorAll('iframe.executable-html-frame').forEach(iframe => {
       const rect = iframe.getBoundingClientRect();
       const visible = viewport && rect.bottom > viewport.top && rect.top < viewport.bottom && rect.right > viewport.left && rect.left < viewport.right;
       const bucket = visible ? totals.visible : totals.offscreen;
       bucket.iframe++;
+      const lifecycle = window.RPHubOffscreenIframeLifecycle?.getState?.(iframe);
+      if (lifecycle) {
+        bucket.lifecycle[lifecycle.state] = (bucket.lifecycle[lifecycle.state] || 0) + 1;
+        if (lifecycle.suspended) bucket.suspended++;
+      } else {
+        bucket.lifecycle.unregistered++;
+      }
       try {
         const doc = iframe.contentDocument;
         const animations = doc?.getAnimations?.({ subtree: true }) || [];
         bucket.animations += animations.length;
-        bucket.runningAnimations += animations.filter(animation => animation.playState === 'running').length;
+        animations.forEach(animation => {
+          if (animation.playState === 'running') bucket.running++;
+          else if (animation.playState === 'paused') bucket.paused++;
+          else if (animation.playState === 'finished') bucket.finished++;
+          else bucket.other++;
+        });
         bucket.activeMedia += [...(doc?.querySelectorAll('audio,video') || [])].filter(media => !media.paused && !media.ended).length;
       } catch (_) {
         totals.unreadable++;
       }
     });
     return totals;
+  })()`);
+} else if (action === 'lifecycle-smoke') {
+  result = await evaluate('window.__RPH_SCROLL_PERF__.runScroll({ durationMs: 1800, pauseMs: 400 })');
+} else if (action === 'lifecycle-status') {
+  result = await evaluate(`(() => {
+    const lifecycle = window.RPHubOffscreenIframeLifecycle;
+    const frames = [...document.querySelectorAll('iframe.executable-html-frame')];
+    const states = { ACTIVE: 0, NEAR: 0, OFFSCREEN: 0, unregistered: 0 };
+    frames.forEach(iframe => {
+      const state = lifecycle?.getState?.(iframe)?.state || 'unregistered';
+      states[state] = (states[state] || 0) + 1;
+    });
+    return { visibility: document.visibilityState, frames: frames.length, states };
+  })()`);
+} else if (action === 'ime-smoke') {
+  result = await evaluate(`(() => {
+    const input = document.querySelector('textarea[placeholder="输入消息..."]');
+    input?.focus();
+    input?.click();
+    return { found: !!input, focused: document.activeElement === input };
   })()`);
 } else if (action === 'normal-smoke') {
   const main = await evaluate(`(() => ({

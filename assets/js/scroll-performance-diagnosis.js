@@ -37,6 +37,45 @@
         }
     };
 
+    const collectIframeRuntime = iframes => {
+        const createBucket = () => ({
+            iframe: 0,
+            animations: 0,
+            running: 0,
+            paused: 0,
+            finished: 0,
+            other: 0,
+            lifecycle: { ACTIVE: 0, NEAR: 0, OFFSCREEN: 0, unregistered: 0 },
+            suspended: 0
+        });
+        const totals = { visible: createBucket(), offscreen: createBucket(), unreadable: 0 };
+        iframes.forEach(iframe => {
+            const bucket = isVisibleInContainer(iframe) ? totals.visible : totals.offscreen;
+            bucket.iframe++;
+            const lifecycle = window.RPHubOffscreenIframeLifecycle?.getState?.(iframe);
+            if (lifecycle) {
+                bucket.lifecycle[lifecycle.state] = (bucket.lifecycle[lifecycle.state] || 0) + 1;
+                if (lifecycle.suspended) bucket.suspended++;
+            } else {
+                bucket.lifecycle.unregistered++;
+            }
+            const doc = safeChildDocument(iframe);
+            if (!doc) {
+                totals.unreadable++;
+                return;
+            }
+            const animations = doc.getAnimations?.({ subtree: true }) || [];
+            bucket.animations += animations.length;
+            animations.forEach(animation => {
+                if (animation.playState === 'running') bucket.running++;
+                else if (animation.playState === 'paused') bucket.paused++;
+                else if (animation.playState === 'finished') bucket.finished++;
+                else bucket.other++;
+            });
+        });
+        return totals;
+    };
+
     const classifyResource = entry => {
         try {
             const url = new URL(entry.name, location.href);
@@ -106,6 +145,7 @@
         const iframes = getIframes();
         const visibleIframes = iframes.filter(isVisibleInContainer);
         const childDocuments = iframes.map(safeChildDocument).filter(Boolean);
+        const iframeRuntime = collectIframeRuntime(iframes);
         const parentMedia = countMedia(document);
         const childMedia = childDocuments.map(countMedia);
         const heavyCss = childDocuments.reduce((total, doc) => {
@@ -134,7 +174,8 @@
                 visible: visibleIframes.length,
                 offscreen: iframes.length - visibleIframes.length,
                 readableChildDocuments: childDocuments.length,
-                childDomNodes: childDocuments.reduce((sum, doc) => sum + doc.querySelectorAll('*').length, 0)
+                childDomNodes: childDocuments.reduce((sum, doc) => sum + doc.querySelectorAll('*').length, 0),
+                runtime: iframeRuntime
             },
             elements: {
                 img: document.querySelectorAll('img').length + childDocuments.reduce((sum, doc) => sum + doc.querySelectorAll('img').length, 0),
@@ -201,6 +242,7 @@
         const pauseMs = Math.max(100, Math.min(1000, Number(options.pauseMs) || 400));
         const requestedDistance = Math.max(container.clientHeight, Number(options.distancePx) || container.clientHeight * 3);
         const startTop = container.scrollTop;
+        const startScrollHeight = container.scrollHeight;
         const distancePx = Math.min(requestedDistance, startTop);
         const topTarget = startTop - distancePx;
         const safety = { stopped: false, reason: null };
@@ -213,6 +255,14 @@
         });
         mutationObserver.observe(container, { subtree: true, childList: true, attributes: true, characterData: true });
         iframeActivity = { visible: {}, offscreen: {} };
+        const lifecycle = window.RPHubOffscreenIframeLifecycle;
+        lifecycle?.resetDiagnostics?.();
+        const frameContinuity = getIframes().map(iframe => ({
+            iframe,
+            contentWindow: iframe.contentWindow,
+            document: safeChildDocument(iframe),
+            height: iframe.getBoundingClientRect().height
+        }));
         active = true;
         perf.startDiagnosticSession();
         const startedAt = performance.now();
@@ -231,6 +281,17 @@
         iframeActivity = null;
         const resources = performance.getEntriesByType('resource').filter(entry => entry.startTime >= resourceStart);
         const iframeCounts = snapshot().iframe;
+        const continuity = frameContinuity.reduce((totals, before) => {
+            if (!before.iframe.isConnected) {
+                totals.removed++;
+                return totals;
+            }
+            if (before.iframe.contentWindow === before.contentWindow) totals.sameContentWindow++;
+            if (safeChildDocument(before.iframe) === before.document) totals.sameDocument++;
+            const heightDelta = Math.abs(before.iframe.getBoundingClientRect().height - before.height);
+            totals.maxHeightDelta = Math.max(totals.maxHeightDelta, heightDelta);
+            return totals;
+        }, { total: frameContinuity.length, sameContentWindow: 0, sameDocument: 0, removed: 0, maxHeightDelta: 0 });
         const withRates = bucket => Object.fromEntries(Object.entries(bucket).map(([key, count]) => [key, {
             count,
             perSecond: round(count / (duration / 1000))
@@ -244,6 +305,13 @@
             ...performanceMetrics,
             domMutationActivity: { callbacks: mutationCallbacks, records: mutationRecords, note: 'DOM mutation proxy; not an exact Vue component update count' },
             iframeCounts,
+            lifecycle: lifecycle?.getDiagnostics?.() || null,
+            continuity: {
+                ...continuity,
+                maxHeightDelta: round(continuity.maxHeightDelta),
+                scrollTopReturnDelta: round(Math.abs(container.scrollTop - startTop)),
+                scrollHeightDelta: round(container.scrollHeight - startScrollHeight)
+            },
             iframeActivity: { visible: withRates(activity.visible), offscreen: withRates(activity.offscreen) },
             network: resourceSummary(resources)
         };

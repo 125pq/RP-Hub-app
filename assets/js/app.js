@@ -2121,6 +2121,7 @@ const app = createApp({
 
         watch(chatContainer, (container) => {
             generatedImageObserver?.disconnect();
+            window.RPHubOffscreenIframeLifecycle?.attach(container);
             if (!container) return;
             generatedImageObserver = new MutationObserver(records => {
                 records.forEach(record => record.addedNodes.forEach(node => {
@@ -9116,6 +9117,7 @@ const app = createApp({
         });
 
         onBeforeUnmount(() => {
+            window.RPHubOffscreenIframeLifecycle?.detach();
             generatedImageObserver?.disconnect();
             generatedImageTasks.clear();
             closeMobileMenu();

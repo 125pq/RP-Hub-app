@@ -32,6 +32,7 @@ const requiredFiles = [
   'assets/js/built-in-content.js',
   'assets/js/core-utils.js',
   'assets/js/data-services.js',
+  'assets/js/offscreen-iframe-lifecycle.js',
   'assets/js/runtime-services.js',
   'assets/js/ui-components.js',
   'assets/js/platform-services.js',
