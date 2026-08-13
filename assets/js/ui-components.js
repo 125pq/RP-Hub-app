@@ -323,6 +323,7 @@
         },
         emits: ['update:current-view', 'update:collapsed', 'toggle-online', 'toggle-advanced', 'close-mobile'],
         setup(props, { emit }) {
+            const { online } = window.RPHubPresence.usePresence();
             const selectView = (view) => {
                 emit('update:current-view', view);
                 emit('close-mobile');
@@ -335,6 +336,7 @@
                 advancedViews: advancedItems.map(item => item.view),
                 itemClass,
                 onlineItems,
+                online,
                 onlineViews: onlineItems.map(item => item.view),
                 primaryItems,
                 selectView
@@ -455,7 +457,10 @@
                         </div>
                         <div v-if="!collapsed" class="ml-3 whitespace-nowrap overflow-hidden">
                             <div class="text-sm font-bold text-gray-900 truncate">{{ user.name }}</div>
-                            <div class="text-xs text-gray-500">User</div>
+                            <div class="flex items-center gap-1.5 text-xs text-gray-500">
+                                <span v-if="online !== null" class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                                <span>{{ online === null ? 'User' : online + ' 人在线' }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
