@@ -5,6 +5,9 @@ assets/vendor/
 assets/generated/
 npm-debug.log*
 
+# Local Word document workspace
+docx/
+
 # Local Android and Gradle state (the android project itself will be tracked)
 .toolchains/
 android/.gradle/
