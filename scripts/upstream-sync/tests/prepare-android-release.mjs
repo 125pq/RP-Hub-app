@@ -13,4 +13,3 @@ assert.throws(() => androidReleaseMetadata('1.8.3-rc.1'), /not a supported seman
 assert.throws(() => androidReleaseMetadata('1.100.0'), /below 100/);
 
 console.log('Android release metadata mapping: PASS');
-

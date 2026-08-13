@@ -21,4 +21,3 @@ assert.match(workflow, /gh release create[\s\S]*--latest/);
 assert.match(workflow, /APK SHA-256/);
 
 console.log('Automated signed Android Release workflow contract: PASS');
-
