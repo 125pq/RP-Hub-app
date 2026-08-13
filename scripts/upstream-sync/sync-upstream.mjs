@@ -44,6 +44,36 @@ function run(command, commandArgs = [], options = {}) {
 const git = (gitArgs, options = {}) => run('git', gitArgs, options);
 const gitText = async gitArgs => (await git(gitArgs, { capture: true })).stdout;
 
+const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+async function fetchUpstream() {
+  let lastFailure = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await git(['fetch', 'upstream', 'main', '--prune'], { allowFailure: true });
+    if (result.code === 0) return;
+    lastFailure = result;
+    console.warn(`Upstream fetch attempt ${attempt}/3 failed`);
+    if (attempt < 3) await delay(attempt * 1000);
+  }
+
+  const localUpstream = await gitText(['rev-parse', 'upstream/main']);
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'RP-Hub-upstream-sync'
+  };
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch('https://api.github.com/repos/STA1N156/RP-Hub/commits/main', { headers });
+  if (!response.ok) {
+    throw new Error(`git fetch failed and GitHub HEAD verification returned HTTP ${response.status}: ${lastFailure?.stderr || ''}`);
+  }
+  const remoteUpstream = String((await response.json()).sha || '');
+  if (!/^[0-9a-f]{40}$/.test(remoteUpstream) || remoteUpstream !== localUpstream) {
+    throw new Error(`git fetch failed and local upstream/main is stale (local ${localUpstream}, GitHub ${remoteUpstream || 'unknown'})`);
+  }
+  console.warn(`FETCH_FALLBACK=PASS (GitHub API confirms unchanged upstream ${localUpstream})`);
+}
+
 async function mergeInProgress() {
   return (await git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { capture: true, allowFailure: true })).code === 0;
 }
@@ -115,7 +145,7 @@ try {
   beforeHead = await gitText(['rev-parse', 'HEAD']);
   console.log(`SYNC_BEFORE_HEAD=${beforeHead}`);
   await ensureUpstreamRemote();
-  await git(['fetch', 'upstream', 'main', '--prune']);
+  await fetchUpstream();
   const upstreamHead = await gitText(['rev-parse', 'upstream/main']);
   const upstreamShort = await gitText(['rev-parse', '--short', 'upstream/main']);
   const incoming = await gitText(['log', '--oneline', 'HEAD..upstream/main']);
