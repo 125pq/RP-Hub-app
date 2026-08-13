@@ -17,6 +17,7 @@ assert.match(workflow, /apksigner[\s\S]*verify --verbose --print-certs/);
 assert.match(workflow, /manifest application-id[\s\S]*io\.github\.pq125\.rphub/);
 assert.match(workflow, /manifest debuggable[\s\S]*= "false"/);
 assert.match(workflow, /sha256sum/);
+assert.match(workflow, /gh release download "\$ANDROID_TAG"[\s\S]*Using canonical APK from existing GitHub Release/);
 assert.match(workflow, /gh release view[\s\S]*skipping duplicate publication/);
 assert.match(workflow, /gh release create[\s\S]*--latest/);
 assert.match(workflow, /APK SHA-256/);

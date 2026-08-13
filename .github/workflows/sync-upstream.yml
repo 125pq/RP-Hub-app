@@ -88,14 +88,25 @@ jobs:
         id: apk
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION_NAME: ${{ steps.android_release.outputs.version_name }}
           VERSION_CODE: ${{ steps.android_release.outputs.version_code }}
+          ANDROID_TAG: ${{ steps.android_release.outputs.android_tag }}
           APK_NAME: ${{ steps.android_release.outputs.apk_name }}
         run: |
           source_apk="android/app/build/outputs/apk/release/app-release.apk"
           test -f "$source_apk"
           output_apk="$RUNNER_TEMP/$APK_NAME"
-          cp "$source_apk" "$output_apk"
+          if gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release download "$ANDROID_TAG" \
+              --repo "${{ github.repository }}" \
+              --pattern "$APK_NAME" \
+              --output "$output_apk" \
+              --clobber
+            echo "Using canonical APK from existing GitHub Release $ANDROID_TAG"
+          else
+            cp "$source_apk" "$output_apk"
+          fi
 
           apksigner_path="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -n "$apksigner_path"
