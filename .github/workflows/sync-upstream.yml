@@ -191,79 +191,77 @@ jobs:
             --notes-file "$RELEASE_NOTES_PATH" \
             --latest
 
-      - name: Publish Android Release mirror to Gitee
-        timeout-minutes: 15
+      - name: Publish APK branch and trigger Gitee mirror pull
+        timeout-minutes: 10
         shell: bash
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_USERNAME: pq125pq
+          GITHUB_PUSH_TOKEN: ${{ github.token }}
           APK_PATH: ${{ steps.apk.outputs.apk_path }}
           APK_NAME: ${{ steps.android_release.outputs.apk_name }}
           ANDROID_TAG: ${{ steps.android_release.outputs.android_tag }}
-          RELEASE_TITLE: ${{ steps.android_release.outputs.title }}
+          VERSION_NAME: ${{ steps.android_release.outputs.version_name }}
+          VERSION_CODE: ${{ steps.android_release.outputs.version_code }}
+          APK_SHA256: ${{ steps.apk.outputs.sha256 }}
           RELEASE_NOTES_PATH: ${{ steps.release_notes.outputs.notes_path }}
         run: |
           test -n "$GITEE_TOKEN"
-          askpass="$RUNNER_TEMP/gitee-askpass.sh"
+          test -n "$GITHUB_PUSH_TOKEN"
+          mirror_dir="$RUNNER_TEMP/android-latest"
+          mkdir -p "$mirror_dir"
+          cp "$APK_PATH" "$mirror_dir/$APK_NAME"
+          gitee_apk_url="https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/${APK_NAME}"
+          github_apk_url="https://github.com/${{ github.repository }}/releases/download/${ANDROID_TAG}/${APK_NAME}"
+          jq -n \
+            --arg versionName "$VERSION_NAME" \
+            --argjson versionCode "$VERSION_CODE" \
+            --arg tag "$ANDROID_TAG" \
+            --rawfile notes "$RELEASE_NOTES_PATH" \
+            --arg apkName "$APK_NAME" \
+            --arg giteeApkUrl "$gitee_apk_url" \
+            --arg githubApkUrl "$github_apk_url" \
+            --argjson apkSize "$(stat -c %s "$APK_PATH")" \
+            --arg apkSha256 "$APK_SHA256" \
+            '{schemaVersion: 1, versionName: $versionName, versionCode: $versionCode, tag: $tag, notes: $notes, apk: {name: $apkName, urls: [$giteeApkUrl, $githubApkUrl], size: $apkSize, sha256: $apkSha256}}' \
+            > "$mirror_dir/android-update.json"
+
+          git -C "$mirror_dir" init
+          git -C "$mirror_dir" checkout -b android-latest
+          git -C "$mirror_dir" config user.name "github-actions[bot]"
+          git -C "$mirror_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$mirror_dir" add "$APK_NAME" android-update.json
+          git -C "$mirror_dir" commit -m "release: publish Android ${ANDROID_TAG} distribution"
+          mirror_sha="$(git -C "$mirror_dir" rev-parse HEAD)"
+          git -C "$mirror_dir" remote add origin https://github.com/${{ github.repository }}.git
+
+          askpass="$RUNNER_TEMP/github-push-askpass.sh"
           printf '%s\n' \
             '#!/bin/sh' \
             'case "$1" in' \
-            '  *Username*) printf "%s\\n" "$GITEE_USERNAME" ;;' \
-            '  *Password*) printf "%s\\n" "$GITEE_TOKEN" ;;' \
+            '  *Username*) printf "%s\\n" "x-access-token" ;;' \
+            '  *Password*) printf "%s\\n" "$GITHUB_PUSH_TOKEN" ;;' \
             '  *) exit 1 ;;' \
             'esac' > "$askpass"
           chmod 700 "$askpass"
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git -C "$mirror_dir" push --force origin HEAD:refs/heads/android-latest
 
-          if ! git ls-remote --exit-code https://gitee.com/pq125pq/rp-hub-app.git refs/heads/main >/dev/null 2>&1; then
-            bootstrap_dir="$RUNNER_TEMP/gitee-bootstrap"
-            mkdir -p "$bootstrap_dir"
-            git -C "$bootstrap_dir" init
-            git -C "$bootstrap_dir" checkout -b main
-            git -C "$bootstrap_dir" config user.name "github-actions[bot]"
-            git -C "$bootstrap_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            printf '%s\n' '# RP-Hub Android 国内更新镜像' > "$bootstrap_dir/README.md"
-            git -C "$bootstrap_dir" add README.md
-            git -C "$bootstrap_dir" commit -m "chore: initialize Android release mirror"
-            git -C "$bootstrap_dir" remote add gitee https://gitee.com/pq125pq/rp-hub-app.git
-            GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
-              git -C "$bootstrap_dir" push gitee HEAD:refs/heads/main
-          fi
-
-          api="https://gitee.com/api/v5/repos/pq125pq/rp-hub-app"
-          release_json="$RUNNER_TEMP/gitee-release.json"
-          status="$(curl --silent --show-error --output "$release_json" --write-out '%{http_code}' \
-            --connect-timeout 20 --max-time 60 \
-            --header "Authorization: Bearer $GITEE_TOKEN" \
-            "$api/releases/tags/$ANDROID_TAG")"
-
-          if [ "$status" = "404" ] || { [ "$status" = "200" ] && ! jq -e 'type == "object" and .id != null' "$release_json" >/dev/null; }; then
-            curl --silent --show-error --fail-with-body \
-              --connect-timeout 20 --max-time 60 \
-              --header "Authorization: Bearer $GITEE_TOKEN" \
-              --request POST \
-              --data-urlencode "tag_name=$ANDROID_TAG" \
-              --data-urlencode "name=$RELEASE_TITLE" \
-              --data-urlencode "body@$RELEASE_NOTES_PATH" \
-              --data-urlencode "target_commitish=main" \
-              --data-urlencode "prerelease=false" \
-              "$api/releases" > "$release_json"
-          elif [ "$status" != "200" ]; then
-            echo "Gitee Release query failed (HTTP $status)" >&2
-            exit 1
-          fi
-
-          release_id="$(jq -er '.id' "$release_json")"
-          if jq -e --arg name "$APK_NAME" '.assets[]? | select(.name == $name)' "$release_json" >/dev/null; then
-            echo "Gitee Release $ANDROID_TAG already contains $APK_NAME"
-            exit 0
-          fi
-
-          asset_json="$RUNNER_TEMP/gitee-asset.json"
           curl --silent --show-error --fail-with-body \
-            --connect-timeout 20 --max-time 600 \
-            --header "Authorization: Bearer $GITEE_TOKEN" \
-            --form "file=@$APK_PATH;type=application/vnd.android.package-archive" \
-            "$api/releases/$release_id/attach_files" > "$asset_json"
-          jq -e --arg name "$APK_NAME" \
-            '.name == $name and (.browser_download_url | startswith("https://gitee.com/"))' \
-            "$asset_json" >/dev/null
+            --connect-timeout 20 --max-time 60 \
+            --request POST --get \
+            --data-urlencode "access_token=$GITEE_TOKEN" \
+            "https://gitee.com/api/v5/repos/pq125pq/rp-hub-app/remote_mirror/pull" \
+            > "$RUNNER_TEMP/gitee-mirror-pull.json"
+
+          for attempt in $(seq 1 30); do
+            gitee_sha="$(git ls-remote https://gitee.com/pq125pq/rp-hub-app.git refs/heads/android-latest | cut -f1)"
+            if [ "$gitee_sha" = "$mirror_sha" ]; then
+              curl --silent --show-error --fail --location --head \
+                --connect-timeout 15 --max-time 30 \
+                "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/android-update.json" >/dev/null
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Gitee mirror did not reach android-latest commit $mirror_sha" >&2
+          exit 1

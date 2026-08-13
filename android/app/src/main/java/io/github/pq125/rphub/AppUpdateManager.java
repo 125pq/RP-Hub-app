@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -38,8 +39,8 @@ import org.json.JSONObject;
 final class AppUpdateManager {
     private static final String TAG = "RPHubUpdate";
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/125pq/RP-Hub-app/releases/latest";
-    private static final String GITEE_RELEASE_API =
-        "https://gitee.com/api/v5/repos/pq125pq/rp-hub-app/releases/latest";
+    private static final String GITEE_UPDATE_MANIFEST =
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/android-update.json";
     private static final int UNKNOWN_APPS_REQUEST = 19082;
     private static final int CONNECT_TIMEOUT_MS = 12000;
     private static final int READ_TIMEOUT_MS = 20000;
@@ -100,11 +101,11 @@ final class AppUpdateManager {
     private AppUpdateRelease fetchLatestRelease() throws IOException, JSONException {
         Exception lastError = null;
         try {
-            AppUpdateRelease release = parseGiteeRelease(new JSONObject(readUtf8(GITEE_RELEASE_API, MAX_RESPONSE_BYTES)));
-            if (release != null) {
-                Log.i(TAG, "Update metadata source: Gitee Release");
-                return release;
-            }
+            AppUpdateRelease release = parseUpdateManifest(
+                new JSONObject(readUtf8(GITEE_UPDATE_MANIFEST, MAX_RESPONSE_BYTES))
+            );
+            Log.i(TAG, "Update metadata source: Gitee mirror branch");
+            return release;
         } catch (IOException | JSONException error) {
             lastError = error;
         }
@@ -119,25 +120,6 @@ final class AppUpdateManager {
         }
         if (lastError instanceof IOException) throw (IOException) lastError;
         throw new IOException("所有更新源均不可用", lastError);
-    }
-
-    private AppUpdateRelease parseGiteeRelease(JSONObject json) throws JSONException {
-        AppUpdateRelease release = parseGitHubRelease(json);
-        if (release == null) return null;
-        List<String> urls = new ArrayList<>(release.apkUrls);
-        String githubFallback = "https://github.com/125pq/RP-Hub-app/releases/download/"
-            + json.getString("tag_name") + "/" + release.apkName;
-        if (!isAllowedDownloadUrl(githubFallback)) throw new JSONException("GitHub 备用下载地址无效");
-        urls.add(githubFallback);
-        return new AppUpdateRelease(
-            release.versionName,
-            release.versionCode,
-            release.notes,
-            release.apkName,
-            urls,
-            release.apkSize,
-            release.sha256
-        );
     }
 
     private AppUpdateRelease parseGitHubRelease(JSONObject json) throws JSONException {
@@ -166,6 +148,45 @@ final class AppUpdateManager {
             );
         }
         return null;
+    }
+
+    private AppUpdateRelease parseUpdateManifest(JSONObject json) throws JSONException {
+        if (json.optInt("schemaVersion") != 1) throw new JSONException("不支持的更新清单版本");
+        String versionName = json.getString("versionName");
+        long versionCode = json.getLong("versionCode");
+        AppUpdateRelease.Version tagVersion = AppUpdateRelease.parseAndroidTag(json.getString("tag"));
+        if (tagVersion == null || tagVersion.code != versionCode || !tagVersion.name.equals(versionName)) {
+            throw new JSONException("更新清单版本信息不一致");
+        }
+        JSONObject apk = json.getJSONObject("apk");
+        String apkName = apk.getString("name");
+        String expectedName = "RP-Hub-" + versionName + "-release.apk";
+        String sha = AppUpdateRelease.normalizeSha256(apk.getString("sha256"));
+        List<String> downloadUrls = manifestDownloadUrls(apk);
+        if (!expectedName.equals(apkName) || sha == null || downloadUrls.isEmpty()) {
+            throw new JSONException("更新清单 APK 信息无效");
+        }
+        return new AppUpdateRelease(
+            versionName,
+            versionCode,
+            json.optString("notes", ""),
+            apkName,
+            downloadUrls,
+            apk.optLong("size", -1L),
+            sha
+        );
+    }
+
+    private static List<String> manifestDownloadUrls(JSONObject apk) throws JSONException {
+        LinkedHashSet<String> urls = new LinkedHashSet<>();
+        JSONArray values = apk.optJSONArray("urls");
+        if (values == null) throw new JSONException("更新清单缺少 APK 下载地址");
+        for (int index = 0; index < values.length(); index++) {
+            String value = values.optString(index, "");
+            if (!isAllowedDownloadUrl(value)) throw new JSONException("更新清单包含不安全的 APK 地址");
+            urls.add(value);
+        }
+        return new ArrayList<>(urls);
     }
 
     private void showUpdateDialog(AppUpdateRelease release) {

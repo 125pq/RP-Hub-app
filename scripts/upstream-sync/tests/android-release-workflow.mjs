@@ -24,17 +24,17 @@ assert.match(workflow, /repos\/STA1N156\/RP-Hub\/releases\/tags\/\$\{UPSTREAM_RE
 assert.match(workflow, /upstream_notes[\s\S]*printf '%s\\n'/);
 assert.match(workflow, /Prepare mirrored release notes/);
 assert.match(workflow, /secrets\.GITEE_TOKEN/);
-assert.match(workflow, /api\/v5\/repos\/pq125pq\/rp-hub-app/);
-assert.match(workflow, /releases\/\$release_id\/attach_files/);
-assert.match(workflow, /type == "object" and \.id != null/);
-assert.match(workflow, /timeout-minutes: 15/);
-assert.match(workflow, /--max-time 600/);
-assert.doesNotMatch(workflow, /push --force/);
-assert.match(updater, /GITEE_RELEASE_API/);
-assert.match(updater, /Update metadata source: Gitee Release/);
+assert.match(workflow, /refs\/heads\/android-latest/);
+assert.match(workflow, /remote_mirror\/pull/);
+assert.match(workflow, /access_token=\$GITEE_TOKEN/);
+assert.match(workflow, /push --force origin HEAD:refs\/heads\/android-latest/);
+assert.doesNotMatch(workflow, /push --force origin HEAD:refs\/heads\/main/);
+assert.match(workflow, /timeout-minutes: 10/);
+assert.match(updater, /GITEE_UPDATE_MANIFEST/);
+assert.match(updater, /Update metadata source: Gitee mirror branch/);
 assert.match(updater, /Update metadata source: GitHub API fallback/);
-assert.match(updater, /parseGiteeRelease/);
-assert.match(updater, /githubFallback/);
+assert.match(updater, /parseUpdateManifest/);
+assert.match(updater, /optJSONArray\("urls"\)/);
 for (const publicProxy of ['ghfast.top', 'gh-proxy.com', 'ghproxy.net', 'cdn.jsdelivr.net', 'cdn.staticdelivr.com']) {
   assert.doesNotMatch(updater, new RegExp(publicProxy.replace('.', '\\.')));
 }
