@@ -15,6 +15,8 @@ def releaseStorePassword = signingValue('storePassword', 'RPHUB_RELEASE_STORE_PA
 def releaseKeyAlias = signingValue('keyAlias', 'RPHUB_RELEASE_KEY_ALIAS')
 def releaseKeyPassword = signingValue('keyPassword', 'RPHUB_RELEASE_KEY_PASSWORD')
 def hasReleaseSigning = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every { it }
+def releaseVersionName = System.getenv('RPHUB_VERSION_NAME') ?: '1.8.2'
+def releaseVersionCode = (System.getenv('RPHUB_VERSION_CODE') ?: '10802').toInteger()
 
 android {
     namespace "io.github.pq125.rphub"
@@ -23,8 +25,8 @@ android {
         applicationId "io.github.pq125.rphub"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10802
-        versionName "1.8.2"
+        versionCode releaseVersionCode
+        versionName releaseVersionName
         manifestPlaceholders = [appLabel: 'RP Hub']
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

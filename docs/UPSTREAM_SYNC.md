@@ -24,6 +24,15 @@ node scripts/upstream-sync/sync-upstream.mjs --dry-run
 
 如果上游没有发布新的正式 Release，脚本不会同步 `main` 上尚未发布的提交，也不会创建空提交。切换同步策略不会回滚以前已经合入的提交；后续正式 Release 包含这些提交后，Git 会自然识别已有历史。
 
+Android 自动发布使用上游三段式版本号。例如上游 `1.8.3` 会生成：
+
+- `versionName`：`1.8.3`
+- `versionCode`：`10803`
+- Android tag：`v1.8.3-android`
+- APK：`RP-Hub-1.8.3-release.apk`
+
+非三段式正式 tag 会令任务明确失败，避免发布版本号不确定的 APK。
+
 ## 补丁分类
 
 - `patch-android-hooks.mjs`：平台脚本加载顺序、Back/AppState 生命周期，以及角色卡和小说的公共导出调用。
@@ -61,6 +70,8 @@ node scripts/upstream-sync/tests/reapply-idempotence.mjs
 ## GitHub Actions
 
 `.github/workflows/sync-upstream.yml` 支持手动触发，并每天定时检查一次上游最新正式 Release。工作流只在 tag 合并、Hook、验证、Web 测试、Android 单元测试和 `assembleRelease` 全部成功后提交并推送；没有新 Release 或代码变化时不会创建空提交，也不会监听自身的 push 再次触发。
+
+构建成功后，工作流还会验证 production 包名、版本号、`debuggable=false` 和 APK 签名，计算 SHA-256，并创建正式 GitHub Release。Release 标题为 `RP-Hub Android <版本>`，上传对应版本 APK，正文包含功能摘要和最终 SHA-256。若 `v<版本>-android` 已经存在，发布步骤会正常跳过，不会覆盖或重复上传现有 Release。
 
 云端构建使用现有永久 release key，需要在 GitHub Actions 中配置以下 Secrets：
 
