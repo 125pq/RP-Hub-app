@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 public class NativeFilePlugin extends Plugin {
 
     private static final Pattern MIME_PATTERN = Pattern.compile("^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$");
-    private static final Pattern MISPLACED_JSON_COPY_SUFFIX = Pattern.compile("^(.*)(\\.jsonl?)\\((\\d+)\\)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MISPLACED_JSON_COPY_SUFFIX = Pattern.compile("^(.*)(\\.jsonl?)\\s*\\((\\d+)\\)$", Pattern.CASE_INSENSITIVE);
     private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
     private final Object stateLock = new Object();
     private boolean saveReserved;
