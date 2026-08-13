@@ -1,12 +1,14 @@
 # 上游自动同步说明
 
-RP-Hub Web 的上游仓库是 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub)，同步分支为 `main`。
+RP-Hub Web 的上游仓库是 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub)。同步目标是 GitHub 标记的**最新正式 Release**，不会直接跟随 `main`，也会忽略 Draft 和 Pre-release。
+
+Release 页面显示的 ZIP/TAR 压缩包只是 GitHub 提供的下载形式。同步脚本实际读取 Release 对应的 Git tag，并通过 Git 合并 tag 指向的提交，不下载或解压压缩包。
 
 本仓库在上游 Web 的基础上独立维护 Android 原生代码、离线资源、WebView 布局适配、性能优化，以及少量调用 `window.platformAdapter` 的必要 Hook。自动同步不会把 Capacitor 或 Android 原生实现重新写回上游业务文件。
 
 ## 手动同步
 
-执行一次正式同步，包括拉取并合并上游、重新应用 Hook、完整验证、Android 单元测试、`assembleRelease` 和创建同步提交：
+执行一次正式同步，包括查询最新正式 Release、拉取并合并对应 tag、重新应用 Hook、完整验证、Android 单元测试、`assembleRelease` 和创建同步提交：
 
 ```text
 node scripts/upstream-sync/sync-upstream.mjs
@@ -19,6 +21,8 @@ node scripts/upstream-sync/sync-upstream.mjs --dry-run
 ```
 
 两种命令都要求工作树干净。如果 Git 检测到真实冲突，脚本会列出冲突文件、执行 `git merge --abort` 并返回失败，不会自动选择 `ours` 或 `theirs` 覆盖冲突。
+
+如果上游没有发布新的正式 Release，脚本不会同步 `main` 上尚未发布的提交，也不会创建空提交。切换同步策略不会回滚以前已经合入的提交；后续正式 Release 包含这些提交后，Git 会自然识别已有历史。
 
 ## 补丁分类
 
@@ -56,7 +60,7 @@ node scripts/upstream-sync/tests/reapply-idempotence.mjs
 
 ## GitHub Actions
 
-`.github/workflows/sync-upstream.yml` 支持手动触发，并每天定时检查一次上游。工作流只在 merge、Hook、验证、Web 测试、Android 单元测试和 `assembleRelease` 全部成功后提交并推送；没有变化时不会创建空提交，也不会监听自身的 push 再次触发。
+`.github/workflows/sync-upstream.yml` 支持手动触发，并每天定时检查一次上游最新正式 Release。工作流只在 tag 合并、Hook、验证、Web 测试、Android 单元测试和 `assembleRelease` 全部成功后提交并推送；没有新 Release 或代码变化时不会创建空提交，也不会监听自身的 push 再次触发。
 
 云端构建使用现有永久 release key，需要在 GitHub Actions 中配置以下 Secrets：
 

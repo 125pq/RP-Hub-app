@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: sync-upstream-main
+  group: sync-upstream-latest-release
   cancel-in-progress: false
 
 jobs:
@@ -57,13 +57,11 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Fetch, merge, and reapply categorized hooks
+        id: upstream_sync
         run: node scripts/upstream-sync/sync-upstream.mjs --prepare-only
 
       - name: Verify adapter and upstream hooks
-        run: node scripts/upstream-sync/verify.mjs
-
-      - name: Verify hook idempotence
-        run: node scripts/upstream-sync/tests/reapply-idempotence.mjs
+        run: npm run test:upstream-sync
 
       - name: Run JavaScript and Web tests
         run: |
@@ -84,6 +82,9 @@ jobs:
 
       - name: Commit and push successful sync
         shell: bash
+        env:
+          UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
+          UPSTREAM_SHA: ${{ steps.upstream_sync.outputs.upstream_sha }}
         run: |
           if git diff --quiet && git diff --cached --quiet; then
             echo "No upstream changes to commit"
@@ -92,6 +93,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          upstream_sha="$(git rev-parse --short upstream/main)"
-          git commit -m "chore(sync): merge upstream RP-Hub ${upstream_sha} and reapply local patches"
+          git commit -m "chore(sync): merge upstream RP-Hub release ${UPSTREAM_RELEASE_TAG} (${UPSTREAM_SHA:0:7}) and reapply local patches"
           git push origin HEAD:main

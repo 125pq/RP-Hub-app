@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { projectRoot } from './lib.mjs';
 import { reapplyHooks } from './reapply-hooks.mjs';
+import { resolveLatestStableRelease } from './release-source.mjs';
 
 const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
+const RELEASE_REF = 'refs/remotes/upstream/releases/latest';
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
 const prepareOnly = args.has('--prepare-only');
@@ -46,32 +48,33 @@ const gitText = async gitArgs => (await git(gitArgs, { capture: true })).stdout;
 
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-async function fetchUpstream() {
+async function fetchUpstreamRelease(release) {
   let lastFailure = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const result = await git(['fetch', 'upstream', 'main', '--prune'], { allowFailure: true });
-    if (result.code === 0) return;
+    const refspec = `refs/tags/${release.tagName}:${RELEASE_REF}`;
+    const result = await git(['fetch', 'upstream', '--force', refspec], { allowFailure: true });
+    if (result.code === 0) {
+      const fetched = await gitText(['rev-parse', `${RELEASE_REF}^{commit}`]);
+      if (fetched !== release.commitSha) {
+        throw new Error(`Fetched release ${release.tagName} resolved to ${fetched}, expected ${release.commitSha}`);
+      }
+      return;
+    }
     lastFailure = result;
-    console.warn(`Upstream fetch attempt ${attempt}/3 failed`);
+    console.warn(`Upstream release fetch attempt ${attempt}/3 failed`);
     if (attempt < 3) await delay(attempt * 1000);
   }
 
-  const localUpstream = await gitText(['rev-parse', 'upstream/main']);
-  const headers = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': 'RP-Hub-upstream-sync'
-  };
-  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch('https://api.github.com/repos/STA1N156/RP-Hub/commits/main', { headers });
-  if (!response.ok) {
-    throw new Error(`git fetch failed and GitHub HEAD verification returned HTTP ${response.status}: ${lastFailure?.stderr || ''}`);
+  const local = await git(['rev-parse', `${RELEASE_REF}^{commit}`], { capture: true, allowFailure: true });
+  if (local.code !== 0 || local.stdout !== release.commitSha) {
+    throw new Error(`git fetch failed and the cached release ref is stale (local ${local.stdout || 'missing'}, GitHub ${release.commitSha}): ${lastFailure?.stderr || ''}`);
   }
-  const remoteUpstream = String((await response.json()).sha || '');
-  if (!/^[0-9a-f]{40}$/.test(remoteUpstream) || remoteUpstream !== localUpstream) {
-    throw new Error(`git fetch failed and local upstream/main is stale (local ${localUpstream}, GitHub ${remoteUpstream || 'unknown'})`);
-  }
-  console.warn(`FETCH_FALLBACK=PASS (GitHub API confirms unchanged upstream ${localUpstream})`);
+  console.warn(`FETCH_FALLBACK=PASS (GitHub API confirms cached release ${release.tagName} at ${release.commitSha})`);
+}
+
+function publishWorkflowOutputs(release) {
+  if (!process.env.GITHUB_OUTPUT) return;
+  appendFileSync(process.env.GITHUB_OUTPUT, `release_tag=${release.tagName}\nupstream_sha=${release.commitSha}\n`, 'utf8');
 }
 
 async function mergeInProgress() {
@@ -145,14 +148,19 @@ try {
   beforeHead = await gitText(['rev-parse', 'HEAD']);
   console.log(`SYNC_BEFORE_HEAD=${beforeHead}`);
   await ensureUpstreamRemote();
-  await fetchUpstream();
-  const upstreamHead = await gitText(['rev-parse', 'upstream/main']);
-  const upstreamShort = await gitText(['rev-parse', '--short', 'upstream/main']);
-  const incoming = await gitText(['log', '--oneline', 'HEAD..upstream/main']);
+  const release = await resolveLatestStableRelease();
+  publishWorkflowOutputs(release);
+  console.log(`UPSTREAM_RELEASE=${release.tagName}`);
+  console.log(`UPSTREAM_RELEASE_URL=${release.url}`);
+  console.log(`UPSTREAM_RELEASE_PUBLISHED_AT=${release.publishedAt}`);
+  await fetchUpstreamRelease(release);
+  const upstreamHead = await gitText(['rev-parse', `${RELEASE_REF}^{commit}`]);
+  const upstreamShort = await gitText(['rev-parse', '--short', `${RELEASE_REF}^{commit}`]);
+  const incoming = await gitText(['log', '--oneline', `HEAD..${upstreamHead}`]);
   console.log(`UPSTREAM_HEAD=${upstreamHead}`);
   console.log(incoming ? `INCOMING_COMMITS=\n${incoming}` : 'INCOMING_COMMITS=none');
 
-  const merge = await git(['merge', '--no-ff', '--no-commit', 'upstream/main'], { allowFailure: true });
+  const merge = await git(['merge', '--no-ff', '--no-commit', upstreamHead], { allowFailure: true });
   if (merge.code !== 0) {
     const conflicts = await gitText(['diff', '--name-only', '--diff-filter=U']);
     console.error(`MERGE_CONFLICTS=\n${conflicts || '(unknown)'}`);
@@ -175,7 +183,7 @@ try {
       console.log('SYNC_COMMIT=none (no changes)');
     } else {
       await git(['add', '-A']);
-      await git(['commit', '-m', `chore(sync): merge upstream RP-Hub ${upstreamShort} and reapply local patches`]);
+      await git(['commit', '-m', `chore(sync): merge upstream RP-Hub release ${release.tagName} (${upstreamShort}) and reapply local patches`]);
       console.log(`SYNC_COMMIT=${await gitText(['rev-parse', 'HEAD'])}`);
     }
   }
