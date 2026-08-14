@@ -1480,12 +1480,9 @@ const app = createApp({
             ];
             if (settingsPanels.some(closeBooleanPanel)) return true;
 
-            if (currentView.value !== 'chat') {
-                currentView.value = 'chat';
-                return true;
-            }
-
-            return false;
+            // back fallback: open the sidebar instead of switching view / minimizing
+            setMobileSidebarOpen(true);
+            return true;
         };
 
         const initializePlatformAdapters = async () => {
