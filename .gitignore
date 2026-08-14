@@ -7,6 +7,7 @@ npm-debug.log*
 
 # Local Word document workspace
 docs/
+DEVELOPMENT_GUIDE.md
 
 # Local Android and Gradle state (the android project itself will be tracked)
 .toolchains/
