@@ -6,7 +6,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class AppUpdateRelease {
-    private static final Pattern ANDROID_TAG = Pattern.compile("^v?(\\d+)\\.(\\d+)\\.(\\d+)(?:-(\\d+))?-android$");
+    private static final Pattern ANDROID_TAG = Pattern.compile("^v?(\\d+)\\.(\\d+)\\.(\\d+)(?:\\.(\\d+))?-android$");
     private static final Pattern SHA_LINE = Pattern.compile(
         "(?im)APK\\s+SHA-?256\\s*[：:]\\s*`?([a-f0-9]{64})`?"
     );
@@ -50,7 +50,7 @@ final class AppUpdateRelease {
             long code = baseCode * 100L + revision;
             if (code < 1 || code > 2100000000L) return null;
             String name = major + "." + minor + "." + patch;
-            if (revision > 0) name += "-" + revision;
+            if (revision > 0) name += "." + revision;
             return new Version(name, code);
         } catch (NumberFormatException ignored) {
             return null;
