@@ -4,7 +4,7 @@
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg?logo=vue.js)](https://vuejs.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![DaisyUI](https://img.shields.io/badge/DaisyUI-5A0EF8?logo=daisyui&logoColor=white)](https://daisyui.com/)
-[![Android Release](https://img.shields.io/badge/Android-1.8.2-3DDC84?logo=android&logoColor=white)](https://github.com/125pq/RP-Hub-app/releases/tag/v1.8.2-android)
+[![Android Release](https://img.shields.io/badge/Android-1.8.3.5-3DDC84?logo=android&logoColor=white)](https://github.com/125pq/RP-Hub-app/releases/tag/v1.8.3.5-android)
 
 > **一款纯前端运行的本地角色扮演（Roleplay）对话和角色卡生成工具。**
 
@@ -23,7 +23,7 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 - UI 模板变量分析与对话状态展示
 - 自动生图、单张重新生成和多套内置画师风格
 - 角色卡生成、万相广场与“墨韵 · 造梦”在线工具
-- Android / Capacitor 原生封装，支持安全区、系统返回、Share 与外部 Browser
+- Android / Capacitor 原生封装，支持安全区、系统返回、Share、外部 Browser 与系统下载
 - 通过 Android Storage Access Framework（SAF）导入导出文件，无需广泛存储权限
 - paragraph-aware 流式渲染与离屏复杂角色卡动画暂停，改善长回复和长聊天滚动性能
 
@@ -31,12 +31,12 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 
 ### Android 正式版
 
-当前正式版本：**RP-Hub Android 1.8.2**
+当前正式版本：**RP-Hub Android 1.8.3.5**
 
 - Package ID：`io.github.pq125.rphub`
-- Version code：`10802`
-- 下载：[RP-Hub-1.8.2-release.apk](https://github.com/125pq/RP-Hub-app/releases/download/v1.8.2-android/RP-Hub-1.8.2-release.apk)
-- SHA-256：`2F02AE0F0AEE96EB99BE9FD779E77CD2237409A6CE3395A7463C57C573595C80`
+- Version code：`1080305`
+- 下载：[RP-Hub-1.8.3.5-release.apk](https://github.com/125pq/RP-Hub-app/releases/download/v1.8.3.5-android/RP-Hub-1.8.3.5-release.apk)
+- SHA-256：`27332E366646F5D2BFB6DD03E4C564D975859D357FB805A860A9E4ED3E526D6A`
 
 APK 使用项目的长期 release key 签名。安装前可使用 Android SDK `apksigner verify` 校验签名，并核对上方 SHA-256。
 
@@ -70,8 +70,13 @@ npm run build:web
 ## 目录结构 (Directory Structure)
 
 ```text
-Roleplay-Hub/
+RP-Hub-app/
 ├── android/                       # Capacitor Android 原生工程
+│   └── app/src/main/java/io/github/pq125/rphub/
+│       ├── MainActivity.java      # 插件注册、WebView 下载监听、冷启动更新检查
+│       ├── NativeFilePlugin.java  # SAF 导入导出 / 分块写入
+│       ├── NativeClipboardPlugin.java # 安全输入框剪贴板
+│       └── AppUpdateManager.java  # 更新检查、下载、校验、安装
 ├── index.html                     # 主界面与脚本加载入口
 ├── character/                     # 角色卡生成工具
 │   └── index.html
@@ -79,17 +84,22 @@ Roleplay-Hub/
 │   └── index.html
 ├── assets/
 │   ├── css/
-│   │   └── styles.css             # 全局样式
+│   │   ├── styles.css             # 全局样式
+│   │   └── safe-area.css          # Android/WebView 安全区布局
 │   └── js/
+│       ├── app.js                 # 主业务入口与页面状态
 │       ├── built-in-content.js    # 默认预设、模式提示词、画师串与更新公告
-│       ├── core-utils.js          # 通用工具、角色卡处理与基础配置
+│       ├── core-utils.js          # 通用工具、角色卡处理与统一文件保存
 │       ├── data-services.js       # 存储、记忆、上下文、分支与 UI 状态
 │       ├── runtime-services.js    # API 请求、消息渲染与运行状态
-│       ├── offscreen-iframe-lifecycle.js # 离屏复杂 UI 生命周期优化
 │       ├── ui-components.js       # 选择器、侧边栏、弹窗与页面组件
-│       └── app.js                 # 主业务入口与页面状态
+│       ├── platform-services.js   # 平台 facade（浏览器与原生统一入口）
+│       ├── rphub-android-adapter.js # Android 原生能力适配层
+│       ├── safe-area.js           # 安全区变量与 viewport 同步
+│       └── offscreen-iframe-lifecycle.js # 离屏复杂 UI 生命周期优化
 ├── scripts/                       # Web/Android 构建、测试与产物验证脚本
-├── docs/                          # 性能诊断与 Android 发布记录
+│   └── upstream-sync/             # 上游同步、Hook 重放、版本推导与验证
+├── .github/workflows/             # 每日同步 / 测试 / 发布 / Gitee 镜像流水线
 ├── package.json                   # 固定依赖及可重复构建命令
 └── README.md                      # 项目说明
 ```
