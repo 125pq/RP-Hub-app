@@ -8829,7 +8829,7 @@ const app = createApp({
                 const branchChats = await Promise.all(branches.map(async branch => {
                     let messages;
                     if (isCurrentCharacter && branch.id === activeStoryBranchId.value) {
-                        messages = cloneForStorage(chatHistory.value);
+                        messages = chatHistory.value;
                     } else if (char.uuid) {
                         messages = await getScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, branch.id));
                     }
@@ -8838,7 +8838,7 @@ const app = createApp({
                     }
                     return {
                         branchId: branch.id,
-                        messages: Array.isArray(messages) ? cloneForStorage(messages) : []
+                        messages: Array.isArray(messages) ? messages : []
                     };
                 }));
                 const totalMessages = branchChats.reduce((sum, branch) => sum + branch.messages.length, 0);
@@ -8848,12 +8848,32 @@ const app = createApp({
                 }
 
                 const chatByBranch = new Map(branchChats.map(branch => [branch.branchId, branch.messages]));
+                const countFloors = (messages) => {
+                    let count = 0;
+                    let previousRole = null;
+                    for (const message of messages) {
+                        if (!message || typeof message !== 'object') continue;
+                        const role = message.role;
+                        if (role === 'system') continue;
+                        const isMergeable = role === 'user' || role === 'assistant';
+                        if (previousRole === null || previousRole !== role || !isMergeable) count += 1;
+                        previousRole = role;
+                    }
+                    return count;
+                };
+                const countMessages = (messages) => {
+                    let count = 0;
+                    for (const message of messages) {
+                        if (message?.role === 'user' || message?.role === 'assistant') count += 1;
+                    }
+                    return count;
+                };
                 const branchMetadata = branches.map(branch => {
                     const messages = chatByBranch.get(branch.id) || [];
                     return {
                         ...branch,
-                        floorCount: getPostprocessedChatMessages(messages, { includeSystem: false }).length,
-                        messageCount: messages.filter(message => ['user', 'assistant'].includes(message?.role)).length,
+                        floorCount: countFloors(messages),
+                        messageCount: countMessages(messages),
                         wordCount: getConversationBodyLength(messages)
                     };
                 });
@@ -8867,9 +8887,20 @@ const app = createApp({
                         : STORY_BRANCH_MAIN_ID,
                     branches: branchMetadata
                 };
-                const chatLines = [manifest, ...branchChats].map(record => JSON.stringify(record)).join('\n');
+                const chatLinesStream = (async function* streamChatExport() {
+                    yield JSON.stringify(manifest);
+                    for (const branch of branchChats) {
+                        yield '\n{"branchId":' + JSON.stringify(branch.branchId) + ',"messages":[';
+                        const messages = branch.messages;
+                        for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
+                            if (messageIndex > 0) yield ',';
+                            yield JSON.stringify(cloneForStorage(messages[messageIndex]));
+                        }
+                        yield ']}';
+                    }
+                })();
                 const result = await cardUtils.saveGeneratedFile(
-                    chatLines,
+                    chatLinesStream,
                     (char.name || 'character') + '_全部分支_chat.jsonl',
                     { mimeType: 'application/jsonl' }
                 );

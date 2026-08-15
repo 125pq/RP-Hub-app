@@ -29,6 +29,7 @@ public class NativeFilePlugin extends Plugin {
 
     private static final Pattern MIME_PATTERN = Pattern.compile("^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$");
     private static final Pattern MISPLACED_JSON_COPY_SUFFIX = Pattern.compile("^(.*)(\\.jsonl?)\\s*\\((\\d+)\\)$", Pattern.CASE_INSENSITIVE);
+    private static final int MAX_DUPLICATE_RENAME_ATTEMPTS = 1000;
     private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
     private final Object stateLock = new Object();
     private boolean saveReserved;
@@ -278,18 +279,32 @@ public class NativeFilePlugin extends Plugin {
             return uri;
         }
 
-        String normalizedName = normalizeDuplicateFilename(currentName);
-        if (normalizedName == null || normalizedName.equals(currentName)) return uri;
+        Matcher matcher = MISPLACED_JSON_COPY_SUFFIX.matcher(currentName == null ? "" : currentName);
+        if (!matcher.matches()) return uri;
+
+        String base = matcher.group(1).replaceFirst("\\s+$", "");
+        String extension = matcher.group(2);
+        int suffix;
         try {
-            Uri renamedUri = DocumentsContract.renameDocument(
-                getContext().getContentResolver(),
-                uri,
-                normalizedName
-            );
-            return renamedUri == null ? uri : renamedUri;
-        } catch (IOException | RuntimeException ignored) {
-            return uri;
+            suffix = Integer.parseInt(matcher.group(3));
+        } catch (NumberFormatException ignored) {
+            suffix = 1;
         }
+
+        for (int candidateSuffix = suffix; candidateSuffix < suffix + MAX_DUPLICATE_RENAME_ATTEMPTS; candidateSuffix++) {
+            String candidate = base + " (" + candidateSuffix + ")" + extension;
+            try {
+                Uri renamedUri = DocumentsContract.renameDocument(
+                    getContext().getContentResolver(),
+                    uri,
+                    candidate
+                );
+                return renamedUri == null ? uri : renamedUri;
+            } catch (IOException | RuntimeException ignored) {
+                // Name already in use (or provider rejected it): try the next suffix.
+            }
+        }
+        return uri;
     }
 
     static String normalizeMimeType(String value) {

@@ -57,8 +57,8 @@
             return { supported: true, result };
         }
 
-        async appendTextChunks(plugin, sessionId, text) {
-            let chunkIndex = 0;
+        async appendTextChunks(plugin, sessionId, text, startIndex = 0) {
+            let chunkIndex = startIndex;
             let offset = 0;
             while (offset < text.length) {
                 let end = Math.min(offset + TEXT_CHUNK_CODE_UNITS, text.length);
@@ -75,6 +75,38 @@
                 });
                 chunkIndex += 1;
                 offset = end;
+            }
+            return chunkIndex;
+        }
+
+        async appendTextStream(plugin, sessionId, stream) {
+            let chunkIndex = 0;
+            let buffer = '';
+            for await (const piece of stream) {
+                buffer += String(piece ?? '');
+                while (buffer.length >= TEXT_CHUNK_CODE_UNITS) {
+                    let end = TEXT_CHUNK_CODE_UNITS;
+                    const last = buffer.charCodeAt(end - 1);
+                    const next = buffer.charCodeAt(end);
+                    if (last >= 0xD800 && last <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) end -= 1;
+                    await plugin.appendChunk({
+                        sessionId,
+                        index: chunkIndex,
+                        encoding: 'utf8',
+                        data: buffer.slice(0, end)
+                    });
+                    chunkIndex += 1;
+                    buffer = buffer.slice(end);
+                }
+            }
+            if (buffer.length > 0) {
+                await plugin.appendChunk({
+                    sessionId,
+                    index: chunkIndex,
+                    encoding: 'utf8',
+                    data: buffer
+                });
+                chunkIndex += 1;
             }
             return chunkIndex;
         }
@@ -108,9 +140,14 @@
             if (!sessionId) throw new Error('Native file save did not create a session');
 
             try {
-                const chunkCount = typeof file.data === 'string'
-                    ? await this.appendTextChunks(plugin, sessionId, file.data)
-                    : await this.appendBinaryChunks(plugin, sessionId, file.data, file.mimeType);
+                let chunkCount;
+                if (file.data && typeof file.data[Symbol.asyncIterator] === 'function') {
+                    chunkCount = await this.appendTextStream(plugin, sessionId, file.data);
+                } else if (typeof file.data === 'string') {
+                    chunkCount = await this.appendTextChunks(plugin, sessionId, file.data);
+                } else {
+                    chunkCount = await this.appendBinaryChunks(plugin, sessionId, file.data, file.mimeType);
+                }
                 return {
                     supported: true,
                     cancelled: false,

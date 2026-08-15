@@ -197,6 +197,28 @@ function loadPlatformServices(overrides = {}) {
   assert.equal(binaryCalls.every(item => item.options.encoding === 'base64'), true);
   assert.equal(Buffer.concat(binaryCalls.map(item => Buffer.from(item.options.data, 'base64'))).length, 200 * 1024);
 
+  const streamPieces = [
+    'a'.repeat((256 * 1024) - 1),
+    '😺\n中文',
+    'b'.repeat(100),
+  ];
+  const streamResult = await services.exportFile({
+    filename: 'stream.jsonl',
+    mimeType: 'application/jsonl',
+    data: (async function* () {
+      for (const piece of streamPieces) yield piece;
+    })(),
+  });
+  assert.equal(streamResult.cancelled, false);
+  const streamFileCalls = calls.file.splice(0);
+  assert.equal(streamFileCalls[0].method, 'beginSave');
+  const streamChunks = streamFileCalls.filter(item => item.method === 'appendChunk');
+  assert.equal(streamChunks.map(item => item.options.data).join(''), streamPieces.join(''), 'streamed pieces must concatenate intact');
+  assert.deepEqual(streamChunks.map(item => item.options.index), [0, 1], 'stream must carry a running chunk index');
+  assert.equal(streamChunks.every(item => item.options.encoding === 'utf8'), true);
+  assert.equal(streamChunks[1].options.data.startsWith('😺'), true, 'surrogate pair must not be split across chunks');
+  assert.equal(streamFileCalls.at(-1).method, 'finishSave');
+
   const info = await services.getAppInfo();
   assert.deepEqual(toPlainObject(info), {
     platform: 'android',

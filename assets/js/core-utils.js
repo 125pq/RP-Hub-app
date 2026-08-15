@@ -906,16 +906,23 @@ window.RPHubUtils = {
     const saveGeneratedFile = async (data, filename, options = {}) => {
         const mimeType = String(options.mimeType || data?.type || 'application/octet-stream');
         const adapter = getPlatformAdapter();
-        if (adapter?.exportFile) {
+        const isChunkStream = data && typeof data[Symbol.asyncIterator] === 'function';
+        if (adapter?.exportFile && (!isChunkStream || adapter.isNative?.())) {
             const result = await adapter.exportFile({ data, filename, mimeType });
             if (result?.supported === false) throw new Error('当前平台不支持文件保存');
             return result;
         }
-        const blob = data && typeof data.arrayBuffer === 'function' && typeof data.slice === 'function'
-            ? data
-            : new Blob([data], { type: mimeType });
-        downloadBlob(blob, filename, options);
-        return { supported: true, cancelled: false, bytesWritten: blob.size };
+        if (isChunkStream) {
+            const parts = [];
+            for await (const part of data) parts.push(String(part ?? ''));
+            data = new Blob(parts, { type: mimeType });
+        } else {
+            data = data && typeof data.arrayBuffer === 'function' && typeof data.slice === 'function'
+                ? data
+                : new Blob([data], { type: mimeType });
+        }
+        downloadBlob(data, filename, options);
+        return { supported: true, cancelled: false, bytesWritten: data.size };
     };
 
     window.RPHubCardUtils = {
