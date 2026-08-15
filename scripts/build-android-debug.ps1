@@ -82,7 +82,8 @@ try {
 
     $outputDirectory = Join-Path $projectRoot 'debug_apk'
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $outputApk = Join-Path $outputDirectory 'RP-Hub-1.8.2-debug.apk'
+    $versionName = if ($env:RPHUB_VERSION_NAME) { $env:RPHUB_VERSION_NAME } else { '1.8.3.5' }
+    $outputApk = Join-Path $outputDirectory "RP-Hub-$versionName-debug.apk"
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
 
     $apk = Get-Item -LiteralPath $outputApk
