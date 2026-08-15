@@ -157,18 +157,6 @@ jobs:
               printf '%s\n' "$hotfix_section"
               echo
             fi
-            echo "## Android 构建说明"
-            echo
-            echo "- Android / Capacitor 封装"
-            echo "- 本地离线运行依赖"
-            echo "- SAF 文件导入与导出"
-            echo "- Android safe-area、Back、Share、Browser 适配"
-            echo "- paragraph-aware streaming 性能优化"
-            echo "- 复杂 UI 角色卡离屏动画暂停，改善长聊天滚动性能"
-            echo "- 使用永久 release key 签名"
-            echo
-            echo "已知问题：默认 Capacitor 图标及少量 UX polish 后续处理。"
-            echo
             echo "## APK 校验"
             echo
             echo "APK SHA-256：\`$APK_SHA256\`"
