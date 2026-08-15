@@ -1641,6 +1641,38 @@ ${content}
         .replace(UI_TEMPLATE_UPDATES_JSON_STRIP_PATTERN, '')
         .trimEnd();
 
+    const processMainContentImpl = (mainText, isGeneratingState) => {
+        mainText = stripUiTemplateUpdateBlock(mainText);
+        if (!isGeneratingState) return { text: mainText, showSpinner: false };
+        const patterns = ['```html', '```vue', '<!DOCTYPE', '<div', '<style'];
+        let earliestIndex = -1;
+        for (const p of patterns) {
+            const idx = mainText.toLowerCase().indexOf(p);
+            if (idx !== -1 && (earliestIndex === -1 || idx < earliestIndex)) {
+                earliestIndex = idx;
+            }
+        }
+        if (earliestIndex !== -1) {
+            return { text: mainText.substring(0, earliestIndex), showSpinner: true };
+        }
+        return { text: mainText, showSpinner: false };
+    };
+    const processMainContentCache = new Map();
+    const processMainContent = (mainText, isGeneratingState) => {
+        const bucketKey = isGeneratingState ? 1 : 0;
+        let bucket = processMainContentCache.get(bucketKey);
+        if (!bucket) {
+            bucket = new Map();
+            processMainContentCache.set(bucketKey, bucket);
+        }
+        const key = mainText || '';
+        if (bucket.has(key)) return bucket.get(key);
+        const result = processMainContentImpl(mainText, isGeneratingState);
+        bucket.set(key, result);
+        if (bucket.size > 800) bucket.delete(bucket.keys().next().value);
+        return result;
+    };
+
     const createDetailedJsonSyntaxError = (error, content) => {
         const positionMatch = String(error?.message || '').match(/position\s+(\d+)/i);
         if (!positionMatch) return error;
@@ -1904,6 +1936,7 @@ ${content}
         setUiTemplateValue,
         stringifyUiSchema,
         stripUiTemplateCodeFence,
-        stripUiTemplateUpdateBlock
+        stripUiTemplateUpdateBlock,
+        processMainContent
     };
 })();

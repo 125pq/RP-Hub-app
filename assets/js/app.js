@@ -114,7 +114,8 @@ const {
     sanitizeUiTemplateImportEntry,
     setUiTemplateValue,
     stringifyUiSchema,
-    stripUiTemplateUpdateBlock
+    stripUiTemplateUpdateBlock,
+    processMainContent
 } = window.RPHubUiTemplateUtils;
 const {
     cloneForStorage,
@@ -6757,7 +6758,17 @@ const app = createApp({
             return `${modeText}: ${toolCall.query}`;
         };
 
-        const getTimelineCharCount = (text) => Array.from(String(text || '')).length;
+        const timelineCharCountCache = new Map();
+        const getTimelineCharCount = (text) => {
+            const key = String(text || '');
+            if (timelineCharCountCache.has(key)) return timelineCharCountCache.get(key);
+            const value = Array.from(key).length;
+            timelineCharCountCache.set(key, value);
+            if (timelineCharCountCache.size > 600) {
+                timelineCharCountCache.delete(timelineCharCountCache.keys().next().value);
+            }
+            return value;
+        };
 
         const getTimelineStepsImpl = (message) => {
             const steps = [];
@@ -9143,23 +9154,6 @@ const app = createApp({
             removePlatformBackListener();
             removePlatformStateListener();
         });
-        // 解析并截断生成的包含 HTML UI 的正文，避免闪屏问题
-        const processMainContent = (mainText, isGeneratingState) => {
-            mainText = stripUiTemplateUpdateBlock(mainText);
-            if (!isGeneratingState) return { text: mainText, showSpinner: false };
-            const patterns = ['```html', '```vue', '<!DOCTYPE', '<div', '<style'];
-            let earliestIndex = -1;
-            for (const p of patterns) {
-                const idx = mainText.toLowerCase().indexOf(p);
-                if (idx !== -1 && (earliestIndex === -1 || idx < earliestIndex)) {
-                    earliestIndex = idx;
-                }
-            }
-            if (earliestIndex !== -1) {
-                return { text: mainText.substring(0, earliestIndex), showSpinner: true };
-            }
-            return { text: mainText, showSpinner: false };
-        };
 
         const switchProfile = (id) => {
             const profile = userProfiles.value.find(p => p.uuid === id);
