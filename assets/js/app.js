@@ -3190,7 +3190,6 @@ const app = createApp({
                     // 如果正则本身就在匹配代码块（如用户提供的 ```json ...```），则不应进行保护
                     // 增强保护：防止普通正则（通常带g）破坏 iframe 渲染内容（HTML文档、Script/Style块）
                     if (!/[<>]/.test(regexPattern) && !regexPattern.includes('```')) {
-                        if (isStandaloneRenderedContent(result)) return;
                         // 匹配 完整的 HTML 文档, Script/Style 块, Markdown 代码块, 行内代码, HTML 标签, 或 <cot> 块
                         // Updated to support <think> and erroneous <cot>...<cot> closing
                         result = cardUtils.transformUnprotectedText(
