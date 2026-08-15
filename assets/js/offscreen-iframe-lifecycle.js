@@ -4,6 +4,7 @@
     const OFFSCREEN_CLASS = 'rph-offscreen';
     const SUSPENSION_STYLE_ID = 'rph-offscreen-animation-suspension';
     const PRELOAD_VIEWPORTS = 1.5;
+    const SCROLL_IDLE_DELAY = 180;
     const metadata = new WeakMap();
     const registeredFrames = new Set();
     const diagnostics = window.__RPH_PERF__?.enabled === true ? {
@@ -19,6 +20,8 @@
     let mutationObserver = null;
     let refreshFrame = null;
     let resizeFrame = null;
+    let scrolling = false;
+    let scrollIdleTimer = null;
 
     const safeChildDocument = iframe => {
         try {
@@ -78,7 +81,7 @@ html.${OFFSCREEN_CLASS} *::after {
             if (previousState === 'OFFSCREEN' && state === 'ACTIVE') diagnostics.directActiveResumes++;
         }
         meta.state = state;
-        applySuspension(iframe, state === 'OFFSCREEN');
+        applySuspension(iframe, state === 'OFFSCREEN' || scrolling);
     };
 
     const refreshAll = () => registeredFrames.forEach(updateFrame);
@@ -89,6 +92,21 @@ html.${OFFSCREEN_CLASS} *::after {
             refreshFrame = null;
             refreshAll();
         });
+    };
+
+    const setScrolling = active => {
+        if (scrolling === active) return;
+        scrolling = active;
+        scheduleRefresh();
+    };
+
+    const handleScroll = () => {
+        if (!scrolling) setScrolling(true);
+        if (scrollIdleTimer !== null) clearTimeout(scrollIdleTimer);
+        scrollIdleTimer = setTimeout(() => {
+            scrollIdleTimer = null;
+            setScrolling(false);
+        }, SCROLL_IDLE_DELAY);
     };
 
     const unobserveFrame = iframe => {
@@ -181,6 +199,10 @@ html.${OFFSCREEN_CLASS} *::after {
         window.removeEventListener('resize', handleResize);
         window.removeEventListener('pageshow', scheduleRefresh);
         document.removeEventListener('visibilitychange', handleVisibility);
+        container?.removeEventListener?.('scroll', handleScroll, true);
+        if (scrollIdleTimer !== null) clearTimeout(scrollIdleTimer);
+        scrollIdleTimer = null;
+        scrolling = false;
         container = null;
     };
 
@@ -199,6 +221,7 @@ html.${OFFSCREEN_CLASS} *::after {
         }));
         mutationObserver.observe(container, { childList: true, subtree: true });
         container.querySelectorAll(FRAME_SELECTOR).forEach(observeFrame);
+        container.addEventListener?.('scroll', handleScroll, { passive: true, capture: true });
         window.addEventListener('resize', handleResize, { passive: true });
         window.addEventListener('pageshow', scheduleRefresh, { passive: true });
         document.addEventListener('visibilitychange', handleVisibility);

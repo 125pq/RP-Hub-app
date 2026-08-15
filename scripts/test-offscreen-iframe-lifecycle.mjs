@@ -48,7 +48,13 @@ const frames = [createFrame(20, 80), createFrame(150, 200), createFrame(300, 350
 const container = {
   clientHeight: 100,
   getBoundingClientRect: () => ({ top: 0, bottom: 100, left: 0, right: 100 }),
-  querySelectorAll: selector => selector === 'iframe.executable-html-frame' ? frames : []
+  querySelectorAll: selector => selector === 'iframe.executable-html-frame' ? frames : [],
+  listeners: new Map(),
+  addEventListener(type, listener) { this.listeners.set(type, listener); },
+  removeEventListener(type, listener) {
+    if (this.listeners.get(type) === listener) this.listeners.delete(type);
+  },
+  dispatch(type) { this.listeners.get(type)?.(); }
 };
 
 const intersectionObservers = [];
@@ -85,6 +91,20 @@ const flushAnimationFrames = () => {
   callbacks.forEach(callback => callback(0));
 };
 
+let timeoutId = 0;
+const timeouts = new Map();
+const setTimeout = (fn) => {
+  const id = ++timeoutId;
+  timeouts.set(id, fn);
+  return id;
+};
+const clearTimeout = id => timeouts.delete(id);
+const flushTimeouts = () => {
+  const entries = [...timeouts.values()];
+  timeouts.clear();
+  entries.forEach(fn => fn());
+};
+
 const eventTarget = {
   addEventListener() {},
   removeEventListener() {}
@@ -98,7 +118,9 @@ const context = vm.createContext({
   IntersectionObserver: FakeIntersectionObserver,
   MutationObserver: FakeMutationObserver,
   requestAnimationFrame,
-  cancelAnimationFrame
+  cancelAnimationFrame,
+  setTimeout,
+  clearTimeout
 });
 
 vm.runInContext(source, context, { filename: 'offscreen-iframe-lifecycle.js' });
@@ -147,6 +169,19 @@ frames[2].isConnected = false;
 mutationObserver.callback([{ removedNodes: [frames[2]], addedNodes: [] }]);
 assert.equal(lifecycle.getState(frames[2]), null);
 assert.equal(frames[2].contentDocument.documentElement.classList.contains('rph-offscreen'), false);
+
+// Scroll pause: while the container scrolls, in-view frames also suspend; idle resumes them.
+container.dispatch('scroll');
+flushAnimationFrames();
+assert.equal(lifecycle.getState(frames[0]).state, 'ACTIVE');
+assert.equal(lifecycle.getState(frames[0]).suspended, true);
+assert.equal(frames[0].contentDocument.documentElement.classList.contains('rph-offscreen'), true);
+assert.equal(lifecycle.getState(frames[1]).suspended, true);
+
+flushTimeouts();
+flushAnimationFrames();
+assert.equal(lifecycle.getState(frames[0]).suspended, false);
+assert.equal(lifecycle.getState(frames[1]).suspended, false);
 
 lifecycle.detach();
 assert.equal(lifecycle.getState(frames[0]), null);
