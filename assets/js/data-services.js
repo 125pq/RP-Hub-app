@@ -1612,15 +1612,30 @@ ${content}
     };
 
     const UI_TEMPLATE_UPDATES_PATTERN = /<ui_template_updates\b[^>]*>([\s\S]*?)<\/ui_template_updates>|(\{\s*"updates"\s*:[\s\S]*$)/i;
-    const UI_TEMPLATE_UPDATES_STRIP_PATTERN = /<ui_template_updates\b[^>]*>[\s\S]*?<\/ui_template_updates>/gi;
-    const UI_TEMPLATE_UPDATES_OPEN_STRIP_PATTERN = /<ui_template_updates\b[^>]*>[\s\S]*$/i;
-    const UI_TEMPLATE_UPDATES_JSON_STRIP_PATTERN = /\{\s*"updates"\s*:[\s\S]*$/i;
+    const findUiTemplateUpdateBlock = (text) => {
+        const source = String(text || '');
+        const taggedCandidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /<ui_template_updates\b[^>]*>/i);
+        const taggedTail = taggedCandidate ? source.slice(taggedCandidate.index).trimEnd() : '';
+        const tagged = taggedTail.match(/^<ui_template_updates\b[^>]*>([\s\S]*?)(?:<\/ui_template_updates>)?$/i);
+        if (tagged) {
+            const result = [taggedTail, tagged[1], undefined];
+            result.index = taggedCandidate.index;
+            return result;
+        }
+        const candidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /\{\s*"updates"\s*:/i);
+        if (!candidate) return null;
+        const tail = source.slice(candidate.index).trimEnd();
+        if (!/^\{\s*"updates"\s*:/i.test(tail)) return null;
+        const result = [tail, undefined, tail];
+        result.index = candidate.index;
+        return result;
+    };
 
-    const stripUiTemplateUpdateBlock = (text) => String(text || '')
-        .replace(UI_TEMPLATE_UPDATES_STRIP_PATTERN, '')
-        .replace(UI_TEMPLATE_UPDATES_OPEN_STRIP_PATTERN, '')
-        .replace(UI_TEMPLATE_UPDATES_JSON_STRIP_PATTERN, '')
-        .trimEnd();
+    const stripUiTemplateUpdateBlock = (text) => {
+        const source = String(text || '');
+        const match = findUiTemplateUpdateBlock(source);
+        return match ? source.slice(0, match.index).trimEnd() : source;
+    };
 
     const createDetailedJsonSyntaxError = (error, content) => {
         const positionMatch = String(error?.message || '').match(/position\s+(\d+)/i);
@@ -1874,6 +1889,7 @@ ${content}
         cloneUiObject,
         cloneUiValue,
         createExecutableHtmlIframe,
+        findUiTemplateUpdateBlock,
         getUiTemplateValue,
         inferInitialUiTemplateState,
         normalizeUiTemplate,
