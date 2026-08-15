@@ -131,14 +131,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           APK_SHA256: ${{ steps.apk.outputs.sha256 }}
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
+          VERSION_NAME: ${{ steps.android_release.outputs.version_name }}
         run: |
           upstream_notes="$(gh api "repos/STA1N156/RP-Hub/releases/tags/${UPSTREAM_RELEASE_TAG}" --jq '.body // ""')"
           notes_file="$RUNNER_TEMP/android-release-notes.md"
+
+          changelog_file="$GITHUB_WORKSPACE/CHANGELOG.md"
+          hotfix_section=""
+          if [ -f "$changelog_file" ]; then
+            hotfix_section="$(awk -v ver="$VERSION_NAME" '
+              { sub(/\r$/, "") }
+              /^## / { in_section = ($0 == ("## " ver)); next }
+              in_section { print }
+            ' "$changelog_file")"
+          fi
+
           {
             echo "## 上游 RP-Hub ${UPSTREAM_RELEASE_TAG} 更新说明"
             echo
             printf '%s\n' "$upstream_notes"
             echo
+            if [ -n "$hotfix_section" ]; then
+              echo "## Android 本次更新 (${VERSION_NAME})"
+              echo
+              printf '%s\n' "$hotfix_section"
+              echo
+            fi
             echo "## Android 构建说明"
             echo
             echo "- Android / Capacitor 封装"
