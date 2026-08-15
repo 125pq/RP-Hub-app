@@ -824,7 +824,7 @@ const app = createApp({
             { value: 'low', label: '低' },
             { value: 'medium', label: '中' },
             { value: 'high', label: '高' },
-            { value: 'xhigh', label: '超高' },
+            { value: 'max', label: '最高' },
             { value: '', label: '默认' }
         ];
         const reasoningEffortSlider = computed({
@@ -1729,6 +1729,7 @@ const app = createApp({
                 }
                 settings.fontFamily = normalizeFontFamily(settings.fontFamily);
                 settings.fontSize = normalizeFontSize(settings.fontSize);
+                if (settings.reasoningEffort === 'xhigh') settings.reasoningEffort = 'max';
                 settings.fontFamilyVersion = 4;
                 applyFontFamily(settings.fontFamily);
                 delete settings.renderLayerLimit;
