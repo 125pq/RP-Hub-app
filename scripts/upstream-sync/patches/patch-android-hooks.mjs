@@ -12,6 +12,12 @@ export async function applyAndroidHooks() {
       `        document.write('<script src="assets/js/platform-services.js?v=' + new Date().getTime() + '"><\\/script>');\n        document.write('<script src="assets/js/rphub-android-adapter.js?v=' + new Date().getTime() + '"><\\/script>');\n`,
       'platform adapter scripts'
     );
+    source = ensureBefore(
+      source,
+      `        document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\\/script>');`,
+      `        document.write('<script src="assets/js/chat-import-streaming.js?v=' + new Date().getTime() + '"><\\/script>');\n`,
+      'chat import streaming script'
+    );
     return source;
   }));
 

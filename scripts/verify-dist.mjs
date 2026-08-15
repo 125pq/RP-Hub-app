@@ -38,6 +38,7 @@ const requiredFiles = [
   'assets/js/platform-services.js',
   'assets/js/rphub-android-adapter.js',
   'assets/js/safe-area.js',
+  'assets/js/chat-import-streaming.js',
   'assets/js/app.js',
   'assets/vendor/vue/vue.global.prod.js',
   'assets/vendor/marked/marked.min.js',

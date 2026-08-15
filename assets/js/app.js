@@ -8591,6 +8591,30 @@ const app = createApp({
             editingWorldInfo.data.keys = parseWorldInfoKeysText(worldInfoKeysText.value, editingWorldInfo.data.useRegex);
         };
 
+        const importCharacterChatJsonl = window.RPHubChatImport.createChatImporter({
+            currentCharacterIndex,
+            currentCharacter,
+            showToast,
+            stopCurrentCharacterWork,
+            getCurrentStoryBranchScopeId,
+            setApplyingCharacterScopedData: (value) => { _isApplyingCharacterScopedData = value; },
+            storyBranches,
+            activeStoryBranchId,
+            selectedStoryBranchId,
+            resetChatRenderWindow,
+            chatHistory,
+            prepareLoadedChatHistoryForDisplay,
+            createInitialChatHistory,
+            loadCharacterMemories,
+            loadGlobalUiTemplateRuntimeForCharacter,
+            clearStoryBranchTransientContext,
+            finishApplyingCharacterScopedData,
+            currentView,
+            scrollChatToBottom,
+            updateCurrentStoryBranchSummary,
+            saveStoryBranchesForCharacter
+        });
+
         const importCharacter = (event) => {
             const file = event.target.files[0];
             if (!file) return;
@@ -8643,116 +8667,11 @@ const app = createApp({
             };
 
             if (file.name.toLowerCase().endsWith('.jsonl')) {
-                const reader = new FileReader();
-                reader.onload = async (e) => {
-                    try {
-                        const records = String(e.target.result || '')
-                            .split(/\r?\n/)
-                            .filter(line => line.trim())
-                            .map(line => JSON.parse(line));
-                        if (!records.length) throw new Error('文件中没有有效的聊天记录');
-                        if (currentCharacterIndex.value < 0) {
-                            showToast('请先选择一个角色才能导入聊天记录', 'warning');
-                            return;
-                        }
-
-                        const char = currentCharacter.value;
-                        if (!char?.uuid) throw new Error('当前角色缺少有效标识');
-
-                        if (records[0]?.type === STORY_BRANCH_CHAT_EXPORT_TYPE) {
-                            const manifest = records[0];
-                            if (Number(manifest.version) !== STORY_BRANCH_CHAT_EXPORT_VERSION) {
-                                throw new Error(`不支持的分支聊天版本：${manifest.version}`);
-                            }
-                            if (!Array.isArray(manifest.branches) || !manifest.branches.length) {
-                                throw new Error('文件中没有分支信息');
-                            }
-
-                            const chatByBranch = new Map();
-                            records.slice(1).forEach(record => {
-                                const branchId = String(record?.branchId || '').trim();
-                                if (!branchId || !Array.isArray(record?.messages)) {
-                                    throw new Error('分支聊天数据不完整');
-                                }
-                                if (record.messages.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
-                                    throw new Error(`分支“${branchId}”包含无效消息`);
-                                }
-                                if (chatByBranch.has(branchId)) throw new Error(`分支“${branchId}”重复`);
-                                chatByBranch.set(branchId, cloneForStorage(record.messages));
-                            });
-
-                            const importedBranches = normalizeStoryBranches(char, { branches: manifest.branches });
-                            importedBranches.forEach(branch => {
-                                if (!chatByBranch.has(branch.id)) throw new Error(`缺少分支“${branch.name}”的聊天记录`);
-                                const messages = chatByBranch.get(branch.id);
-                                branch.floorCount = getPostprocessedChatMessages(messages, { includeSystem: false }).length;
-                                branch.messageCount = messages.filter(message => ['user', 'assistant'].includes(message.role)).length;
-                                branch.wordCount = getConversationBodyLength(messages);
-                            });
-                            const importedIds = new Set(importedBranches.map(branch => branch.id));
-                            if ([...chatByBranch.keys()].some(branchId => !importedIds.has(branchId))) {
-                                throw new Error('聊天记录中包含未知分支');
-                            }
-                            const importedActiveId = importedIds.has(String(manifest.activeBranchId))
-                                ? String(manifest.activeBranchId)
-                                : STORY_BRANCH_MAIN_ID;
-
-                            if (!await stopCurrentCharacterWork()) return;
-                            if (!getMainDb()) await initDB();
-                            await Promise.all([
-                                ...importedBranches.map(branch => setScopedStoredValue(
-                                    'chat',
-                                    getStoryBranchScopeId(char.uuid, branch.id),
-                                    chatByBranch.get(branch.id),
-                                    { clone: false }
-                                )),
-                                setScopedStoredValue('branches', char.uuid, {
-                                    version: 1,
-                                    activeBranchId: importedActiveId,
-                                    branches: cloneForStorage(importedBranches)
-                                }, { clone: false })
-                            ]);
-
-                            _isApplyingCharacterScopedData = true;
-                            storyBranches.value = importedBranches;
-                            activeStoryBranchId.value = importedActiveId;
-                            selectedStoryBranchId.value = importedActiveId;
-                            resetChatRenderWindow();
-                            const activeChat = chatByBranch.get(importedActiveId);
-                            chatHistory.value = activeChat.length
-                                ? prepareLoadedChatHistoryForDisplay(activeChat)
-                                : createInitialChatHistory(char);
-                            await loadCharacterMemories(getStoryBranchScopeId(char.uuid, importedActiveId), ' during branch chat import');
-                            loadGlobalUiTemplateRuntimeForCharacter(char);
-                            clearStoryBranchTransientContext();
-                            finishApplyingCharacterScopedData();
-                            currentView.value = 'chat';
-                            await scrollChatToBottom();
-
-                            const messageCount = [...chatByBranch.values()].reduce((sum, messages) => sum + messages.length, 0);
-                            showToast(`成功导入 ${importedBranches.length} 个分支，共 ${messageCount} 条聊天记录`, 'success');
-                            return;
-                        }
-
-                        if (records.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
-                            throw new Error('聊天记录包含无效消息');
-                        }
-                        const importedChat = cloneForStorage(records);
-                        if (!await stopCurrentCharacterWork()) return;
-                        _isApplyingCharacterScopedData = true;
-                        chatHistory.value = prepareLoadedChatHistoryForDisplay(importedChat);
-                        await setScopedStoredValue('chat', getCurrentStoryBranchScopeId(), importedChat, { clone: false });
-                        updateCurrentStoryBranchSummary();
-                        await saveStoryBranchesForCharacter(char);
-                        finishApplyingCharacterScopedData();
-                        showToast(`成功为 ${char.name} 导入 ${importedChat.length} 条聊天记录`, 'success');
-                    } catch (err) {
-                        _isApplyingCharacterScopedData = false;
-                        console.error('Chat import error:', err);
-                        showToast('聊天记录解析失败: ' + err.message, 'error');
-                    }
-                };
-                reader.readAsText(file);
+                importCharacterChatJsonl(file).catch(err => {
+                    _isApplyingCharacterScopedData = false;
+                    console.error('Chat import error:', err);
+                    showToast('聊天记录解析失败: ' + (err?.message || 'JSON 格式错误'), 'error');
+                });
             } else if (file.type === 'application/json' || file.name.toLowerCase().endsWith('.json')) {
                 const reader = new FileReader();
                 reader.onload = async (e) => {
