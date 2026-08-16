@@ -59,8 +59,26 @@ export async function applyAndroidHooks() {
     return source;
   }));
 
-  changes.push(await editText('character/index.html', category, source => {
-    if (!source.includes('cardUtils.saveGeneratedFile')) {
+  changes.push(await editText('assets/js/presence.js', category, source => {
+    if (!source.includes("const isNativeApp = window.platformAdapter?.isNative?.() === true;")) {
+      source = ensureBefore(
+        source,
+        `                    window.dispatchEvent(new CustomEvent('rphub:update-available', {`,
+        `                    // In the native APK, APK updates are handled by AppUpdateManager (which checks\n                    // the GitHub releases API and downloads/installs the APK). Refreshing the WebView\n                    // cannot replace the installed APK, so the web "refresh to update" prompt would be\n                    // misleading. The heartbeat still runs (presence stays online) — only the web\n                    // refresh prompt is suppressed for native builds.\n                    const isNativeApp = window.platformAdapter?.isNative?.() === true;\n                    if (!isNativeApp) {\n`,
+        'presence native update guard'
+      );
+      source = ensureAfter(
+        source,
+        `                        detail: { versionId: latestVersionId }\n                    }));`,
+        `\n                    }`,
+        'presence native update guard close'
+      );
+    }
+    requireContains(source, 'window.platformAdapter?.isNative?.() === true', 'presence native guard');
+    return source;
+  }));
+
+  changes.push(await editText('character/index.html', category, source => {    if (!source.includes('cardUtils.saveGeneratedFile')) {
       source = replaceOnce(
         source,
         `                const downloadFile = (blob, filename) => {\n                    cardUtils.downloadBlob(blob, filename, { targetBlank: true, revokeDelay: 2000 });\n                };`,
