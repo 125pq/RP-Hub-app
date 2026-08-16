@@ -5329,52 +5329,64 @@ const app = createApp({
             const characterId = currentCharacter.value?.uuid;
             const storyScopeId = getCurrentStoryBranchScopeId();
             const epoch = _classicExtractionEpoch;
+            const concurrency = normalizeClassicMemoryConcurrency(memorySettings.classicConcurrency);
             let completed = 0;
             let memorySourceForSave = null;
             classicBatchExtractProgress.value = { current: 0, total: groups.length };
             try {
-                for (const group of groups) {
+                for (let offset = 0; offset < groups.length; offset += concurrency) {
                     if (signal?.aborted || epoch !== _classicExtractionEpoch
                         || currentCharacter.value?.uuid !== characterId
                         || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    let summary;
-                    try {
-                        summary = await requestClassicSecondarySummary(group, signal);
-                    } catch (error) {
-                        if (error?.name === 'AbortError') throw error;
-                        console.warn('Classic memory secondary compression failed:', error);
-                        break;
+                    const results = await Promise.all(groups.slice(offset, offset + concurrency).map(async group => {
+                        try {
+                            return { group, summary: await requestClassicSecondarySummary(group, signal) };
+                        } catch (error) {
+                            return { group, error };
+                        } finally {
+                            classicBatchExtractProgress.value.current++;
+                        }
+                    }));
+                    if (signal?.aborted || epoch !== _classicExtractionEpoch
+                        || currentCharacter.value?.uuid !== characterId
+                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
+                    let failed = false;
+                    for (const result of results) {
+                        if (result.error) {
+                            if (result.error.name === 'AbortError') throw result.error;
+                            console.warn('Classic memory secondary compression failed:', result.error);
+                            failed = true;
+                            continue;
+                        }
+                        const { group, summary } = result;
+                        const sourceIds = new Set(group.map(memory => memory.id));
+                        if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) continue;
+                        const startTurn = Number(group[0].turn);
+                        const endTurn = Number(group[group.length - 1].turn);
+                        const sourceMemories = group.map(memory => cloneForStorage(memory));
+                        const mergedMemory = markRuntimeRaw({
+                            id: generateUUID(),
+                            timestamp: Date.now(),
+                            turn: endTurn,
+                            turnStart: startTurn,
+                            turnEnd: endTurn,
+                            summary,
+                            enabled: true,
+                            classicMemory: true,
+                            secondaryCompressed: true,
+                            summaryModel: String(memorySettings.classicModel || '').trim(),
+                            sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
+                            sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
+                            sourceMemories
+                        });
+                        classicMemories.value = [
+                            ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
+                            mergedMemory
+                        ];
+                        memorySourceForSave = classicMemories.value;
+                        completed++;
                     }
-                    if (signal?.aborted || epoch !== _classicExtractionEpoch
-                        || currentCharacter.value?.uuid !== characterId
-                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    const sourceIds = new Set(group.map(memory => memory.id));
-                    if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) break;
-                    const startTurn = Number(group[0].turn);
-                    const endTurn = Number(group[group.length - 1].turn);
-                    const sourceMemories = group.map(memory => cloneForStorage(memory));
-                    const mergedMemory = markRuntimeRaw({
-                        id: generateUUID(),
-                        timestamp: Date.now(),
-                        turn: endTurn,
-                        turnStart: startTurn,
-                        turnEnd: endTurn,
-                        summary,
-                        enabled: true,
-                        classicMemory: true,
-                        secondaryCompressed: true,
-                        summaryModel: String(memorySettings.classicModel || '').trim(),
-                        sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
-                        sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
-                        sourceMemories
-                    });
-                    classicMemories.value = [
-                        ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
-                        mergedMemory
-                    ];
-                    memorySourceForSave = classicMemories.value;
-                    completed++;
-                    classicBatchExtractProgress.value.current++;
+                    if (failed) break;
                 }
             } finally {
                 if (completed > 0) await saveClassicMemoriesNow(storyScopeId, memorySourceForSave);
