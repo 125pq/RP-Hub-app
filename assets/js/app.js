@@ -9437,7 +9437,9 @@ const app = createApp({
                         displayTurnStart,
                         displayTurnEnd,
                         originalChars: userChars + assistantChars,
-                        compressedChars: isSecondaryClassicMemory(memory) ? summaryChars : userChars + summaryChars
+                        compressedChars: isSecondaryClassicMemory(memory)
+                            ? getClassicSecondaryMemoryMarker(memory).length + summaryChars
+                            : userChars + summaryChars
                     };
                 })
                 .sort((a, b) => (b.displayTurnEnd || 0) - (a.displayTurnEnd || 0));

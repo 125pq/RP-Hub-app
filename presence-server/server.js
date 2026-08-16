@@ -17,8 +17,8 @@ const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '*')
 const clients = new Map();
 
 const refreshLatestVersionId = () => {
-    if (Date.now() < nextVersionRefreshAt) return Promise.resolve();
     if (versionRefreshPromise) return versionRefreshPromise;
+    if (Date.now() < nextVersionRefreshAt) return Promise.resolve();
     nextVersionRefreshAt = Date.now() + versionRefreshMs;
     versionRefreshPromise = fetch(`${versionSourceUrl}?t=${Date.now()}`, {
         cache: 'no-store',
@@ -33,7 +33,7 @@ const refreshLatestVersionId = () => {
                 source.match(/window\.RPHubLatestUpdate\s*=\s*Object\.freeze\(\s*\{\s*id\s*:\s*(\d{5})\b/)?.[1]
             );
             if (versionId === null) throw new Error('Version ID not found');
-            latestVersionId = versionId;
+            latestVersionId = Math.max(latestVersionId, versionId);
         })
         .catch(error => console.warn('Latest version check failed:', error.message))
         .finally(() => {
