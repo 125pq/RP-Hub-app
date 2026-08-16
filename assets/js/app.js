@@ -980,6 +980,23 @@ const app = createApp({
             return snapshot.turns[snapshot.turns.length - 1] || null;
         };
 
+        const latestDeletableMessageIndexes = computed(() => {
+            let latestUserIndex = -1;
+            for (let index = chatHistory.value.length - 1; index >= 0; index--) {
+                if (chatHistory.value[index]?.role === 'user') {
+                    latestUserIndex = index;
+                    break;
+                }
+            }
+            if (latestUserIndex < 0) return new Set();
+            const indexes = new Set([latestUserIndex]);
+            for (let index = latestUserIndex + 1; index < chatHistory.value.length; index++) {
+                if (chatHistory.value[index]?.role === 'assistant') indexes.add(index);
+            }
+            return indexes;
+        });
+        const canDeleteMessage = (index) => latestDeletableMessageIndexes.value.has(index);
+
         const regexScripts = ref([]);
         const globalRegexScripts = ref([]);
         const LEGACY_USER_REGEX_NAME = 'Auto Replace {{user}}';
@@ -2621,56 +2638,6 @@ const app = createApp({
             return { logs: removedLogs, blocks: removedBlocks };
         };
 
-        const removeUiTemplateChangesForTurn = (turn, {
-            beforeSnapshot = buildConversationTurnSnapshot(),
-            beforeHistory = chatHistory.value,
-            shiftLaterTurns = true
-        } = {}) => {
-            if (!Number.isFinite(turn) || turn < 1) return { logs: 0, blocks: 0 };
-            let changedLogs = 0;
-            currentUiTemplates.value.forEach(template => {
-                const logs = Array.isArray(template.changeLog) ? template.changeLog : [];
-                const removedLogs = logs.filter(log => Number(log.turn) === turn);
-                const nextLogs = logs.filter(log => Number(log.turn) !== turn).map(log => (
-                    shiftLaterTurns && Number(log.turn) > turn ? { ...log, turn: Number(log.turn) - 1 } : log
-                ));
-                const nextLog = [...nextLogs]
-                    .filter(log => Number(log.turn) >= (shiftLaterTurns ? turn : turn + 1))
-                    .sort((a, b) => Number(a.turn) - Number(b.turn) || Number(a.time) - Number(b.time))[0];
-                const removedChanges = {};
-                [...removedLogs].sort((a, b) => Number(a.time) - Number(b.time)).forEach(log => {
-                    Object.entries(log.changes || {}).forEach(([key, change]) => {
-                        removedChanges[key] = removedChanges[key]
-                            ? { ...removedChanges[key], to: change.to }
-                            : change;
-                    });
-                });
-                if (removedLogs.length && nextLog) {
-                    nextLog.changes ||= {};
-                    Object.entries(removedChanges).forEach(([key, change]) => {
-                        nextLog.changes[key] = nextLog.changes[key]
-                            ? { ...nextLog.changes[key], from: change.from }
-                            : change;
-                    });
-                } else if (removedLogs.length) {
-                    rebuildUiTemplateStateFromLogs(template, nextLogs);
-                }
-                if (removedLogs.length || (shiftLaterTurns && logs.some(log => Number(log.turn) > turn))) changedLogs++;
-                template.changeLog = nextLogs;
-            });
-
-            let removedBlocks = 0;
-            const affectedTurn = (beforeSnapshot?.turns || []).find(turnInfo => Number(turnInfo.turn) === turn);
-            (affectedTurn?.sourceIndexes || []).forEach(index => {
-                const message = beforeHistory[index];
-                if (message?.role === 'assistant' && message.uiTemplateBlocks) {
-                    delete message.uiTemplateBlocks;
-                    removedBlocks++;
-                }
-            });
-            return { logs: changedLogs, blocks: removedBlocks };
-        };
-
         const resetUiTemplateRuntimeState = () => {
             abortUiTemplateUpdate();
             currentUiTemplates.value.forEach(template => {
@@ -4149,13 +4116,11 @@ const app = createApp({
 
         const deleteMessage = (index) => {
             const targetMessage = chatHistory.value[index];
-            if (!targetMessage || !['user', 'assistant', 'system'].includes(targetMessage.role)) return;
+            if (!targetMessage || !canDeleteMessage(index)) return;
             const deletesUserTurn = targetMessage.role === 'user';
             const message = deletesUserTurn
                 ? '确定要删除该轮次吗？该轮的相关项也将一并删除。'
-                : targetMessage.role === 'system'
-                    ? '确定要删除这条状态消息吗？'
-                    : '确定要删除这条 AI 消息吗？该轮的相关项也将一并删除。';
+                : '确定要删除这条 AI 消息吗？该轮的相关项也将一并删除。';
             confirmAction(message, async () => {
                 abortConversationBackgroundWork();
                 const snapshot = await ensureConversationMessageIds();
@@ -4176,25 +4141,16 @@ const app = createApp({
                     .filter(Boolean));
                 recentGenerationTimes.value = recentGenerationTimes.value.filter(t => !removedMessageIds.has(t.id || t));
                 const nextHistory = chatHistory.value.filter((_, messageIndex) => !removedIndexes.has(messageIndex));
-                const nextSnapshot = buildConversationTurnSnapshot(nextHistory, { includeSystem: false });
-                const uiCleanup = removeUiTemplateChangesForTurn(affectedTurn, {
-                    beforeSnapshot: snapshot,
-                    beforeHistory: chatHistory.value,
-                    shiftLaterTurns: nextSnapshot.turns.length < snapshot.turns.length
-                });
-                syncMemoryConversationBindings(snapshot, { backfill: true });
-                // 向量和总结记忆按各自的消息绑定分别清理。
+                const uiCleanup = pruneUiTemplateChangesFromTurn(affectedTurn);
                 if (affectedTurn) {
                     await removeVectorMemoriesForConversationTurn(snapshot, affectedTurn);
                     await removeClassicMemoriesForConversationTurn(snapshot, affectedTurn);
                 }
                 chatHistory.value = nextHistory;
-                syncMemoryConversationBindings(nextSnapshot);
                 clearCurrentVectorEmptyTurns();
-                removeOrphanedUiTemplateCorrections();
                 await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
                 await saveMemorySettingsNow();
-                const deletedLabel = deletesUserTurn ? '该轮次' : targetMessage.role === 'system' ? '状态消息' : 'AI 消息';
+                const deletedLabel = deletesUserTurn ? '该轮次' : 'AI 消息';
                 showToast(`${deletedLabel}已删除，相关项已一并清除`, 'success');
             });
         };
@@ -9390,7 +9346,7 @@ const app = createApp({
             toggleMobileMenu, closeMobileMenu,
             fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
-            copyMessage, playMessageActionFeedback, deleteMessage, regenerateMessage,
+            copyMessage, playMessageActionFeedback, canDeleteMessage, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,
             createNewCharacter, editCharacter, saveCharacter, deleteCharacter, selectCharacter, toggleCharacterFavorite, isCharacterFavorite,
             currentUiTemplates, activeUiTemplates, uiTemplateUpdateStatus, createUiTemplate, editUiTemplate, saveUiTemplate, deleteUiTemplate, importUiTemplates, updateUiTemplatesFromChat, renderEditingUiTemplatePreview, handleUiTemplateClick,
