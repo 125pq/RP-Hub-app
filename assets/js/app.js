@@ -5323,7 +5323,7 @@ const app = createApp({
             return groups;
         };
 
-        const compressEligibleClassicMemories = async (totalTurns, signal) => {
+        const compressEligibleClassicMemories = async (totalTurns, signal, interactive = false) => {
             const groups = getEligibleClassicSecondaryGroups(totalTurns);
             if (!groups.length) return 0;
             const characterId = currentCharacter.value?.uuid;
@@ -5351,12 +5351,38 @@ const app = createApp({
                         || currentCharacter.value?.uuid !== characterId
                         || getCurrentStoryBranchScopeId() !== storyScopeId) break;
                     let failed = false;
-                    for (const result of results) {
+                    for (let result of results) {
                         if (result.error) {
                             if (result.error.name === 'AbortError') throw result.error;
-                            console.warn('Classic memory secondary compression failed:', result.error);
-                            failed = true;
-                            continue;
+                            if (interactive) {
+                                let retryError = result.error;
+                                const range = `${result.group[0].turn}-${result.group[result.group.length - 1].turn}`;
+                                while (true) {
+                                    const retry = await showVueConfirmModal(
+                                        '总结模式补录遇到错误',
+                                        `第 ${range} 轮二次压缩失败：\n${retryError.message}\n\n是否立即重试？`
+                                    );
+                                    if (!retry) {
+                                        const abortError = new Error('用户取消了重试并中止了二次压缩');
+                                        abortError.name = 'AbortError';
+                                        throw abortError;
+                                    }
+                                    try {
+                                        result = {
+                                            group: result.group,
+                                            summary: await requestClassicSecondarySummary(result.group, signal)
+                                        };
+                                        break;
+                                    } catch (error) {
+                                        if (error.name === 'AbortError') throw error;
+                                        retryError = error;
+                                    }
+                                }
+                            } else {
+                                console.warn('Classic memory secondary compression failed:', result.error);
+                                failed = true;
+                                continue;
+                            }
                         }
                         const { group, summary } = result;
                         const sourceIds = new Set(group.map(memory => memory.id));
@@ -7516,7 +7542,8 @@ const app = createApp({
                         foundJobs = true;
                         secondaryCompressedCount += await compressEligibleClassicMemories(
                             currentTurnCount,
-                            batchController.signal
+                            batchController.signal,
+                            manual
                         );
                     }
                     if (_classicBatchExtractAbort !== batchController || batchController.signal.aborted) break;
