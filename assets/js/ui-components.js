@@ -725,7 +725,7 @@
                     </div>
                     <div ref="contentEl" class="p-4 max-h-[75vh] overflow-y-auto custom-scrollbar update-content" @scroll="handleScroll">
                         <div v-if="remoteUpdateId" class="py-6 text-center">
-                            <p class="text-base font-bold text-gray-800">发现新版本，请刷新页面更新</p>
+                            <p class="text-lg font-bold text-gray-800">发现新版本，请刷新页面更新</p>
                         </div>
                         <div v-else class="prose prose-sm prose-gray max-w-none">
                             <div class="markdown-body" v-html="renderMarkdown(update.content, 'assistant', true)"></div>
