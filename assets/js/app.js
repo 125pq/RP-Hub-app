@@ -939,9 +939,20 @@ const app = createApp({
         const standaloneRenderedContentPattern = /^(?:\s|<!--[\s\S]*?-->)*(?:```|<!doctype\b|<\?xml\b|<html\b|<(?:head|body|style|script|template|svg|canvas|iframe|div|section|article|aside|header|footer|main|nav|form|table|ul|ol|pre|p|img)\b)/i;
         const isStandaloneRenderedContent = text => standaloneRenderedContentPattern.test(String(text || ''));
         const loggedBlockedStyleFragments = new Set();
+        // Per-message memoization of the blocked-style filter. filterBlockedStyleText is a pure
+        // function of its input (all patterns are constants), so caching by content string is
+        // byte-exact. This avoids re-filtering the whole stable history on every streaming flush:
+        // only messages whose content actually changed miss the cache. The `log` path is excluded
+        // from the cache so its diagnostic side effects (console + fragment dedup) stay intact.
+        const filteredContentCache = new Map();
+        const FILTERED_CONTENT_CACHE_MAX = 2000;
         const filterBlockedStyleText = (text, { log = false } = {}) => {
             const source = String(text || '');
             if (isStandaloneRenderedContent(source)) return source;
+            if (!log) {
+                const cached = filteredContentCache.get(source);
+                if (cached !== undefined) return cached;
+            }
             const removedFragments = [];
             const updateBlock = findUiTemplateUpdateBlock(source);
             const filterEnd = updateBlock?.index ?? source.length;
@@ -954,18 +965,29 @@ const app = createApp({
                 .replace(/[，,；;]+([。！？!?])/g, '$1')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n'));
+            const result = filtered + source.slice(filterEnd);
             if (log) {
                 const newFragments = removedFragments.filter(fragment => fragment && !loggedBlockedStyleFragments.has(fragment));
                 newFragments.forEach(fragment => loggedBlockedStyleFragments.add(fragment));
                 if (newFragments.length) console.info(`[文风过滤] 已过滤 ${newFragments.length} 处`, newFragments);
+            } else {
+                if (filteredContentCache.size >= FILTERED_CONTENT_CACHE_MAX) {
+                    filteredContentCache.delete(filteredContentCache.keys().next().value);
+                }
+                filteredContentCache.set(source, result);
             }
-            return filtered + source.slice(filterEnd);
+            return result;
         };
-        const getPostprocessedChatMessages = (messages = chatHistory.value, options = {}) => (
-            postprocessChatHistory(messages, options).map(message => message.role === 'assistant'
+        const getPostprocessedChatMessages = (messages = chatHistory.value, options = {}) => {
+            const merged = postprocessChatHistory(messages, options);
+            // countOnly: callers that only need the merged-message count (e.g. floor stats)
+            // skip the blocked-style filter entirely. The merge result length depends only on
+            // the role sequence, never on content, so filtering is pure waste here.
+            if (options.countOnly) return merged;
+            return merged.map(message => message.role === 'assistant'
                 ? { ...message, content: filterBlockedStyleText(message.content) }
-                : message)
-        );
+                : message);
+        };
         const buildConversationTurnSnapshot = (messages = chatHistory.value, options = {}) => (
             createConversationTurnSnapshot(messages, options)
         );
@@ -2973,7 +2995,7 @@ const app = createApp({
 
         const conversationBodyLength = computed(() => getConversationBodyLength(chatHistory.value));
         const chatRoundStats = computed(() => ({
-            floors: getPostprocessedChatMessages(chatHistory.value, { includeSystem: false }).length
+            floors: getPostprocessedChatMessages(chatHistory.value, { includeSystem: false, countOnly: true }).length
         }));
         const currentStoryBranch = computed(() => (
             storyBranches.value.find(branch => branch.id === activeStoryBranchId.value) || null
@@ -3091,7 +3113,7 @@ const app = createApp({
             return Math.max(0, predictedLength);
         });
         const summaryCompressionRate = computed(() => {
-            const floorCount = getPostprocessedChatMessages(chatHistory.value, { includeSystem: false }).length;
+            const floorCount = getPostprocessedChatMessages(chatHistory.value, { includeSystem: false, countOnly: true }).length;
             if (floorCount <= memorySettings.summaryKeepFloors) return null;
             return conversationBodyLength.value > 0
                 ? Math.max(0, Math.round((1 - summaryCompressedBodyLength.value / conversationBodyLength.value) * 100))
@@ -8009,7 +8031,7 @@ const app = createApp({
             const branch = storyBranches.value.find(item => item.id === activeStoryBranchId.value);
             if (!branch) return;
             branch.updatedAt = Date.now();
-            branch.floorCount = getPostprocessedChatMessages(chatHistory.value, { includeSystem: false }).length;
+            branch.floorCount = getPostprocessedChatMessages(chatHistory.value, { includeSystem: false, countOnly: true }).length;
             branch.messageCount = chatHistory.value.filter(message => ['user', 'assistant'].includes(message?.role)).length;
             branch.wordCount = getConversationBodyLength(chatHistory.value);
         };
@@ -8235,7 +8257,7 @@ const app = createApp({
                     branchMemories = storedMemories.filter(memory => Number(memory?.turn) <= forkTurn);
                     branchClassicMemories = storedClassicMemories.filter(memory => Number(memory?.turn) <= forkTurn);
                 }
-                const floorCount = getPostprocessedChatMessages(sourceChatHistory, { includeSystem: false }).length;
+                const floorCount = getPostprocessedChatMessages(sourceChatHistory, { includeSystem: false, countOnly: true }).length;
                 const wordCount = getConversationBodyLength(sourceChatHistory);
 
                 await setScopedStoredValue('chat', branchScopeId, cloneForStorage(sourceChatHistory), { clone: false });
