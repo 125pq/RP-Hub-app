@@ -2,6 +2,12 @@ name: Sync upstream RP-Hub
 
 on:
   workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Android release revision (0-99). Leave blank to auto-derive from package.json.'
+        required: false
+        type: string
+        default: ''
   schedule:
     - cron: '17 2 * * *'
 
@@ -64,7 +70,7 @@ jobs:
 
       - name: Prepare Android release metadata
         id: android_release
-        run: node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}"
+        run: node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ inputs.revision }}"
 
       - name: Verify adapter and upstream hooks
         run: npm run test:upstream-sync

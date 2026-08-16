@@ -102,7 +102,8 @@ function publishOutputs(metadata) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const upstreamTag = process.argv[2];
-  const explicitRevision = process.argv.length > 3 ? Number(process.argv[3]) : null;
+  const rawRevision = process.argv.length > 3 ? String(process.argv[3]).trim() : '';
+  const explicitRevision = rawRevision === '' ? null : Number(rawRevision);
   const revision = Number.isInteger(explicitRevision) ? explicitRevision : deriveRevision(upstreamTag, currentPackageVersion());
   const metadata = androidReleaseMetadata(upstreamTag, revision);
   publishOutputs(metadata);
