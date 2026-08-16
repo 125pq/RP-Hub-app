@@ -115,4 +115,14 @@ assert.match(syncUpstreamSource, /if\s*\(\s*conflicts\s*\)\s*\{[\s\S]*MERGE_CONF
 assert.match(syncUpstreamSource, /Upstream git merge failed without content conflicts/);
 assert.doesNotMatch(syncUpstreamSource, /MERGE_CONFLICTS=\\n\$\{conflicts\s*\|\|\s*'\(unknown\)'\}/);
 
+const appSource = await read('assets/js/app.js');
+assert.match(appSource, /normalizeClassicMemoryConcurrency\(memorySettings\.classicConcurrency\)/);
+assert.match(appSource, /compressEligibleClassicMemories\s*=\s*async\s*\(totalTurns,\s*signal,\s*interactive\s*=\s*false\)/);
+assert.match(appSource, /showVueConfirmModal/);
+assert.match(appSource, /总结模式补录遇到错误/);
+assert.match(appSource, /getClassicSecondaryMemoryMarker\(memory\)\.length/);
+assert.match(appSource, /batchController\.signal,\s*manual/);
+const presenceServerSource = await read('presence-server/server.js');
+assert.match(presenceServerSource, /if\s*\(versionRefreshPromise\)\s*return\s*versionRefreshPromise;/);
+assert.match(presenceServerSource, /latestVersionId\s*=\s*Math\.max\(latestVersionId,\s*versionId\);/);
 console.log('Upstream 1.8.4 merge regression contract: PASS');

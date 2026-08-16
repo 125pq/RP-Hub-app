@@ -4194,6 +4194,7 @@ const app = createApp({
             return removed;
         };
 
+
         const removeVectorMemoriesForConversationTurn = async (snapshot, turn) => {
             if (!Number.isFinite(turn) || turn <= 0) return 0;
             const turnInfo = snapshot?.turns?.find(item => item.turn === turn);
@@ -5286,6 +5287,7 @@ const app = createApp({
                 : snapshot;
         };
 
+
         const hasClassicMemoryForJob = (job) => {
             const targetIds = new Set(job.sourceAssistantIds || []);
             return classicMemories.value.some(memory => {
@@ -5407,6 +5409,7 @@ const app = createApp({
                 requestMessages.push({ role: 'user', content: `${marker}\n${turnInfo.userContent}` });
                 requestMessages.push({ role: 'assistant', content: `${marker}\n${turnInfo.assistantContent}` });
             });
+
             requestMessages.push({
                 role: 'user',
                 content: BUILTIN_PROMPTS.buildClassicSummaryFinalInstruction(job.turn)
@@ -5467,58 +5470,96 @@ const app = createApp({
             return groups;
         };
 
-        const compressEligibleClassicMemories = async (totalTurns, signal) => {
+        const compressEligibleClassicMemories = async (totalTurns, signal, interactive = false) => {
             const groups = getEligibleClassicSecondaryGroups(totalTurns);
             if (!groups.length) return 0;
             const characterId = currentCharacter.value?.uuid;
             const storyScopeId = getCurrentStoryBranchScopeId();
             const epoch = _classicExtractionEpoch;
+            const concurrency = normalizeClassicMemoryConcurrency(memorySettings.classicConcurrency);
             let completed = 0;
             let memorySourceForSave = null;
             classicBatchExtractProgress.value = { current: 0, total: groups.length };
             try {
-                for (const group of groups) {
+                for (let offset = 0; offset < groups.length; offset += concurrency) {
                     if (signal?.aborted || epoch !== _classicExtractionEpoch
                         || currentCharacter.value?.uuid !== characterId
                         || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    let summary;
-                    try {
-                        summary = await requestClassicSecondarySummary(group, signal);
-                    } catch (error) {
-                        if (error?.name === 'AbortError') throw error;
-                        console.warn('Classic memory secondary compression failed:', error);
-                        break;
+                    const results = await Promise.all(groups.slice(offset, offset + concurrency).map(async group => {
+                        try {
+                            return { group, summary: await requestClassicSecondarySummary(group, signal) };
+                        } catch (error) {
+                            return { group, error };
+                        } finally {
+                            classicBatchExtractProgress.value.current++;
+                        }
+                    }));
+                    if (signal?.aborted || epoch !== _classicExtractionEpoch
+                        || currentCharacter.value?.uuid !== characterId
+                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
+                    let failed = false;
+                    for (let result of results) {
+                        if (result.error) {
+                            if (result.error.name === 'AbortError') throw result.error;
+                            if (interactive) {
+                                let retryError = result.error;
+                                const range = `${result.group[0].turn}-${result.group[result.group.length - 1].turn}`;
+                                while (true) {
+                                    const retry = await showVueConfirmModal(
+                                        '总结模式补录遇到错误',
+                                        `第 ${range} 轮二次压缩失败：\n${retryError.message}\n\n是否立即重试？`
+                                    );
+                                    if (!retry) {
+                                        const abortError = new Error('用户取消了重试并中止了二次压缩');
+                                        abortError.name = 'AbortError';
+                                        throw abortError;
+                                    }
+                                    try {
+                                        result = {
+                                            group: result.group,
+                                            summary: await requestClassicSecondarySummary(result.group, signal)
+                                        };
+                                        break;
+                                    } catch (error) {
+                                        if (error.name === 'AbortError') throw error;
+                                        retryError = error;
+                                    }
+                                }
+                            } else {
+                                console.warn('Classic memory secondary compression failed:', result.error);
+                                failed = true;
+                                continue;
+                            }
+                        }
+                        const { group, summary } = result;
+                        const sourceIds = new Set(group.map(memory => memory.id));
+                        if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) continue;
+                        const startTurn = Number(group[0].turn);
+                        const endTurn = Number(group[group.length - 1].turn);
+                        const sourceMemories = group.map(memory => cloneForStorage(memory));
+                        const mergedMemory = markRuntimeRaw({
+                            id: generateUUID(),
+                            timestamp: Date.now(),
+                            turn: endTurn,
+                            turnStart: startTurn,
+                            turnEnd: endTurn,
+                            summary,
+                            enabled: true,
+                            classicMemory: true,
+                            secondaryCompressed: true,
+                            summaryModel: String(memorySettings.classicModel || '').trim(),
+                            sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
+                            sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
+                            sourceMemories
+                        });
+                        classicMemories.value = [
+                            ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
+                            mergedMemory
+                        ];
+                        memorySourceForSave = classicMemories.value;
+                        completed++;
                     }
-                    if (signal?.aborted || epoch !== _classicExtractionEpoch
-                        || currentCharacter.value?.uuid !== characterId
-                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    const sourceIds = new Set(group.map(memory => memory.id));
-                    if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) break;
-                    const startTurn = Number(group[0].turn);
-                    const endTurn = Number(group[group.length - 1].turn);
-                    const sourceMemories = group.map(memory => cloneForStorage(memory));
-                    const mergedMemory = markRuntimeRaw({
-                        id: generateUUID(),
-                        timestamp: Date.now(),
-                        turn: endTurn,
-                        turnStart: startTurn,
-                        turnEnd: endTurn,
-                        summary,
-                        enabled: true,
-                        classicMemory: true,
-                        secondaryCompressed: true,
-                        summaryModel: String(memorySettings.classicModel || '').trim(),
-                        sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
-                        sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
-                        sourceMemories
-                    });
-                    classicMemories.value = [
-                        ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
-                        mergedMemory
-                    ];
-                    memorySourceForSave = classicMemories.value;
-                    completed++;
-                    classicBatchExtractProgress.value.current++;
+                    if (failed) break;
                 }
             } finally {
                 if (completed > 0) await saveClassicMemoriesNow(storyScopeId, memorySourceForSave);
@@ -7657,6 +7698,7 @@ const app = createApp({
                     if (isConversationBusy.value) {
                         await waitForMemoryConversationIdle(batchController.signal);
                         continue;
+
                     }
                     const currentTurnCount = buildConversationTurnSnapshot(chatHistory.value, { includeSystem: false }).turns.length;
                     if (jobs.length > 0 || _classicBatchRescanRequested || currentTurnCount !== safeTurnCount) continue;
@@ -7664,7 +7706,8 @@ const app = createApp({
                         foundJobs = true;
                         secondaryCompressedCount += await compressEligibleClassicMemories(
                             currentTurnCount,
-                            batchController.signal
+                            batchController.signal,
+                            manual
                         );
                     }
                     if (_classicBatchExtractAbort !== batchController || batchController.signal.aborted) break;
@@ -9499,6 +9542,7 @@ const app = createApp({
                 );
             }
         });
+
         const classicMemoryPageCount = computed(() => Math.max(1, Math.ceil(classicMemories.value.length / LIST_PAGE_SIZE)));
         watch(classicMemoryPageCount, pageCount => { classicMemoryPage.value = Math.min(classicMemoryPage.value, pageCount); });
         watch(() => currentCharacter.value?.uuid, () => { classicMemoryPage.value = 1; });
@@ -9548,7 +9592,9 @@ const app = createApp({
                         displayTurnStart,
                         displayTurnEnd,
                         originalChars: userChars + assistantChars,
-                        compressedChars: isSecondaryClassicMemory(memory) ? summaryChars : userChars + summaryChars
+                        compressedChars: isSecondaryClassicMemory(memory)
+                            ? getClassicSecondaryMemoryMarker(memory).length + summaryChars
+                            : userChars + summaryChars
                     };
                 })
                 .sort((a, b) => (b.displayTurnEnd || 0) - (a.displayTurnEnd || 0));
