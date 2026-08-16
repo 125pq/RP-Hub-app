@@ -4639,6 +4639,7 @@ const app = createApp({
                     .map(preset => preset.content
                         .replace(/^\s*<writing_style>\s*/i, '')
                         .replace(/\s*<\/writing_style>\s*$/i, ''))
+                    .concat(/deepseek/i.test(requestModel) ? '正文最少1000字。' : [])
                     .join('\n\n')
             });
 
