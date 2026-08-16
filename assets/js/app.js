@@ -102,10 +102,10 @@ const {
     managedPresets: BUILTIN_PRESETS
 } = window.RPHubBuiltinPresets;
 const {
-    UI_TEMPLATE_UPDATES_PATTERN,
     applyUiTemplateUpdateListToTemplate,
     cloneUiObject,
     createExecutableHtmlIframe,
+    findUiTemplateUpdateBlock,
     inferInitialUiTemplateState,
     normalizeUiTemplate,
     normalizeUiTemplateUpdateList,
@@ -936,15 +936,16 @@ const app = createApp({
         const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
         const blockedStyleWordPattern = /极其/g;
+        const standaloneRenderedContentPattern = /^(?:\s|<!--[\s\S]*?-->)*(?:```|<!doctype\b|<\?xml\b|<html\b|<(?:head|body|style|script|template|svg|canvas|iframe|div|section|article|aside|header|footer|main|nav|form|table|ul|ol|pre|p|img)\b)/i;
+        const isStandaloneRenderedContent = text => standaloneRenderedContentPattern.test(String(text || ''));
         const loggedBlockedStyleFragments = new Set();
         const filterBlockedStyleText = (text, { log = false } = {}) => {
             const source = String(text || '');
+            if (isStandaloneRenderedContent(source)) return source;
             const removedFragments = [];
-            const structuredIndexes = ['<ui_template_updates>', '{"updates"']
-                .map(marker => source.lastIndexOf(marker))
-                .filter(index => index >= 0);
-            const structuredIndex = structuredIndexes.length ? Math.min(...structuredIndexes) : source.length;
-            const filtered = cardUtils.transformUnprotectedText(source.slice(0, structuredIndex), part => part
+            const updateBlock = findUiTemplateUpdateBlock(source);
+            const filterEnd = updateBlock?.index ?? source.length;
+            const filtered = cardUtils.transformUnprotectedText(source.slice(0, filterEnd), part => part
                 .replace(blockedStyleSentencePattern, match => { removedFragments.push(match.trim()); return ''; })
                 .replace(paleFingerClausePattern, match => { removedFragments.push(match.trim()); return ''; })
                 .replace(blockedStyleWordPattern, match => { removedFragments.push(match); return ''; })
@@ -958,7 +959,7 @@ const app = createApp({
                 newFragments.forEach(fragment => loggedBlockedStyleFragments.add(fragment));
                 if (newFragments.length) console.info(`[文风过滤] 已过滤 ${newFragments.length} 处`, newFragments);
             }
-            return filtered + source.slice(structuredIndex);
+            return filtered + source.slice(filterEnd);
         };
         const getPostprocessedChatMessages = (messages = chatHistory.value, options = {}) => (
             postprocessChatHistory(messages, options).map(message => message.role === 'assistant'
@@ -2472,7 +2473,7 @@ const app = createApp({
                 console.warn('[UI模板] 主模型变量分析失败:', reason, result);
                 return { handled: true, changed: false };
             };
-            const match = String(targetMessage.content || '').match(UI_TEMPLATE_UPDATES_PATTERN);
+            const match = findUiTemplateUpdateBlock(targetMessage.content);
             if (!match) {
                 const missingTemplates = templates
                     .map(template => `模板“${template.name || '未命名'}”（ID：${template.id}）`)
@@ -3816,7 +3817,7 @@ const app = createApp({
                 const messageHeight = messageEl?.getBoundingClientRect?.().height || 0;
                 msg.isEditing_Message = true;
                 const cotMatch = msg.content.match(/<(think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
-                const uiTemplateUpdateMatch = msg.content.match(UI_TEMPLATE_UPDATES_PATTERN);
+                const uiTemplateUpdateMatch = findUiTemplateUpdateBlock(msg.content);
                 msg.originalCot = cotMatch ? cotMatch[0] : '';
                 msg.originalSys = parseCot(msg.content).sys;
                 msg.originalUiTemplateUpdate = uiTemplateUpdateMatch ? uiTemplateUpdateMatch[0] : '';
