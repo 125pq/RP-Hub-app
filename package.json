@@ -9,7 +9,7 @@
     "verify:dist": "node scripts/verify-dist.mjs",
     "test:syntax": "node --check assets/js/platform-services.js && node --check assets/js/rphub-android-adapter.js && node --check assets/js/core-utils.js && node --check assets/js/app.js",
     "test:platform": "npm run test:syntax && node scripts/test-platform-services.mjs && node scripts/test-safe-area-layout.mjs",
-    "test:upstream-sync": "node scripts/upstream-sync/tests/release-source.mjs && node scripts/upstream-sync/tests/prepare-android-release.mjs && node scripts/upstream-sync/tests/android-release-workflow.mjs && node scripts/upstream-sync/verify.mjs && node scripts/upstream-sync/tests/reapply-idempotence.mjs",
+    "test:upstream-sync": "node scripts/upstream-sync/tests/release-source.mjs && node scripts/upstream-sync/tests/prepare-android-release.mjs && node scripts/upstream-sync/tests/android-release-workflow.mjs && node scripts/upstream-sync/verify.mjs && node scripts/upstream-sync/tests/merge-regressions.mjs && node scripts/upstream-sync/tests/reapply-idempotence.mjs",
     "test:performance": "node scripts/test-performance-benchmark.mjs && node scripts/test-offscreen-iframe-lifecycle.mjs && node scripts/test-streaming-flush.mjs",
     "sync:upstream": "node scripts/upstream-sync/sync-upstream.mjs",
     "sync:upstream:dry-run": "node scripts/upstream-sync/sync-upstream.mjs --dry-run",
