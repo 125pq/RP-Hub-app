@@ -2561,7 +2561,11 @@
                                 <div class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2.5">
                                     <div class="flex items-center gap-2">
                                         <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>
-                                        <span class="text-sm font-medium text-gray-800">第 {{ memory.displayTurn || '?' }} 轮</span>
+                                        <span class="text-sm font-medium text-gray-800">
+                                            第 {{ memory.displayTurnStart === memory.displayTurnEnd
+                                                ? memory.displayTurnStart
+                                                : memory.displayTurnStart + '-' + memory.displayTurnEnd }} 轮
+                                        </span>
                                     </div>
                                     <div class="flex items-center gap-2">
                                         <div class="flex items-baseline gap-1 text-[13px] font-medium text-gray-400"
@@ -2794,7 +2798,7 @@
             @update-field="editingWorldInfo.data[$event.field] = $event.value"
             @update-keys="updateEditingWorldInfoKeys"></world-info-editor-modal>
 
-        <context-viewer-modal :show="showContextViewerModal" :floors="chatRoundStats.floors"
+        <context-viewer-modal :show="showContextViewerModal" :floors="lastContextFloorCount"
             :total-length="lastContextTotalLength" :world-infos="lastTriggeredWorldInfos"
             :messages="lastContextMessages" @close="showContextViewerModal = false"></context-viewer-modal>
 
