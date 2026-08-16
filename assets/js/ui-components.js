@@ -632,6 +632,7 @@
             const remoteUpdateId = ref(null);
             const pendingRemoteUpdateId = ref(null);
             let countdownTimer = null;
+            let countdownEndsAt = 0;
             let layoutTimer = null;
 
             const clearTimers = () => {
@@ -641,16 +642,16 @@
                 layoutTimer = null;
             };
             const startCountdown = () => {
-                countdown.value = 10;
                 clearInterval(countdownTimer);
-                countdownTimer = setInterval(() => {
-                    if (countdown.value > 0) {
-                        countdown.value--;
-                        return;
-                    }
+                countdownEndsAt = Date.now() + 10_000;
+                const updateCountdown = () => {
+                    countdown.value = Math.max(0, Math.ceil((countdownEndsAt - Date.now()) / 1000));
+                    if (countdown.value > 0) return;
                     clearInterval(countdownTimer);
                     countdownTimer = null;
-                }, 1000);
+                };
+                updateCountdown();
+                countdownTimer = setInterval(updateCountdown, 250);
             };
             const showRemoteUpdate = (versionId) => {
                 clearTimers();

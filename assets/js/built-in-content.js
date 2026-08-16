@@ -604,7 +604,7 @@ ${uiTemplateAnalysisSection}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10191,
+    id: 10192,
     title: '网站公告',
     content: `
 ### RP-Hub 1.8.4
