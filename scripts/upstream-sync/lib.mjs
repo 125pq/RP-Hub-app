@@ -42,8 +42,14 @@ export function replaceOnce(source, before, after, label) {
 export async function editText(relativePath, category, transform) {
   const absolutePath = path.join(projectRoot, relativePath);
   const before = await readFile(absolutePath, 'utf8');
-  const after = transform(before);
-  if (after === before) return null;
+  // Patches match/insert with LF literals. Normalize CRLF to LF before the
+  // transform so anchors are EOL-agnostic, then restore the file's original
+  // EOL style so a CRLF file is not silently rewritten to LF.
+  const usesCrlf = before.includes('\r\n');
+  const normalized = usesCrlf ? before.replace(/\r\n/g, '\n') : before;
+  const afterNormalized = transform(normalized);
+  if (afterNormalized === normalized) return null;
+  const after = usesCrlf ? afterNormalized.replace(/\n/g, '\r\n') : afterNormalized;
   await writeFile(absolutePath, after, 'utf8');
   return { category, file: relativePath };
 }
