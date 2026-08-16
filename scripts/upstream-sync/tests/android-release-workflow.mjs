@@ -12,6 +12,11 @@ const [workflow, gradle, updater] = await Promise.all([
 
 assert.match(gradle, /RPHUB_VERSION_NAME/);
 assert.match(gradle, /RPHUB_VERSION_CODE/);
+const configGitIdentityIndex = workflow.indexOf('name: Configure Git identity');
+const fetchMergeIndex = workflow.indexOf('name: Fetch, merge, and reapply categorized hooks');
+assert.ok(configGitIdentityIndex !== -1 && configGitIdentityIndex < fetchMergeIndex);
+assert.match(workflow, /git config user\.name "github-actions\[bot\]"/);
+assert.match(workflow, /git config user\.email "41898282\+github-actions\[bot\]@users\.noreply\.github\.com"/);
 assert.match(workflow, /npm audit --omit=dev/);
 assert.match(workflow, /apksigner[\s\S]*verify --verbose --print-certs/);
 assert.match(workflow, /manifest application-id[\s\S]*io\.github\.pq125\.rphub/);

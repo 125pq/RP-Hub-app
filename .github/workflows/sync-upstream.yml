@@ -26,6 +26,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Configure Git identity
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -184,8 +190,6 @@ jobs:
             echo "No upstream changes to commit"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore(sync): merge upstream RP-Hub release ${UPSTREAM_RELEASE_TAG} (${UPSTREAM_SHA:0:7}) and reapply local patches"
           git push origin HEAD:main

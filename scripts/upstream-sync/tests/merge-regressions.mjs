@@ -109,4 +109,10 @@ for (const match of sidebarMatches) {
   assert.ok(!block.includes('will-change: transform'), '.app-sidebar must not have will-change: transform');
   assert.ok(!block.includes('backface-visibility: hidden'), '.app-sidebar must not have backface-visibility: hidden');
 }
+const syncUpstreamSource = await read('scripts/upstream-sync/sync-upstream.mjs');
+assert.match(syncUpstreamSource, /git\(\s*\['merge',\s*'--no-ff',\s*'--no-commit',\s*upstreamHead\],\s*\{\s*allowFailure:\s*true,\s*capture:\s*true\s*\}\s*\)/);
+assert.match(syncUpstreamSource, /if\s*\(\s*conflicts\s*\)\s*\{[\s\S]*MERGE_CONFLICTS=\\n[\s\S]*Upstream merge conflicted and was aborted/);
+assert.match(syncUpstreamSource, /Upstream git merge failed without content conflicts/);
+assert.doesNotMatch(syncUpstreamSource, /MERGE_CONFLICTS=\\n\$\{conflicts\s*\|\|\s*'\(unknown\)'\}/);
+
 console.log('Upstream 1.8.4 merge regression contract: PASS');

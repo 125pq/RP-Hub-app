@@ -160,12 +160,25 @@ try {
   console.log(`UPSTREAM_HEAD=${upstreamHead}`);
   console.log(incoming ? `INCOMING_COMMITS=\n${incoming}` : 'INCOMING_COMMITS=none');
 
-  const merge = await git(['merge', '--no-ff', '--no-commit', upstreamHead], { allowFailure: true });
+  const merge = await git(['merge', '--no-ff', '--no-commit', upstreamHead], {
+    allowFailure: true,
+    capture: true
+  });
+  if (merge.stdout) console.log(merge.stdout);
+  if (merge.stderr && merge.code === 0) console.error(merge.stderr);
   if (merge.code !== 0) {
+    if (merge.stderr) console.error(merge.stderr);
     const conflicts = await gitText(['diff', '--name-only', '--diff-filter=U']);
-    console.error(`MERGE_CONFLICTS=\n${conflicts || '(unknown)'}`);
-    if (await mergeInProgress()) await git(['merge', '--abort']);
-    throw new Error('Upstream merge conflicted and was aborted; no ours/theirs resolution was attempted');
+    if (conflicts) {
+      console.error(`MERGE_CONFLICTS=\n${conflicts}`);
+      if (await mergeInProgress()) await git(['merge', '--abort'], { allowFailure: true });
+      throw new Error('Upstream merge conflicted and was aborted; no ours/theirs resolution was attempted');
+    }
+    if (await mergeInProgress()) await git(['merge', '--abort'], { allowFailure: true });
+    const detail = [merge.stderr, merge.stdout].filter(Boolean).join('\n');
+    throw new Error(
+      `Upstream git merge failed without content conflicts${detail ? `:\n${detail}` : ''}`
+    );
   }
 
   await reapplyHooks();
