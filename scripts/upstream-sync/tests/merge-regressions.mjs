@@ -94,4 +94,19 @@ assert.ok(appIdx !== -1, 'index.html must load app.js');
 assert.ok(platformIdx < adapterIdx, 'platform-services.js must load before rphub-android-adapter.js');
 assert.ok(adapterIdx < appIdx, 'rphub-android-adapter.js must load before app.js');
 
+
+// ---- assets/css/styles.css (.app-sidebar rendering stability) ----
+const css = await read('assets/css/styles.css');
+assert.ok(css.includes('.app-sidebar'), 'styles.css must define .app-sidebar');
+
+// Extract all .app-sidebar rule blocks
+const sidebarMatches = [...css.matchAll(/(?:^|\n)[ \t]*\.app-sidebar\s*\{([\s\S]*?)\n[ \t]*\}/g)];
+assert.ok(sidebarMatches.length > 0, 'Must find at least one .app-sidebar CSS rule');
+
+for (const match of sidebarMatches) {
+  const block = match[1];
+  assert.ok(!block.includes('contain: layout paint style'), '.app-sidebar must not have contain: layout paint style');
+  assert.ok(!block.includes('will-change: transform'), '.app-sidebar must not have will-change: transform');
+  assert.ok(!block.includes('backface-visibility: hidden'), '.app-sidebar must not have backface-visibility: hidden');
+}
 console.log('Upstream 1.8.4 merge regression contract: PASS');

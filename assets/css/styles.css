@@ -1775,9 +1775,6 @@
                 transform: translate3d(-104%, 0, 0);
                 transform-origin: left center;
                 transition: transform 0.28s cubic-bezier(0.22, 0.78, 0.25, 1);
-                contain: layout paint style;
-                will-change: transform;
-                backface-visibility: hidden;
                 box-shadow:
                     18px 0 54px -24px rgba(15, 23, 42, 0.45),
                     0 0 0 1px rgba(255, 255, 255, 0.72) inset;
