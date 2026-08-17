@@ -5,12 +5,14 @@ import { applySafeAreaHooks } from './patches/patch-safe-area.mjs';
 import { applyOfflineAssetHooks } from './patches/patch-offline-assets.mjs';
 import { applyPerformanceHooks } from './patches/patch-performance.mjs';
 import { applySidebarRenderingHooks } from './patches/patch-sidebar-rendering.mjs';
+import { applyChatLayoutHooks } from './patches/patch-chat-layout.mjs';
 
 export async function reapplyHooks() {
   const groups = [
     ['android-hooks', applyAndroidHooks],
     ['webview-layout-safe-area', applySafeAreaHooks],
     ['webview-sidebar-rendering', applySidebarRenderingHooks],
+    ['webview-chat-layout', applyChatLayoutHooks],
     ['offline-assets', applyOfflineAssetHooks],
     ['performance-patches', applyPerformanceHooks],
     ['backup-hooks', applyBackupHooks]

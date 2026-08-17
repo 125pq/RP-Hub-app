@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      notes:
+        description: 'Optional custom Android release notes (markdown). Overrides the CHANGELOG hotfix section when provided.'
+        required: false
+        type: string
+        default: ''
   schedule:
     - cron: '17 2 * * *'
 
@@ -144,13 +149,16 @@ jobs:
           APK_SHA256: ${{ steps.apk.outputs.sha256 }}
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
           VERSION_NAME: ${{ steps.android_release.outputs.version_name }}
+          CUSTOM_NOTES: ${{ inputs.notes }}
         run: |
           upstream_notes="$(gh api "repos/STA1N156/RP-Hub/releases/tags/${UPSTREAM_RELEASE_TAG}" --jq '.body // ""')"
           notes_file="$RUNNER_TEMP/android-release-notes.md"
 
           changelog_file="$GITHUB_WORKSPACE/CHANGELOG.md"
           hotfix_section=""
-          if [ -f "$changelog_file" ]; then
+          if [ -n "$CUSTOM_NOTES" ]; then
+            hotfix_section="$CUSTOM_NOTES"
+          elif [ -f "$changelog_file" ]; then
             hotfix_section="$(awk -v ver="$VERSION_NAME" '
               { sub(/\r$/, "") }
               /^## / { in_section = ($0 == ("## " ver)); next }

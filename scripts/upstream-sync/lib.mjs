@@ -156,13 +156,20 @@ export function rebuildWithOriginalEol(original, afterNormalized, dominantTerm) 
   }
   const ops = diffLineTexts(origTexts, outLines);
   const parts = [];
+  // Terminators of deleted lines, paired in order with the inserted lines of
+  // the same contiguous change block. A *replaced* line therefore inherits the
+  // EOL of the line it replaced instead of always taking the dominant term.
+  const deletedTerms = [];
   for (const op of ops) {
     if (op.type === 'equal') {
+      deletedTerms.length = 0; // a change block ended
       parts.push(outLines[op.bIndex] + origLines[op.aIndex].term);
+    } else if (op.type === 'delete') {
+      deletedTerms.push(origLines[op.aIndex].term);
     } else if (op.type === 'insert') {
-      parts.push(outLines[op.bIndex] + dominantTerm);
+      const term = deletedTerms.length > 0 ? deletedTerms.shift() : dominantTerm;
+      parts.push(outLines[op.bIndex] + term);
     }
-    // 'delete' contributes nothing to the rebuilt output.
   }
   return parts.join('');
 }

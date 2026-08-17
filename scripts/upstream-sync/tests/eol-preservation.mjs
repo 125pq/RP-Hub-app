@@ -41,11 +41,11 @@ import { dominantEol, editText, ensureBefore, projectRoot, rebuildWithOriginalEo
   assert.equal(rebuildWithOriginalEol(noTrail, 'x\na\nb', dominantEol(noTrail)), 'x\na\nb');
 
   // Modifying an existing line must NOT desynchronize the EOL mapping: the
-  // changed line takes the dominant term, but every following unchanged line
-  // keeps its own original terminator.
+  // changed line inherits the terminator of the line it replaced, and every
+  // following unchanged line keeps its own original terminator.
   assert.equal(
     rebuildWithOriginalEol(mixed, 'a\nB\nc\nd\n', dominantEol(mixed)),
-    'a\r\nB\r\nc\r\nd\n'
+    'a\r\nB\nc\r\nd\n'
   );
   console.log('EOL helper unit tests: PASS');
 }

@@ -7,6 +7,7 @@ const files = [
   'assets/js/app.js',
   'assets/js/core-utils.js',
   'assets/js/runtime-services.js',
+  'assets/css/styles.css',
   'character/index.html',
   'novel/index.html'
 ];
