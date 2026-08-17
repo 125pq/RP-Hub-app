@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { projectRoot } from '../lib.mjs';
+import { patchSidebarComponentTemplate } from '../patches/patch-sidebar-rendering.mjs';
 import path from 'node:path';
 
 const read = relative => readFile(path.join(projectRoot, relative), 'utf8');
@@ -109,6 +110,25 @@ for (const match of sidebarMatches) {
   assert.ok(!block.includes('will-change: transform'), '.app-sidebar must not have will-change: transform');
   assert.ok(!block.includes('backface-visibility: hidden'), '.app-sidebar must not have backface-visibility: hidden');
 }
+
+// ---- assets/js/ui-components.js (.app-sidebar width class collision) ----
+// The sidebar element must not carry a static desktop expanded width that
+// collides with the dynamic collapsed width; the two branches must be mutually
+// exclusive so the offline precompiled CSS cascade cannot keep it at 288px.
+const uiComponents = await read('assets/js/ui-components.js');
+assert.doesNotMatch(uiComponents, /class="app-sidebar[^"]*\bw-72\b[^"]*\bmd:w-72\b/, 'app-sidebar must not carry static w-72 md:w-72');
+assert.match(uiComponents, /:class="collapsed \? 'w-16 md:w-16' : 'w-72 md:w-72'"/, 'app-sidebar width must switch between w-16 md:w-16 and w-72 md:w-72');
+
+// Patch unit checks: idempotent, and fails loudly when the upstream snippet
+// has drifted instead of silently matching nothing.
+const upstreamSnippet = `            <div class="app-sidebar fixed inset-y-0 left-0 z-50 w-72 md:w-72 bg-white/95 border-r border-gray-200/80 transform transition-all duration-300 md:relative md:translate-x-0 flex flex-col shadow-2xl md:shadow-sm md:rounded-none rounded-r-3xl overflow-hidden"
+                :class="collapsed ? 'md:w-16' : 'md:w-72'">`;
+const patched = patchSidebarComponentTemplate(upstreamSnippet);
+assert.ok(!patched.includes('z-50 w-72 md:w-72 bg-white'), 'patch must remove static w-72 md:w-72');
+assert.ok(patched.includes(":class=\"collapsed ? 'w-16 md:w-16' : 'w-72 md:w-72'\""), 'patch must produce mutually exclusive width classes');
+assert.equal(patchSidebarComponentTemplate(patched), patched, 'patch must be idempotent');
+assert.throws(() => patchSidebarComponentTemplate(upstreamSnippet.replace('md:w-72 bg-white', 'md:w-72 CHANGED')), /app-sidebar width classes/, 'patch must fail on drifted upstream snippet');
+
 const syncUpstreamSource = await read('scripts/upstream-sync/sync-upstream.mjs');
 assert.match(syncUpstreamSource, /git\(\s*\['merge',\s*'--no-ff',\s*'--no-commit',\s*upstreamHead\],\s*\{\s*allowFailure:\s*true,\s*capture:\s*true\s*\}\s*\)/);
 assert.match(syncUpstreamSource, /if\s*\(\s*conflicts\s*\)\s*\{[\s\S]*MERGE_CONFLICTS=\\n[\s\S]*Upstream merge conflicted and was aborted/);

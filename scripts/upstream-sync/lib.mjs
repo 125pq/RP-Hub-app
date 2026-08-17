@@ -68,29 +68,101 @@ export function splitLinesKeepTerm(text) {
   return lines;
 }
 
+// Myers O(ND) diff over line texts. Returns an ordered list of operations:
+// { type: 'equal', aIndex, bIndex } | { type: 'delete', aIndex } | { type: 'insert', bIndex }.
+function diffLineTexts(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const max = n + m;
+  const v = new Map();
+  const trace = [];
+  v.set(1, 0);
+  for (let d = 0; d <= max; d += 1) {
+    trace.push(new Map(v));
+    for (let k = -d; k <= d; k += 2) {
+      let x;
+      if (k === -d || (k !== d && (v.get(k - 1) ?? -1) < (v.get(k + 1) ?? -1))) {
+        x = v.get(k + 1) ?? -1;
+      } else {
+        x = (v.get(k - 1) ?? -1) + 1;
+      }
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) { x += 1; y += 1; }
+      v.set(k, x);
+      if (x >= n && y >= m) return backtrackDiff(trace, a, b, d);
+    }
+  }
+  return [];
+}
+
+function backtrackDiff(trace, a, b, d) {
+  const ops = [];
+  let x = a.length;
+  let y = b.length;
+  for (let dd = d; dd > 0; dd -= 1) {
+    const v = trace[dd];
+    const k = x - y;
+    let prevK;
+    if (k === -dd || (k !== dd && (v.get(k - 1) ?? -1) < (v.get(k + 1) ?? -1))) {
+      prevK = k + 1;
+    } else {
+      prevK = k - 1;
+    }
+    const prevX = v.get(prevK) ?? -1;
+    const prevY = prevX - prevK;
+    while (x > prevX && y > prevY) {
+      ops.push({ type: 'equal', aIndex: x - 1, bIndex: y - 1 });
+      x -= 1;
+      y -= 1;
+    }
+    if (x === prevX) {
+      ops.push({ type: 'insert', bIndex: y - 1 });
+      y -= 1;
+    } else {
+      ops.push({ type: 'delete', aIndex: x - 1 });
+      x -= 1;
+    }
+  }
+  while (x > 0 && y > 0) {
+    ops.push({ type: 'equal', aIndex: x - 1, bIndex: y - 1 });
+    x -= 1;
+    y -= 1;
+  }
+  while (x > 0) {
+    ops.push({ type: 'delete', aIndex: x - 1 });
+    x -= 1;
+  }
+  while (y > 0) {
+    ops.push({ type: 'insert', bIndex: y - 1 });
+    y -= 1;
+  }
+  ops.reverse();
+  return ops;
+}
+
 // Rebuild `afterNormalized` (LF-only) writing back the original EOL of each
 // line that already existed in `original`; lines introduced by the patch use
 // `dominantTerm`. This preserves mixed-EOL files line-by-line instead of
-// rewriting the whole file to one style.
+// rewriting the whole file to one style. Matching is position-based (via a
+// line diff) so that a patch which *modifies* an existing line does not
+// desynchronize the EOL mapping and rewrite every following line.
 export function rebuildWithOriginalEol(original, afterNormalized, dominantTerm) {
   const origLines = splitLinesKeepTerm(original);
   const origTexts = origLines.map(line => line.text);
   const outLines = afterNormalized.split('\n');
+  // The trailing empty element split() produces for a file ending in "\n".
+  if (outLines.length > 0 && outLines[outLines.length - 1] === '' && afterNormalized.endsWith('\n')) {
+    outLines.pop();
+  }
+  const ops = diffLineTexts(origTexts, outLines);
   const parts = [];
-  let origIdx = 0;
-  for (let i = 0; i < outLines.length; i += 1) {
-    const lineText = outLines[i];
-    const isLast = i === outLines.length - 1;
-    // The trailing empty element split() produces for a file ending in "\n".
-    if (isLast && lineText === '' && afterNormalized.endsWith('\n')) break;
-    let term;
-    if (origIdx < origTexts.length && lineText === origTexts[origIdx]) {
-      term = origLines[origIdx].term;
-      origIdx += 1;
-    } else {
-      term = dominantTerm;
+  for (const op of ops) {
+    if (op.type === 'equal') {
+      parts.push(outLines[op.bIndex] + origLines[op.aIndex].term);
+    } else if (op.type === 'insert') {
+      parts.push(outLines[op.bIndex] + dominantTerm);
     }
-    parts.push(lineText + term);
+    // 'delete' contributes nothing to the rebuilt output.
   }
   return parts.join('');
 }

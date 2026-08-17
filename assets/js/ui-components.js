@@ -346,8 +346,8 @@
             <div @click="$emit('close-mobile')"
                 class="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 md:hidden mobile-overlay"></div>
 
-            <div class="app-sidebar fixed inset-y-0 left-0 z-50 w-72 md:w-72 bg-white/95 border-r border-gray-200/80 transform transition-all duration-300 md:relative md:translate-x-0 flex flex-col shadow-2xl md:shadow-sm md:rounded-none rounded-r-3xl overflow-hidden"
-                :class="collapsed ? 'md:w-16' : 'md:w-72'">
+            <div class="app-sidebar fixed inset-y-0 left-0 z-50 bg-white/95 border-r border-gray-200/80 transform transition-all duration-300 md:relative md:translate-x-0 flex flex-col shadow-2xl md:shadow-sm md:rounded-none rounded-r-3xl overflow-hidden"
+                :class="collapsed ? 'w-16 md:w-16' : 'w-72 md:w-72'">
                 <div class="safe-sidebar-header h-16 flex items-center border-b border-gray-100/80 bg-white/70 backdrop-blur-xl transition-all duration-300"
                     :class="collapsed ? 'justify-center px-0' : 'justify-between px-6'">
                     <div v-show="!collapsed" class="app-logo relative inline-flex items-baseline gap-1.5 pr-1 min-w-0">

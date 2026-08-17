@@ -1,4 +1,4 @@
-import { editText } from '../lib.mjs';
+import { editText, replaceOnce } from '../lib.mjs';
 
 const category = 'webview-sidebar-rendering';
 
@@ -56,11 +56,29 @@ export function patchSidebarRenderingCss(source) {
   return changed ? result : source;
 }
 
+// Static `w-72 md:w-72` on the sidebar element collides with the dynamic
+// `:class="collapsed ? 'md:w-16' : 'md:w-72'"`: when collapsed, both `md:w-72`
+// and `md:w-16` remain on the element and, in the offline precompiled CSS,
+// `md:w-72` wins the cascade (same specificity, later in the stylesheet), so
+// the sidebar stays 288px. Make the width classes mutually exclusive so the
+// collapsed branch is `w-16 md:w-16` and the expanded branch `w-72 md:w-72`.
+export function patchSidebarComponentTemplate(source) {
+  const before = `            <div class="app-sidebar fixed inset-y-0 left-0 z-50 w-72 md:w-72 bg-white/95 border-r border-gray-200/80 transform transition-all duration-300 md:relative md:translate-x-0 flex flex-col shadow-2xl md:shadow-sm md:rounded-none rounded-r-3xl overflow-hidden"
+                :class="collapsed ? 'md:w-16' : 'md:w-72'">`;
+  const after = `            <div class="app-sidebar fixed inset-y-0 left-0 z-50 bg-white/95 border-r border-gray-200/80 transform transition-all duration-300 md:relative md:translate-x-0 flex flex-col shadow-2xl md:shadow-sm md:rounded-none rounded-r-3xl overflow-hidden"
+                :class="collapsed ? 'w-16 md:w-16' : 'w-72 md:w-72'">`;
+  return replaceOnce(source, before, after, 'app-sidebar width classes');
+}
+
 export async function applySidebarRenderingHooks() {
   const changes = [];
   const editResult = await editText('assets/css/styles.css', category, patchSidebarRenderingCss);
   if (editResult) {
     changes.push(editResult);
+  }
+  const editJsResult = await editText('assets/js/ui-components.js', category, patchSidebarComponentTemplate);
+  if (editJsResult) {
+    changes.push(editJsResult);
   }
   return changes;
 }
