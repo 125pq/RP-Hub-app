@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(scriptDirectory, '..');
+const projectRoot = path.resolve(scriptDirectory, '..', '..');
 const outputDirectory = path.join(projectRoot, 'dist');
 
 const publishAllowlist = [
@@ -39,6 +39,7 @@ const requiredFiles = [
   'assets/js/rphub-android-adapter.js',
   'assets/js/safe-area.js',
   'assets/js/chat-import-streaming.js',
+  'assets/js/rphub-backup.js',
   'assets/js/app.js',
   'assets/vendor/vue/vue.global.prod.js',
   'assets/vendor/marked/marked.min.js',

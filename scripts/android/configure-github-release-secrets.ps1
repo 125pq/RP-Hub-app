@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectRoot = Split-Path -Parent $scriptDirectory
+$projectRoot = Split-Path -Parent (Split-Path -Parent $scriptDirectory)
 if ([string]::IsNullOrWhiteSpace($PropertiesPath)) {
     $PropertiesPath = Join-Path $projectRoot 'keystore.properties'
 }

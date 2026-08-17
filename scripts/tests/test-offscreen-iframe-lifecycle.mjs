@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const source = await readFile(new URL('../assets/js/offscreen-iframe-lifecycle.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('../../assets/js/offscreen-iframe-lifecycle.js', import.meta.url), 'utf8');
 
 class FakeClassList {
   constructor() { this.values = new Set(); }

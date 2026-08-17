@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const platformSource = await readFile(new URL('../assets/js/platform-services.js', import.meta.url), 'utf8');
-const androidSource = await readFile(new URL('../assets/js/rphub-android-adapter.js', import.meta.url), 'utf8');
+const platformSource = await readFile(new URL('../../assets/js/platform-services.js', import.meta.url), 'utf8');
+const androidSource = await readFile(new URL('../../assets/js/rphub-android-adapter.js', import.meta.url), 'utf8');
 const toPlainObject = value => JSON.parse(JSON.stringify(value));
 
 assert.doesNotMatch(platformSource, /\bCapacitor\b|NativeFile/, 'generic platform facade must not contain Android bridge details');

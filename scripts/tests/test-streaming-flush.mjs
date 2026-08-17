@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const runtimeSource = await readFile(new URL('../assets/js/runtime-services.js', import.meta.url), 'utf8');
+const runtimeSource = await readFile(new URL('../../assets/js/runtime-services.js', import.meta.url), 'utf8');
 const apiSource = runtimeSource.slice(0, runtimeSource.indexOf('// --- Message renderer ---'));
 const flushes = [];
 let maxLatencyMs = 50;

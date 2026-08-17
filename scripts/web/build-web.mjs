@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(scriptDirectory, '..');
+const projectRoot = path.resolve(scriptDirectory, '..', '..');
 const outputDirectory = path.join(projectRoot, 'dist');
 
 const publishAllowlist = [

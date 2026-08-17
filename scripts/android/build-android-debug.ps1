@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$projectRoot = Split-Path -Parent $PSScriptRoot
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $androidRoot = Join-Path $projectRoot 'android'
 $toolchainRoot = Join-Path (Split-Path -Parent $projectRoot) '.android-toolchain'
 

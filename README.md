@@ -97,7 +97,11 @@ RP-Hub-app/
 │       ├── rphub-android-adapter.js # Android 原生能力适配层
 │       ├── safe-area.js           # 安全区变量与 viewport 同步
 │       └── offscreen-iframe-lifecycle.js # 离屏复杂 UI 生命周期优化
-├── scripts/                       # Web/Android 构建、测试与产物验证脚本
+├── scripts/                       # 构建、测试与工具脚本
+│   ├── web/                       # Web 构建：vendor 准备、CSS、dist、产物校验
+│   ├── android/                   # Android 打包、安装、release 密钥
+│   ├── tests/                     # Web/Android 平台测试
+│   ├── tools/                     # 一次性迁移/修复工具
 │   └── upstream-sync/             # 上游同步、Hook 重放、版本推导与验证
 ├── .github/workflows/             # 每日同步 / 测试 / 发布 / Gitee 镜像流水线
 ├── package.json                   # 固定依赖及可重复构建命令

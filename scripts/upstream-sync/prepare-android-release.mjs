@@ -84,7 +84,7 @@ export function applyAndroidVersion(versionName, versionCode) {
   const gradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle');
   writeFileSync(gradlePath, transformBuildGradle(readFileSync(gradlePath, 'utf8'), versionName, versionCode), 'utf8');
 
-  const scriptPath = path.join(projectRoot, 'scripts', 'build-android-release.ps1');
+  const scriptPath = path.join(projectRoot, 'scripts', 'android', 'build-android-release.ps1');
   writeFileSync(scriptPath, transformBuildScript(readFileSync(scriptPath, 'utf8'), versionName), 'utf8');
 }
 

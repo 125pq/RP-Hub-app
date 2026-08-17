@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const css = await readFile(new URL('../assets/css/safe-area.css', import.meta.url), 'utf8');
-const gradle = await readFile(new URL('../android/app/build.gradle', import.meta.url), 'utf8');
+const css = await readFile(new URL('../../assets/css/safe-area.css', import.meta.url), 'utf8');
+const gradle = await readFile(new URL('../../android/app/build.gradle', import.meta.url), 'utf8');
 
 const wideLayout = css.match(/@media \(min-width: 769px\) \{([\s\S]*?)\n\}/)?.[1] || '';
 assert.match(wideLayout, /\.safe-sidebar-header[\s\S]*padding-top:\s*var\(--safe-top\)/);
