@@ -2180,6 +2180,29 @@
                     debouncedSave(newVal);
                 }, { deep: true });
 
+                // Flush any pending debounced writes on demand (used by the main-app
+                // backup bridge before taking a snapshot).
+                const flushWorkshopData = async () => {
+                    const json = JSON.stringify(characters.value);
+                    await localforage.setItem('ai_chargen_characters', json);
+                    const { customModels, ...persistentOptions } = options;
+                    localStorage.setItem('ai_chargen_options', JSON.stringify(persistentOptions));
+                    localStorage.setItem('ai_chargen_active_index', currentCharacterIndex.value);
+                };
+                window.addEventListener('message', (flushEvent) => {
+                    const flushData = flushEvent?.data || {};
+                    if (flushData.type !== 'RPHUB_BACKUP_FLUSH') return;
+                    const requestId = flushData.requestId;
+                    (async () => {
+                        try {
+                            await flushWorkshopData();
+                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');
+                        } catch (_) {
+                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');
+                        }
+                    })();
+                });
+
 
                 // Computed
                 const currentCharacter = computed(() => characters.value[currentCharacterIndex.value]);

@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { applyAndroidHooks } from './patches/patch-android-hooks.mjs';
+import { applyBackupHooks } from './patches/patch-backup.mjs';
 import { applySafeAreaHooks } from './patches/patch-safe-area.mjs';
 import { applyOfflineAssetHooks } from './patches/patch-offline-assets.mjs';
 import { applyPerformanceHooks } from './patches/patch-performance.mjs';
@@ -11,7 +12,8 @@ export async function reapplyHooks() {
     ['webview-layout-safe-area', applySafeAreaHooks],
     ['webview-sidebar-rendering', applySidebarRenderingHooks],
     ['offline-assets', applyOfflineAssetHooks],
-    ['performance-patches', applyPerformanceHooks]
+    ['performance-patches', applyPerformanceHooks],
+    ['backup-hooks', applyBackupHooks]
   ];
   const changes = [];
   for (const [category, apply] of groups) {

@@ -9444,6 +9444,26 @@ const app = createApp({
             });
         });
 
+        // Backup flush bridges (local full-backup export/restore).
+        // Register the main-app writer flush; the character/novel iframe flushes
+        // are driven through RPHubBackupBridge.flushEmbeddedFrame (defined in
+        // rphub-backup.js, which loads before app.js).
+        if (window.RPHubBackupBridge) {
+            window.RPHubBackupBridge
+                .register('main-app', async () => {
+                    if (_memorySettingsSaveTimer) {
+                        clearTimeout(_memorySettingsSaveTimer);
+                        _memorySettingsSaveTimer = null;
+                    }
+                    await saveData({ saveMemories: true, saveCharacters: true });
+                    await flushPendingChatHistorySave();
+                    await saveStoryBranchesForCharacter();
+                    await saveTokenUsageHistoryNow();
+                })
+                .register('character-frame', () => window.RPHubBackupBridge.flushEmbeddedFrame('character'))
+                .register('novel-frame', () => window.RPHubBackupBridge.flushEmbeddedFrame('novel'));
+        }
+
         onBeforeUnmount(() => {
             window.RPHubOffscreenIframeLifecycle?.detach();
             generatedImageObserver?.disconnect();

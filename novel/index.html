@@ -2430,6 +2430,23 @@
                     await fetchModels();
                 };
 
+                const flushNovelData = async () => {
+                    await saveData();
+                };
+                window.addEventListener('message', (flushEvent) => {
+                    const flushData = flushEvent?.data || {};
+                    if (flushData.type !== 'RPHUB_BACKUP_FLUSH') return;
+                    const requestId = flushData.requestId;
+                    (async () => {
+                        try {
+                            await flushNovelData();
+                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');
+                        } catch (_) {
+                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');
+                        }
+                    })();
+                });
+
                 const saveData = async () => {
                     // 1. 更新当前书籍在 books 数组中的数据
                     if (currentBookId.value) {
