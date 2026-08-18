@@ -2,3 +2,8 @@
 *.mjs whitespace=cr-at-eol
 *.html whitespace=cr-at-eol
 *.md whitespace=cr-at-eol
+
+# Upstream app.js is intentionally mixed-EOL (CRLF + bare LF). core.autocrlf=true
+# would rewrite it on add/checkout and reintroduce thousands of EOL-only diff
+# lines against upstream, so this file must be stored byte-exact.
+assets/js/app.js -text
