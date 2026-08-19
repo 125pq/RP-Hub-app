@@ -1,0 +1,49 @@
+name: Validate RP-Hub-app
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch upstream refs
+        shell: bash
+        run: |
+          git remote get-url upstream || git remote add upstream https://github.com/STA1N156/RP-Hub.git
+          git fetch upstream --force refs/heads/main:refs/remotes/upstream/main
+
+      - name: Syntax checks
+        run: npm run test:syntax
+
+      - name: Platform tests
+        run: npm run test:platform
+
+      - name: Upstream sync tests
+        run: npm run test:upstream-sync
+
+      - name: Build web
+        run: npm run build:web
+
+      - name: Verify dist
+        run: npm run verify:dist
