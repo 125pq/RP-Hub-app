@@ -46,8 +46,8 @@ final class AppUpdateManager {
     private static final int READ_TIMEOUT_MS = 20000;
     private static final int MAX_RESPONSE_BYTES = 512 * 1024;
     private static final int MAX_REDIRECTS = 5;
-    private static final long SLOW_SOURCE_GRACE_MS = 30000L;
-    private static final long MIN_DOWNLOAD_BYTES_PER_SECOND = 100L * 1024L;
+    private static final long SLOW_SOURCE_GRACE_MS = 3000L;
+    private static final long MIN_DOWNLOAD_BYTES_PER_SECOND = 150L * 1024L;
 
     private final MainActivity activity;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
