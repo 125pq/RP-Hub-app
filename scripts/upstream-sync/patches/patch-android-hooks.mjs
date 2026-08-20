@@ -1,25 +1,27 @@
 import { editText, ensureAfter, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
+import { patchIndexScriptOverlay } from './index-script-overlay.mjs';
 
 const category = 'android-hooks';
+
+export function patchAndroidNovel(source) {
+  source = replaceOnce(source, '                const exportBook = () => {', '                const exportBook = async () => {', 'novel async export hook');
+  if (!source.includes('adapter?.exportFile')) {
+    const start = source.indexOf('                    const blob = new Blob([content]');
+    const endMarker = "                    showToast('小说已开始导出', 'success');";
+    const end = source.indexOf(endMarker, start);
+    if (start < 0 || end < 0) throw new Error('Missing sync anchor: novel browser export block');
+    const fallback = source.slice(start, end + endMarker.length);
+    const hook = `                    let adapter = window.platformAdapter;\n                    try {\n                        if (!adapter && window.parent !== window) adapter = window.parent.platformAdapter;\n                    } catch {}\n                    if (adapter?.exportFile) {\n                        let result;\n                        try {\n                            result = await adapter.exportFile({\n                                data: content,\n                                filename: \`\${novel.value.title || '小说导出'}.txt\`,\n                                mimeType: 'text/plain'\n                            });\n                        } catch (error) {\n                            showToast(\`小说导出失败：\${error.message || '文件保存失败'}\`, 'error');\n                            return;\n                        }\n                        if (result.cancelled) return;\n                        if (result.supported === false) throw new Error('当前平台不支持文件保存');\n                        showToast('小说已开始导出', 'success');\n                        return;\n                    }\n\n`;
+    source = `${source.slice(0, start)}${hook}${fallback}${source.slice(end + endMarker.length)}`;
+  }
+  requireContains(source, 'adapter?.exportFile', 'novel platform export');
+  return source;
+}
 
 export async function applyAndroidHooks() {
   const changes = [];
 
-  changes.push(await editText('index.html', category, source => {
-    source = ensureBefore(
-      source,
-      `        document.write('<script src="assets/js/safe-area.js?v=' + new Date().getTime() + '"><\\/script>');`,
-      `        document.write('<script src="assets/js/platform-services.js?v=' + new Date().getTime() + '"><\\/script>');\n        document.write('<script src="assets/js/rphub-android-adapter.js?v=' + new Date().getTime() + '"><\\/script>');\n`,
-      'platform adapter scripts'
-    );
-    source = ensureBefore(
-      source,
-      `        document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\\/script>');`,
-      `        document.write('<script src="assets/js/chat-import-streaming.js?v=' + new Date().getTime() + '"><\\/script>');\n`,
-      'chat import streaming script'
-    );
-    return source;
-  }));
+  changes.push(await editText('index.html', category, patchIndexScriptOverlay));
 
   changes.push(await editText('assets/js/app.js', category, source => {
     if (!source.includes('const initializePlatformAdapters = async () => {')) {
@@ -81,19 +83,7 @@ export async function applyAndroidHooks() {
     return source;
   }));
 
-  changes.push(await editText('novel/index.html', category, source => {
-    if (!source.includes('adapter?.exportFile')) {
-      const start = source.indexOf('                    const blob = new Blob([content]');
-      const endMarker = "                    showToast('小说已开始导出', 'success');";
-      const end = source.indexOf(endMarker, start);
-      if (start < 0 || end < 0) throw new Error('Missing sync anchor: novel browser export block');
-      const fallback = source.slice(start, end + endMarker.length);
-      const hook = `                    let adapter = window.platformAdapter;\n                    try {\n                        if (!adapter && window.parent !== window) adapter = window.parent.platformAdapter;\n                    } catch {}\n                    if (adapter?.exportFile) {\n                        const result = await adapter.exportFile({\n                            data: content,\n                            filename: \`\${novel.value.title || '小说导出'}.txt\`,\n                            mimeType: 'text/plain'\n                        });\n                        if (result.cancelled) return;\n                        if (result.supported === false) throw new Error('Current platform cannot save files');\n                        showToast('小说已开始导出', 'success');\n                        return;\n                    }\n\n`;
-      source = `${source.slice(0, start)}${hook}${fallback}${source.slice(end + endMarker.length)}`;
-    }
-    requireContains(source, 'adapter?.exportFile', 'novel platform export');
-    return source;
-  }));
+  changes.push(await editText('novel/index.html', category, patchAndroidNovel));
 
   return changes.filter(Boolean);
 }

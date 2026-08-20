@@ -5,6 +5,7 @@ import process from 'node:process';
 import { projectRoot } from './lib.mjs';
 import { reapplyHooks } from './reapply-hooks.mjs';
 import { resolveLatestStableRelease } from './release-source.mjs';
+import { mergeWithAutoResolver } from './sync-orchestration.mjs';
 
 const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
 const RELEASE_REF = 'refs/remotes/upstream/releases/latest';
@@ -45,6 +46,15 @@ function run(command, commandArgs = [], options = {}) {
 
 const git = (gitArgs, options = {}) => run('git', gitArgs, options);
 const gitText = async gitArgs => (await git(gitArgs, { capture: true })).stdout;
+
+async function stageTrackedChangesPrecisely() {
+  const paths = new Set();
+  for (const args of [['diff', '--name-only'], ['diff', '--cached', '--name-only']]) {
+    const output = await gitText(args);
+    for (const relativePath of output.split('\n').map(value => value.trim()).filter(Boolean)) paths.add(relativePath);
+  }
+  for (const relativePath of paths) await git(['add', '--', relativePath]);
+}
 
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -160,28 +170,14 @@ try {
   console.log(`UPSTREAM_HEAD=${upstreamHead}`);
   console.log(incoming ? `INCOMING_COMMITS=\n${incoming}` : 'INCOMING_COMMITS=none');
 
-  const merge = await git(['merge', '--no-ff', '--no-commit', upstreamHead], {
-    allowFailure: true,
-    capture: true
+  // Keep merge output/classification and the resolver/reapply/abort path in
+  // one injectable helper so offline fixtures exercise the Action behavior.
+  await mergeWithAutoResolver({
+    cwd: projectRoot,
+    upstreamRef: upstreamHead,
+    git,
+    reapply: async () => reapplyHooks()
   });
-  if (merge.stdout) console.log(merge.stdout);
-  if (merge.stderr && merge.code === 0) console.error(merge.stderr);
-  if (merge.code !== 0) {
-    if (merge.stderr) console.error(merge.stderr);
-    const conflicts = await gitText(['diff', '--name-only', '--diff-filter=U']);
-    if (conflicts) {
-      console.error(`MERGE_CONFLICTS=\n${conflicts}`);
-      if (await mergeInProgress()) await git(['merge', '--abort'], { allowFailure: true });
-      throw new Error('Upstream merge conflicted and was aborted; no ours/theirs resolution was attempted');
-    }
-    if (await mergeInProgress()) await git(['merge', '--abort'], { allowFailure: true });
-    const detail = [merge.stderr, merge.stdout].filter(Boolean).join('\n');
-    throw new Error(
-      `Upstream git merge failed without content conflicts${detail ? `:\n${detail}` : ''}`
-    );
-  }
-
-  await reapplyHooks();
   if (!prepareOnly) await runValidation();
 
   if (dryRun) {
@@ -195,7 +191,7 @@ try {
     if (!status) {
       console.log('SYNC_COMMIT=none (no changes)');
     } else {
-      await git(['add', '-A']);
+      await stageTrackedChangesPrecisely();
       await git(['commit', '-m', `chore(sync): merge upstream RP-Hub release ${release.tagName} (${upstreamShort}) and reapply local patches`]);
       console.log(`SYNC_COMMIT=${await gitText(['rev-parse', 'HEAD'])}`);
     }
