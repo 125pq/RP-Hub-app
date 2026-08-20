@@ -5,19 +5,21 @@ import { fileURLToPath } from 'node:url';
 import { countOccurrences, projectRoot } from './lib.mjs';
 
 const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
-const [index, app, core, character, novel, platform, android] = await Promise.all([
+const [index, app, core, character, novel, platform, android, updateCheck] = await Promise.all([
   read('index.html'),
   read('assets/js/app.js'),
   read('assets/js/core-utils.js'),
   read('character/index.html'),
   read('novel/index.html'),
   read('assets/js/platform-services.js'),
-  read('assets/js/rphub-android-adapter.js')
+  read('assets/js/rphub-android-adapter.js'),
+  read('assets/js/update-check.js')
 ]);
 
 assert.match(platform, /global\.platformAdapter\s*=\s*platformAdapter/);
 assert.match(platform, /global\.PlatformServices\s*=\s*platformAdapter/);
 assert.equal(countOccurrences(index, 'assets/js/rphub-android-adapter.js'), 1, 'Android adapter script must load exactly once');
+assert.equal(countOccurrences(index, 'assets/js/update-check.js'), 1, 'Update check script must load exactly once');
 assert.equal(countOccurrences(android, 'if (global.__rphubAndroidAdapterLoaded) return;'), 1, 'Android adapter needs one initialization guard');
 assert.equal(countOccurrences(android, 'platform.installNativeAdapter(new AndroidAdapter(global));'), 1, 'Android adapter must install once');
 
@@ -27,6 +29,7 @@ assert.match(app, /removePlatformBackListener\(\);[\s\S]*removePlatformStateList
 assert.match(core, /adapter\.exportFile\(/);
 assert.match(character, /cardUtils\.saveGeneratedFile\(/);
 assert.match(novel, /adapter\.exportFile[\s\S]*mimeType:\s*'text\/plain'/);
+assert.match(updateCheck, /window\.platformAdapter\?\.isNative\?\.\(\) === true/, 'Native update guard must target the loaded update-check module');
 
 const platformIndex = index.indexOf('assets/js/platform-services.js');
 const androidIndex = index.indexOf('assets/js/rphub-android-adapter.js');
