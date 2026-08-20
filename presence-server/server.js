@@ -54,6 +54,15 @@ const sendJson = (response, status, body, corsOrigin = '') => {
     response.end(JSON.stringify(body));
 };
 
+const readJson = async (request) => {
+    let body = '';
+    for await (const chunk of request) {
+        body += chunk;
+        if (body.length > 2048) throw new Error('Request too large');
+    }
+    return JSON.parse(body || '{}');
+};
+
 const server = http.createServer(async (request, response) => {
     const origin = request.headers.origin || '';
     const corsOrigin = getCorsOrigin(origin);
@@ -63,7 +72,8 @@ const server = http.createServer(async (request, response) => {
         if (origin && !corsOrigin) return sendJson(response, 403, { error: 'Origin not allowed' });
         response.writeHead(204, {
             'Access-Control-Allow-Origin': corsOrigin || '*',
-            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
             'Access-Control-Max-Age': '86400',
             Vary: 'Origin'
         });
@@ -83,6 +93,20 @@ const server = http.createServer(async (request, response) => {
             latestVersionId,
             updateAvailable: currentVersionId !== null && latestVersionId > currentVersionId
         }, corsOrigin);
+    }
+
+    // Keep old pages update-capable without storing client IDs or counting users.
+    if (request.method === 'POST' && url.pathname === '/v1/presence') {
+        try {
+            const currentVersionId = parseVersionId((await readJson(request)).versionId);
+            await refreshLatestVersionId();
+            return sendJson(response, 200, {
+                latestVersionId,
+                updateAvailable: currentVersionId !== null && latestVersionId > currentVersionId
+            }, corsOrigin);
+        } catch {
+            return sendJson(response, 400, { error: 'Invalid request' }, corsOrigin);
+        }
     }
 
     return sendJson(response, 404, { error: 'Not found' }, corsOrigin);
