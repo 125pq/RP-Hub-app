@@ -1,6 +1,20 @@
 import { editText, ensureAfter, ensureBefore, requireContains } from '../lib.mjs';
+import { patchIndexScriptOverlay } from './index-script-overlay.mjs';
 
 const category = 'backup-hooks';
+
+export function patchBackupNovel(source) {
+  if (!source.includes("flushData.type !== 'RPHUB_BACKUP_FLUSH'")) {
+    source = ensureBefore(
+      source,
+      `                const saveData = async () => {`,
+      `                const flushNovelData = async () => {\n                    await saveData();\n                };\n                window.addEventListener('message', (flushEvent) => {\n                    const flushData = flushEvent?.data || {};\n                    if (flushData.type !== 'RPHUB_BACKUP_FLUSH') return;\n                    const requestId = flushData.requestId;\n                    (async () => {\n                        try {\n                            await flushNovelData();\n                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');\n                        } catch (_) {\n                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');\n                        }\n                    })();\n                });\n\n`,
+      'novel backup flush'
+    );
+  }
+  requireContains(source, "flushData.type !== 'RPHUB_BACKUP_FLUSH'", 'novel backup flush handler');
+  return source;
+}
 
 // Adds the minimal hooks needed for the local backup module:
 //  - index.html: load rphub-backup.js before app.js.
@@ -16,16 +30,7 @@ export async function applyBackupHooks() {
   const changes = [];
 
   // --- index.html: load rphub-backup.js before app.js -----------------------
-  changes.push(await editText('index.html', category, source => {
-    source = ensureBefore(
-      source,
-      `        document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\\/script>');`,
-      `        document.write('<script src="assets/js/rphub-backup.js?v=' + new Date().getTime() + '"><\\/script>');\n`,
-      'rphub-backup script load'
-    );
-    requireContains(source, 'assets/js/rphub-backup.js', 'index rphub-backup script');
-    return source;
-  }));
+  changes.push(await editText('index.html', category, patchIndexScriptOverlay));
 
   // --- app.js: register flush bridges ---------------------------------------
   changes.push(await editText('assets/js/app.js', category, source => {
@@ -98,18 +103,7 @@ export async function applyBackupHooks() {
   }));
 
   // --- novel/index.html: flush handler ---------------------------------------
-  changes.push(await editText('novel/index.html', category, source => {
-    if (!source.includes("flushData.type !== 'RPHUB_BACKUP_FLUSH'")) {
-      source = ensureBefore(
-        source,
-        `                const saveData = async () => {`,
-        `                const flushNovelData = async () => {\n                    await saveData();\n                };\n                window.addEventListener('message', (flushEvent) => {\n                    const flushData = flushEvent?.data || {};\n                    if (flushData.type !== 'RPHUB_BACKUP_FLUSH') return;\n                    const requestId = flushData.requestId;\n                    (async () => {\n                        try {\n                            await flushNovelData();\n                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');\n                        } catch (_) {\n                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');\n                        }\n                    })();\n                });\n\n`,
-        'novel backup flush'
-      );
-    }
-    requireContains(source, "flushData.type !== 'RPHUB_BACKUP_FLUSH'", 'novel backup flush handler');
-    return source;
-  }));
+  changes.push(await editText('novel/index.html', category, patchBackupNovel));
 
   return changes.filter(Boolean);
 }

@@ -178,9 +178,11 @@ assert.equal(patchSidebarComponentTemplate(patched), patched, 'patch must be ide
 assert.throws(() => patchSidebarComponentTemplate(upstreamSnippet.replace('md:w-72 bg-white', 'md:w-72 CHANGED')), /app-sidebar width classes/, 'patch must fail on drifted upstream snippet');
 
 const syncUpstreamSource = await read('scripts/upstream-sync/sync-upstream.mjs');
-assert.match(syncUpstreamSource, /git\(\s*\['merge',\s*'--no-ff',\s*'--no-commit',\s*upstreamHead\],\s*\{\s*allowFailure:\s*true,\s*capture:\s*true\s*\}\s*\)/);
-assert.match(syncUpstreamSource, /if\s*\(\s*conflicts\s*\)\s*\{[\s\S]*MERGE_CONFLICTS=\\n[\s\S]*Upstream merge conflicted and was aborted/);
-assert.match(syncUpstreamSource, /Upstream git merge failed without content conflicts/);
+const syncOrchestrationSource = await read('scripts/upstream-sync/sync-orchestration.mjs');
+assert.match(syncUpstreamSource, /mergeWithAutoResolver\(\s*\{[\s\S]*upstreamRef:\s*upstreamHead[\s\S]*reapply:/);
+assert.match(syncOrchestrationSource, /git\(\s*\['merge',\s*'--no-ff',\s*'--no-commit',\s*upstreamRef\],\s*\{\s*allowFailure:\s*true,\s*capture:\s*true\s*\}\s*\)/);
+assert.match(syncOrchestrationSource, /if\s*\(\s*conflicts\s*\)\s*\{[\s\S]*MERGE_CONFLICTS=\\n[\s\S]*Upstream merge conflicted and was aborted/);
+assert.match(syncOrchestrationSource, /Upstream git merge failed without content conflicts/);
 assert.doesNotMatch(syncUpstreamSource, /MERGE_CONFLICTS=\\n\$\{conflicts\s*\|\|\s*'\(unknown\)'\}/);
 
 const appSource = await read('assets/js/app.js');
