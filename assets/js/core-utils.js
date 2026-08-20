@@ -1009,7 +1009,7 @@ window.RPHubUtils = {
                 { value: '4K横图', label: '4K横图(-25)' },
                 { value: '4K方图', label: '4K方图(-25)' }
             ]),
-            imageCounts: Object.freeze([1, 2, 3, 4, 5, 6].map(count => ({
+            imageCounts: Object.freeze([1, 2, 3, 4, 5, 6, 7, 8].map(count => ({
                 value: count,
                 label: `${count} 张`
             }))),

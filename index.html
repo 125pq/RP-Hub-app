@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <meta name="rphub-presence-api" content="https://rphub-presence.zeabur.app">
+    <meta name="rphub-update-api" content="https://rphub-presence.zeabur.app">
     <title>RP Hub</title>
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
     <!-- <link rel="icon" href="logo.jpg" type="image/jpeg"> -->
@@ -313,7 +313,7 @@
                                 <button
                                     class="ml-1 p-1.5 text-white/60 hover:text-white hover:bg-white/20 rounded-full transition-all flex-shrink-0"
                                     :class="{'bg-white/20 text-white': showDescriptionPanel}">
-                                    <svg class="w-4 h-4 transition-transform duration-300 ease-out"
+                                    <svg class="desc-panel-chevron w-4 h-4"
                                         :class="{'rotate-180': showDescriptionPanel}" fill="none" stroke="currentColor"
                                         viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -871,10 +871,6 @@
                                             class="absolute bottom-full right-0 mb-3 md:mb-4 z-50 pointer-events-auto w-[min(22rem,calc(100vw-3rem))] md:w-[min(24rem,calc(100vw-2rem))] max-h-[calc(100dvh-10rem)] md:max-h-none transform-gpu origin-bottom-right">
                                             <div @click.stop
                                                 class="bg-white/95 backdrop-blur-xl border border-gray-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.12)] rounded-2xl p-3 flex flex-col gap-3 ring-1 ring-black/5 max-w-full max-h-[inherit] overflow-x-hidden overflow-y-auto overscroll-contain">
-                                                <div class="flex items-center justify-between px-0.5">
-                                                    <span class="text-sm font-bold text-gray-700">聊天模型</span>
-                                                    <span class="text-xs text-gray-400">快捷切换</span>
-                                                </div>
                                                 <div class="flex flex-col gap-1.5">
                                                     <button v-for="(slot, slotIndex) in chatModelSlots" :key="slot.mode"
                                                         type="button" @click="selectChatModelSlot(slot)"
@@ -901,6 +897,22 @@
                                                         </div>
                                                         <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.01"
                                                             class="compact-range block w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                                    </div>
+                                                    <div class="flex flex-col gap-2 border-t border-gray-100 pt-3">
+                                                        <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50">
+                                                            <span>流式输出</span>
+                                                            <span class="relative inline-flex flex-none items-center">
+                                                                <input v-model="settings.stream" type="checkbox" class="settings-toggle-input sr-only">
+                                                                <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
+                                                            </span>
+                                                        </label>
+                                                        <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50">
+                                                            <span>沉浸模式</span>
+                                                            <span class="relative inline-flex flex-none items-center">
+                                                                <input v-model="settings.immersiveMode" type="checkbox" class="settings-toggle-input sr-only">
+                                                                <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
+                                                            </span>
+                                                        </label>
                                                     </div>
                                                 </div>
                                             </div>
@@ -984,7 +996,7 @@
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor"><use href="#icon-delete"></use></svg>
                             </button>
                             <button @click="showAddCharacterMenu = true"
-                                class="p-2.5 bg-primary-600 text-white rounded-xl shadow-sm active:scale-95 transition-all"
+                                class="settings-create-button"
                                 title="添加角色卡">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1038,7 +1050,7 @@
                             删除
                         </button>
                         <button @click="showAddCharacterMenu = true"
-                            class="flex-1 md:flex-none justify-center px-3 md:px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl transition-all shadow-sm hover:shadow flex items-center text-sm font-bold">
+                            class="settings-create-button settings-create-button--labeled flex-1 md:flex-none">
                             <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M12 4v16m8-8H4"></path>
@@ -1142,7 +1154,7 @@
             <!-- Novel View -->
             <div v-if="currentView === 'novel'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">
                 <embedded-view-content :src="novelUrl" :loading="isNovelLoading"
-                    loading-text="加载墨韵·造梦中..." @menu="toggleMobileMenu" @load="onNovelLoad">
+                    loading-text="加载小说生成中..." @menu="toggleMobileMenu" @load="onNovelLoad">
                 </embedded-view-content>
             </div>
 
@@ -1367,24 +1379,21 @@
                                         </div>
                                     </div>
 
+                                    <div class="group">
+                                        <label
+                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">偏好设定</label>
+                                        <textarea v-model="user.preferences" rows="4"
+                                            placeholder="偏好的互动方式、称呼或希望长期遵循的习惯..."
+                                            class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl px-4 py-3 text-gray-800 focus:bg-white focus:border-primary-500 focus:ring-4 focus:ring-primary-100 focus:outline-none transition-all resize-y"></textarea>
+                                    </div>
+
                                     <!-- Description -->
                                     <div class="group">
                                         <label
                                             class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">详细设定</label>
-                                        <div class="relative">
-                                            <textarea v-model="user.description" rows="6"
-                                                placeholder="描述您的外貌、性格、背景故事等..."
-                                                class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl px-4 py-3 text-gray-800 focus:bg-white focus:border-primary-500 focus:ring-4 focus:ring-primary-100 focus:outline-none transition-all resize-y"></textarea>
-                                            <div class="absolute right-3 bottom-3 text-gray-300 pointer-events-none">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor"
-                                                    viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z">
-                                                    </path>
-                                                </svg>
-                                            </div>
-                                        </div>
+                                        <textarea v-model="user.description" rows="6"
+                                            placeholder="外貌、性格、背景故事等..."
+                                            class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl px-4 py-3 text-gray-800 focus:bg-white focus:border-primary-500 focus:ring-4 focus:ring-primary-100 focus:outline-none transition-all resize-y"></textarea>
                                     </div>
 
 
@@ -1589,7 +1598,7 @@
 
                                 <!-- Model Configuration Inputs -->
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
-                                    <div class="group order-1">
+                                    <div class="group">
                                         <label
                                             class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">聊天模型</label>
                                         <div class="relative flex-1 group" @click="openModelSelector('quickModels')">
@@ -1612,35 +1621,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="group order-4 self-start w-full">
-                                        <div class="flex items-center justify-between mb-2 px-1">
-                                            <label
-                                                class="text-xs font-bold text-gray-500 uppercase tracking-wider">温度</label>
-                                            <span class="text-xs font-mono font-semibold text-gray-500 tabular-nums">{{
-                                                Number(settings.temperature).toFixed(2) }}</span>
-                                        </div>
-                                        <div
-                                            class="h-12 flex items-center px-4 bg-gray-50/60 border-2 border-gray-100 rounded-xl hover:bg-white hover:border-teal-300 hover:shadow-md transition-all">
-                                            <input v-model.number="settings.temperature" type="range" min="0" max="1"
-                                                step="0.01"
-                                                class="compact-range w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-teal-500 hover:accent-teal-400 transition-all">
-                                        </div>
-                                    </div>
-                                    <div class="group order-3 self-start w-full">
-                                        <div class="flex items-center justify-between mb-2 px-1">
-                                            <label
-                                                class="text-xs font-bold text-gray-500 uppercase tracking-wider">推理强度</label>
-                                            <span class="text-xs font-semibold text-gray-500">{{ reasoningEffortLabel }}</span>
-                                        </div>
-                                        <div
-                                            class="h-12 flex items-center px-4 bg-gray-50/60 border-2 border-gray-100 rounded-xl hover:bg-white hover:border-teal-300 hover:shadow-md transition-all">
-                                            <input v-model.number="reasoningEffortSlider" type="range" min="0" max="5"
-                                                step="1"
-                                                class="compact-range w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-teal-500 hover:accent-teal-400 transition-all"
-                                                aria-label="推理强度">
-                                        </div>
-                                    </div>
-                                    <div class="group order-2">
+                                    <div class="group">
                                         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">识图模型</label>
                                         <div class="relative flex-1 group" @click="openModelSelector('visionModel')">
                                             <div
@@ -1660,7 +1641,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="group order-6 col-span-1 md:col-span-2 mt-2">
+                                    <div class="group col-span-1 md:col-span-2 mt-2">
                                         <button @click="fetchModels(true)"
                                             class="w-full px-4 py-3 bg-white hover:bg-teal-50 text-gray-600 hover:text-teal-700 rounded-lg border border-gray-200 hover:border-teal-200 transition-all shadow-sm active:scale-95 whitespace-nowrap font-medium flex items-center justify-center text-sm"
                                             title="刷新列表">
@@ -2822,7 +2803,7 @@
         document.write('<script src="assets/js/core-utils.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/data-services.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/runtime-services.js?v=' + new Date().getTime() + '"><\/script>');
-        document.write('<script src="assets/js/presence.js?v=' + new Date().getTime() + '"><\/script>');
+        document.write('<script src="assets/js/update-check.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/ui-components.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\/script>');
     </script>

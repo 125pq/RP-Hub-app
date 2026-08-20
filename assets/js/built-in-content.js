@@ -59,10 +59,11 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         `只输出第 ${startTurn}–${endTurn} 轮的合并总结正文，不要标题、解释、列表、Markdown、开场语或结语。`
     ].join('\n');
 
-    const buildUserInfoPrompt = ({ name, description }) => [
+    const buildUserInfoPrompt = ({ name, description, preferences }) => [
         '[User Info]',
         `Name: ${name || ''}`,
-        `Description: ${description || ''}`
+        `Description: ${description || ''}`,
+        `Preferences: ${preferences || ''}`
     ].join('\n');
 
     const buildCharacterPrompt = ({ name, personality }) =>
@@ -607,18 +608,19 @@ ${uiTemplateAnalysisSection}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10192,
+    id: 10193,
     title: '网站公告',
     content: `
-### RP-Hub 1.8.4
+### RP-Hub 1.8.5
 
-- 记忆系统总结模式新增自动二次压缩，压缩率与上下文长度提升约500%
-- 简化精炼了部分预设与提示词
-- 优化了UI模板的成功率
-- 新增更新版本心跳提醒
-- 修复了部分代码结构被破坏的问题
-- 修复了对话内容被异常过滤的问题
+- 新增用户偏好设定，支持补充互动习惯
+- 生图数量扩展至单次最多 8 张
+- 优化了聊天快捷面板，集中管理推理强度、温度、流式输出与沉浸模式
+- 优化了分支删除逻辑，删除分支后下级分支会自动顺延
+- “墨韵·造梦”更名为“小说生成”并调整入口位置
 
-#### 更新时间：08/16/19:53
+- 修复了部分情况下聊天气泡暂时消失的问题
+
+#### 更新时间：08/20/17:39
     `
 });

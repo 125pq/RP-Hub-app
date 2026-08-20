@@ -1,7 +1,6 @@
 import http from 'node:http';
 
 const port = Number(process.env.PORT) || 3000;
-const ttlMs = Math.min(300_000, Math.max(30_000, Number(process.env.PRESENCE_TTL_MS) || 60_000));
 const parseVersionId = value => /^\d{5}$/.test(String(value ?? '').trim())
     ? Number(value)
     : null;
@@ -14,7 +13,6 @@ const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '*')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
-const clients = new Map();
 
 const refreshLatestVersionId = () => {
     if (versionRefreshPromise) return versionRefreshPromise;
@@ -42,13 +40,6 @@ const refreshLatestVersionId = () => {
     return versionRefreshPromise;
 };
 
-const removeExpired = () => {
-    const now = Date.now();
-    clients.forEach((expiresAt, clientId) => {
-        if (expiresAt <= now) clients.delete(clientId);
-    });
-};
-
 const getCorsOrigin = (origin) => {
     if (allowedOrigins.includes('*')) return '*';
     return origin && allowedOrigins.includes(origin) ? origin : '';
@@ -63,23 +54,6 @@ const sendJson = (response, status, body, corsOrigin = '') => {
     response.end(JSON.stringify(body));
 };
 
-const readJson = (request) => new Promise((resolve, reject) => {
-    let body = '';
-    request.setEncoding('utf8');
-    request.on('data', chunk => {
-        body += chunk;
-        if (body.length > 2048) request.destroy();
-    });
-    request.on('end', () => {
-        try {
-            resolve(JSON.parse(body || '{}'));
-        } catch {
-            reject(new Error('Invalid JSON'));
-        }
-    });
-    request.on('error', reject);
-});
-
 const server = http.createServer(async (request, response) => {
     const origin = request.headers.origin || '';
     const corsOrigin = getCorsOrigin(origin);
@@ -89,8 +63,7 @@ const server = http.createServer(async (request, response) => {
         if (origin && !corsOrigin) return sendJson(response, 403, { error: 'Origin not allowed' });
         response.writeHead(204, {
             'Access-Control-Allow-Origin': corsOrigin || '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
             'Access-Control-Max-Age': '86400',
             Vary: 'Origin'
         });
@@ -103,41 +76,22 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 200, { ok: true }, corsOrigin);
     }
 
-    if (request.method === 'GET' && url.pathname === '/v1/online') {
-        removeExpired();
-        return sendJson(response, 200, { online: clients.size }, corsOrigin);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/v1/presence') {
-        try {
-            const { clientId, versionId } = await readJson(request);
-            if (!/^[a-zA-Z0-9_-]{16,128}$/.test(String(clientId || ''))) {
-                return sendJson(response, 400, { error: 'Invalid clientId' }, corsOrigin);
-            }
-            const currentVersionId = parseVersionId(versionId);
-            await refreshLatestVersionId();
-            removeExpired();
-            clients.set(clientId, Date.now() + ttlMs);
-            return sendJson(response, 200, {
-                online: clients.size,
-                expiresIn: ttlMs,
-                latestVersionId,
-                updateAvailable: currentVersionId !== null && latestVersionId > currentVersionId
-            }, corsOrigin);
-        } catch {
-            return sendJson(response, 400, { error: 'Invalid request' }, corsOrigin);
-        }
+    if (request.method === 'GET' && url.pathname === '/v1/version') {
+        const currentVersionId = parseVersionId(url.searchParams.get('current'));
+        await refreshLatestVersionId();
+        return sendJson(response, 200, {
+            latestVersionId,
+            updateAvailable: currentVersionId !== null && latestVersionId > currentVersionId
+        }, corsOrigin);
     }
 
     return sendJson(response, 404, { error: 'Not found' }, corsOrigin);
 });
 
-const cleanupTimer = setInterval(removeExpired, ttlMs);
-cleanupTimer.unref();
 refreshLatestVersionId();
 
 server.listen(port, '0.0.0.0', () => {
-    console.log(`RP-Hub presence service listening on ${port}`);
+    console.log(`RP-Hub update check service listening on ${port}`);
 });
 
 const shutdown = () => server.close(() => process.exit(0));
