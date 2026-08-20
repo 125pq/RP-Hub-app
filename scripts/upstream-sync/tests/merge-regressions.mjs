@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import { projectRoot } from '../lib.mjs';
 import { patchSidebarComponentTemplate } from '../patches/patch-sidebar-rendering.mjs';
 import path from 'node:path';
@@ -74,26 +75,73 @@ assertAll(ui, [
   'safe-sidebar-header'
 ], 'ui-components.js contract');
 
-// ---- assets/js/presence.js ----
-const presence = await read('assets/js/presence.js');
-assertAll(presence, [
-  'versionId',
-  'latestVersionId',
-  'updateAvailable',
-  // Native guard: suppress the web "refresh to update" prompt in the APK
+// ---- assets/js/update-check.js ----
+const updateCheck = await read('assets/js/update-check.js');
+assertAll(updateCheck, [
+  'rphub:update-available',
+  // Native guard: suppress the web "refresh to update" prompt in the APK.
   "window.platformAdapter?.isNative?.() === true"
-], 'presence.js contract');
+], 'update-check.js contract');
 
 // ---- index.html script loading order (platform adapter before app.js) ----
 const index = await read('index.html');
 const platformIdx = index.indexOf('platform-services.js');
 const adapterIdx = index.indexOf('rphub-android-adapter.js');
+const updateCheckIdx = index.indexOf('assets/js/update-check.js');
 const appIdx = index.indexOf('assets/js/app.js');
 assert.ok(platformIdx !== -1, 'index.html must load platform-services.js');
 assert.ok(adapterIdx !== -1, 'index.html must load rphub-android-adapter.js');
+assert.ok(updateCheckIdx !== -1, 'index.html must load update-check.js');
 assert.ok(appIdx !== -1, 'index.html must load app.js');
 assert.ok(platformIdx < adapterIdx, 'platform-services.js must load before rphub-android-adapter.js');
 assert.ok(adapterIdx < appIdx, 'rphub-android-adapter.js must load before app.js');
+assert.ok(updateCheckIdx < appIdx, 'update-check.js must load before app.js');
+
+async function countUpdateEvents(isNative) {
+  const mounted = [];
+  const dispatched = [];
+  let resolveFetchStarted;
+  const fetchStarted = new Promise(resolve => { resolveFetchStarted = resolve; });
+  const context = {
+    Vue: {
+      onMounted: callback => mounted.push(callback),
+      onBeforeUnmount: () => {}
+    },
+    window: {
+      RPHubLatestUpdate: { id: '12345' },
+      platformAdapter: { isNative: () => isNative },
+      dispatchEvent: event => dispatched.push(event)
+    },
+    document: {
+      hidden: false,
+      querySelector: () => ({ content: 'https://updates.example.test' }),
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    },
+    fetch: async () => {
+      resolveFetchStarted();
+      return { ok: true, json: async () => ({ updateAvailable: true, latestVersionId: '12346' }) };
+    },
+    CustomEvent: class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    },
+    setInterval: () => 1,
+    clearInterval: () => {}
+  };
+  runInNewContext(updateCheck, context);
+  context.window.RPHubUpdateCheck.useUpdateCheck();
+  assert.equal(mounted.length, 1, 'update check must register one mounted callback');
+  mounted[0]();
+  await fetchStarted;
+  await new Promise(resolve => setImmediate(resolve));
+  return dispatched.filter(event => event.type === 'rphub:update-available').length;
+}
+
+assert.equal(await countUpdateEvents(true), 0, 'native APK must suppress the web update event');
+assert.equal(await countUpdateEvents(false), 1, 'web browsers must retain the update event');
 
 
 // ---- assets/css/styles.css (.app-sidebar rendering stability) ----

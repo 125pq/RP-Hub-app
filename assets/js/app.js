@@ -385,7 +385,9 @@ const app = createApp({
                 scrollRevealObserver = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
                         if (entry.isIntersecting) {
+                            entry.target.dataset.revealed = 'true';
                             entry.target.classList.add('reveal-active');
+                            scrollRevealObserver.unobserve(entry.target);
                         }
                     });
                 }, {
@@ -400,7 +402,7 @@ const app = createApp({
             if (!scrollRevealObserver) initScrollReveal();
             if (scrollRevealObserver && newEls) {
                 newEls.forEach(el => {
-                    if (el instanceof HTMLElement && !el.classList.contains('reveal-active')) {
+                    if (el instanceof HTMLElement && el.dataset.revealed !== 'true' && !el.classList.contains('reveal-active')) {
                         scrollRevealObserver.observe(el);
                         perfObservedRevealElements?.add(el);
                     }
@@ -553,6 +555,7 @@ const app = createApp({
         const user = reactive({
             name: '请前往设置自定义你的名称',
             description: '',
+            preferences: '',
             avatar: '',
             person: 'second', //记录人称偏好：second 或 third
         });
@@ -572,6 +575,7 @@ const app = createApp({
                     const currentProfile = userProfiles.value[profileIndex];
                     if (currentProfile.name !== newVal.name ||
                         currentProfile.description !== newVal.description ||
+                        currentProfile.preferences !== newVal.preferences ||
                         currentProfile.avatar !== newVal.avatar ||
                         currentProfile.person !== newVal.person) {
                         userProfiles.value[profileIndex] = JSON.parse(JSON.stringify(newVal));
@@ -824,10 +828,10 @@ const app = createApp({
         });
         const reasoningEffortOptions = [
             { value: 'none', label: '关闭' },
-            { value: 'low', label: '低' },
-            { value: 'medium', label: '中' },
-            { value: 'high', label: '高' },
-            { value: 'max', label: '最高' },
+            { value: 'low', label: '低（low）' },
+            { value: 'medium', label: '中（medium）' },
+            { value: 'high', label: '高（high）' },
+            { value: 'max', label: '最高（max）' },
             { value: '', label: '默认' }
         ];
         const reasoningEffortSlider = computed({
@@ -1922,7 +1926,7 @@ const app = createApp({
                 const savedActiveId = await getStoredValue('active_profile_id');
 
                 if (savedProfiles && savedProfiles.length > 0) {
-                    userProfiles.value = savedProfiles;
+                    userProfiles.value = savedProfiles.map(profile => ({ ...profile, preferences: String(profile?.preferences || '') }));
                     activeProfileId.value = savedActiveId || savedProfiles[0].uuid;
                     const activeProfile = userProfiles.value.find(p => p.uuid === activeProfileId.value);
                     if (activeProfile) {
@@ -8190,7 +8194,7 @@ const app = createApp({
 
             // 2. 自动生图世界书
             const autoImageGenWIName = '自动生图';
-            const imageGenCount = Math.min(6, Math.max(1, Number(settings.imageGenCount) || 2));
+            const imageGenCount = Math.min(8, Math.max(1, Number(settings.imageGenCount) || 2));
             const autoImageGenWIContent = {
                 comment: autoImageGenWIName,
                 keys: [],
@@ -8430,55 +8434,46 @@ const app = createApp({
                 showToast('请选择需要删除的分支，主线不能删除', 'warning');
                 return;
             }
-            const childrenByParent = new Map();
-            storyBranches.value.forEach(branch => {
-                if (!childrenByParent.has(branch.parentId)) childrenByParent.set(branch.parentId, []);
-                childrenByParent.get(branch.parentId).push(branch.id);
-            });
-            const deleteIds = new Set();
-            const stack = [target.id];
-            while (stack.length > 0) {
-                const branchId = stack.pop();
-                if (deleteIds.has(branchId)) continue;
-                deleteIds.add(branchId);
-                stack.push(...(childrenByParent.get(branchId) || []));
-            }
-            const childCount = deleteIds.size - 1;
-            const childHint = childCount > 0 ? `及其 ${childCount} 条子分支` : '';
+            const parentId = storyBranches.value.some(branch => branch.id === target.parentId)
+                ? target.parentId
+                : STORY_BRANCH_MAIN_ID;
+            const parent = storyBranches.value.find(branch => branch.id === parentId);
+            const hasChildren = storyBranches.value.some(branch => branch.parentId === target.id);
             confirmAction(
-                `确定要删除“${target.name}”${childHint}吗？相关聊天、记忆和 UI 状态也会删除，此操作无法撤销。`,
+                `确定要删除“${target.name}”吗？${hasChildren ? `下级分支会顺延到“${parent?.name || '主线'}”下，` : ''}该分支的聊天、记忆和 UI 状态会被删除，此操作无法撤销。`,
                 async () => {
                     try {
-                        if (deleteIds.has(activeStoryBranchId.value)) {
-                            await switchStoryBranch(STORY_BRANCH_MAIN_ID, { closeModal: false, notify: false });
-                            if (activeStoryBranchId.value !== STORY_BRANCH_MAIN_ID) {
-                                throw new Error('无法切换到主线');
+                        if (target.id === activeStoryBranchId.value) {
+                            await switchStoryBranch(parentId, { closeModal: false, notify: false });
+                            if (activeStoryBranchId.value !== parentId) {
+                                throw new Error(`无法切换到“${parent?.name || '主线'}”`);
                             }
                         }
                         storyBranchSwitching.value = true;
                         if (!getMainDb()) await initDB();
-                        const scopeIds = [...deleteIds].map(branchId => getStoryBranchScopeId(char.uuid, branchId));
-                        await Promise.all(scopeIds.flatMap(scopeId => [
+                        const scopeId = getStoryBranchScopeId(char.uuid, target.id);
+                        await Promise.all([
                             deleteScopedStoredValue('chat', scopeId),
                             deleteScopedStoredValue('memories', scopeId),
                             deleteScopedStoredValue('classic_memories', scopeId)
-                        ]));
-                        scopeIds.forEach(scopeId => {
-                            delete memorySettings.emptyTurns?.[getMemoryEmptyTurnsKey(scopeId)];
-                        });
+                        ]);
+                        delete memorySettings.emptyTurns?.[getMemoryEmptyTurnsKey(scopeId)];
                         getUiTemplatesForRuntime(char).forEach(template => {
                             if (!template.runtimeByCharacter) return;
-                            scopeIds.forEach(scopeId => delete template.runtimeByCharacter[scopeId]);
+                            delete template.runtimeByCharacter[scopeId];
                         });
-                        storyBranches.value = storyBranches.value.filter(branch => !deleteIds.has(branch.id));
-                        selectedStoryBranchId.value = activeStoryBranchId.value;
+                        storyBranches.value.forEach(branch => {
+                            if (branch.parentId === target.id) branch.parentId = parentId;
+                        });
+                        storyBranches.value = storyBranches.value.filter(branch => branch.id !== target.id);
+                        selectedStoryBranchId.value = parentId;
                         await Promise.all([
                             saveStoryBranchesForCharacter(char),
                             saveMemorySettingsNow(),
                             setStoredValue('global_ui_templates', globalUiTemplates.value),
                             saveCharactersNow()
                         ]);
-                        showToast(`已删除“${target.name}”${childHint}`, 'success');
+                        showToast(`已删除“${target.name}”${hasChildren ? '，下级分支已顺延保留' : ''}`, 'success');
                     } catch (error) {
                         console.error('Failed to delete story branch:', error);
                         showToast(`删除分支失败：${error.message || '请稍后重试'}`, 'error');
@@ -9487,7 +9482,7 @@ const app = createApp({
             const profile = userProfiles.value.find(p => p.uuid === id);
             if (profile) {
                 activeProfileId.value = id;
-                Object.assign(user, JSON.parse(JSON.stringify(profile)));
+                Object.assign(user, { preferences: '', ...JSON.parse(JSON.stringify(profile)) });
                 saveData();
                 showToast(`已切换为人设: ${user.name}`, 'success');
             }
@@ -9498,6 +9493,7 @@ const app = createApp({
                 uuid: generateUUID(),
                 name: '新人设',
                 description: '',
+                preferences: '',
                 avatar: null,
                 person: 'second'
             };

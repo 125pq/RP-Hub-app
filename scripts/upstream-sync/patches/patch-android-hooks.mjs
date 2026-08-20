@@ -59,22 +59,13 @@ export async function applyAndroidHooks() {
     return source;
   }));
 
-  changes.push(await editText('assets/js/presence.js', category, source => {
-    if (!source.includes("const isNativeApp = window.platformAdapter?.isNative?.() === true;")) {
-      source = ensureBefore(
-        source,
-        `                    window.dispatchEvent(new CustomEvent('rphub:update-available', {`,
-        `                    // In the native APK, APK updates are handled by AppUpdateManager (which checks\n                    // the GitHub releases API and downloads/installs the APK). Refreshing the WebView\n                    // cannot replace the installed APK, so the web "refresh to update" prompt would be\n                    // misleading. The heartbeat still runs (presence stays online) — only the web\n                    // refresh prompt is suppressed for native builds.\n                    const isNativeApp = window.platformAdapter?.isNative?.() === true;\n                    if (!isNativeApp) {\n`,
-        'presence native update guard'
-      );
-      source = ensureAfter(
-        source,
-        `                        detail: { versionId: latestVersionId }\n                    }));`,
-        `\n                    }`,
-        'presence native update guard close'
-      );
+  changes.push(await editText('assets/js/update-check.js', category, source => {
+    const dispatch = `                    window.dispatchEvent(new CustomEvent('rphub:update-available', {\n                        detail: { versionId: latestVersionId }\n                    }));`;
+    const guardedDispatch = `                    // The native APK checks GitHub Releases through AppUpdateManager. A\n                    // WebView reload cannot update the installed APK, so keep this web-only prompt\n                    // out of native builds while preserving browser update notifications.\n                    const isNativeApp = window.platformAdapter?.isNative?.() === true;\n                    if (!isNativeApp) {\n                        window.dispatchEvent(new CustomEvent('rphub:update-available', {\n                            detail: { versionId: latestVersionId }\n                        }));\n                    }`;
+    if (!source.includes(guardedDispatch)) {
+      source = replaceOnce(source, dispatch, guardedDispatch, 'update-check native update guard');
     }
-    requireContains(source, 'window.platformAdapter?.isNative?.() === true', 'presence native guard');
+    requireContains(source, guardedDispatch, 'update-check native guard');
     return source;
   }));
 

@@ -24,7 +24,7 @@ const EOL_NOISE_ALLOWANCE = {
   // P0-1 follow-up: README.md still carries legacy EOL churn.
   'README.md': 58,
   // P0-1 follow-up: novel/index.html still carries legacy EOL churn.
-  'novel/index.html': 26,
+  'novel/index.html': 24,
   // P0-1 follow-up: character/index.html still carries legacy EOL churn.
   'character/index.html': 14,
   // P0-1 follow-up: runtime-services.js still carries legacy EOL churn.
@@ -44,6 +44,16 @@ function probeGit(args) {
 }
 
 function resolveBaseline() {
+  // During a real --no-commit upstream merge, HEAD is still the local parent.
+  // Compare against the pending upstream parent so its own whitespace changes
+  // are not mistaken for local EOL churn before the merge commit is created.
+  try {
+    const oid = probeGit(['rev-parse', '--verify', 'MERGE_HEAD^{commit}']);
+    if (oid) return { ref: 'MERGE_HEAD', oid };
+  } catch {
+    // Not an in-progress merge; resolve the normal upstream baseline below.
+  }
+
   for (const candidate of ['upstream/main', 'upstream/master', 'upstream/releases/latest']) {
     try {
       const oid = probeGit(['rev-parse', '--verify', `${candidate}^{commit}`]);
