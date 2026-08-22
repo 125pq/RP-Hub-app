@@ -4345,7 +4345,8 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
-        const appendNextResponsePrompt = (messageList, { cotEnabled = false, useDeepSeekCot = false, writingStylePrompt = '' } = {}) => {
+        const usesThinkingCotTag = (model) => /(?:deepseek|glm)/i.test(String(model || ''));
+        const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
                 message?.role === 'user'
                 && Array.isArray(message._sourceIndexes)
@@ -4357,7 +4358,7 @@ const app = createApp({
                 autoImageGenEnabled: isAutoImageGenEnabled.value,
                 cotEnabled,
                 imageGenCount: settings.imageGenCount,
-                useDeepSeekCot,
+                useThinkingTag,
                 writingStylePrompt,
                 uiTemplateEnabled: settings.uiTemplateEnabled
                     && settings.uiTemplateMainModelAnalysis
@@ -4718,7 +4719,7 @@ const app = createApp({
             appendPendingUiTemplateCorrection(messages);
             appendNextResponsePrompt(messages, {
                 cotEnabled: cotPresets.length > 0,
-                useDeepSeekCot: /deepseek/i.test(requestModel),
+                useThinkingTag: usesThinkingCotTag(requestModel),
                 writingStylePrompt: writingStylePresets
                     .map(preset => preset.content
                         .replace(/^\s*<writing_style>\s*/i, '')
@@ -9149,7 +9150,7 @@ const app = createApp({
                     uiTemplateAnalysisEnabled: settings.uiTemplateEnabled
                         && settings.uiTemplateMainModelAnalysis
                         && activeUiTemplates.value.length > 0,
-                    useDeepSeekOpening: /deepseek/i.test(String(settings.model || ''))
+                    useThinkingOpening: usesThinkingCotTag(settings.model)
                 });
                 const existingCotPreset = presets.value.find(p => p.name === cotPresetName);
                 if (!existingCotPreset) {
