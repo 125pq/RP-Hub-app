@@ -69,13 +69,16 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
     const buildCharacterPrompt = ({ name, personality }) =>
         `Name: ${name}\nPersonality: ${personality}`;
 
-    const buildNextResponsePrompt = ({ cotEnabled = false, uiTemplateEnabled = false, writingStylePrompt = '' } = {}) => [
+    const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, uiTemplateEnabled = false, useDeepSeekCot = false, writingStylePrompt = '' } = {}) => [
         '<next_response>',
         '完整承接最新用户输入中已经发生的言行，结合当前场景继续剧情。',
         String(writingStylePrompt || '').trim(),
         '按系统中当前启用的人称、时间戳、NSFW及输出格式执行。',
         cotEnabled
-            ? '先完成规定的COT，闭合</cot> 标签后再直接输出本轮正文；不要复述规则。'
+            ? `先完成规定的COT，闭合${useDeepSeekCot ? '</thinking>' : '</cot>'} 标签后再直接输出本轮正文；不要复述规则。`
+            : '',
+        autoImageGenEnabled
+            ? `当前已开启自动生图，请按系统中的自动生图规则生成并插入${Math.min(8, Math.max(2, Number(imageGenCount) || 2))}张图片。`
             : '',
         uiTemplateEnabled
             ? '正文结束后，按系统提供的当前变量JSON检查并输出本轮需要更新的变量。'
@@ -566,6 +569,9 @@ image###生成的提示词###
         const openingInstruction = useDeepSeekOpening
             ? '在<thinking>标签中输出完整的本轮分析。只完成必要判断，不在其中试写或复述正文，并严格按以下顺序进行：'
             : '正文前先输出由 <cot> 和 </cot> 完整包裹的本轮分析。只完成必要判断，不在其中试写或复述正文，并按以下顺序进行：';
+        const closingInstruction = useDeepSeekOpening
+            ? ''
+            : '\n- 必须闭合 </cot> 标签后再输出正文，禁止在未闭合标签前输出正文。';
 
         return `<cot_protocol>
 ${openingInstruction}
@@ -585,8 +591,7 @@ ${uiTemplateAnalysisSection}
 
 [最终检查]
 确认人物没有失真或越过认知边界，剧情因果成立。先判断是否应用<nsfw_rules>：当前剧情已经进入或正在明确推进NSFW内容时应用；否则忽略。随后按<writing_style>做最终检查。
-
-- 必须闭合 </cot> 标签后再输出正文，禁止在未闭合标签前输出正文。
+${closingInstruction}
 </cot_protocol>`.replace(/\n{3,}/g, '\n\n');
     };
 
