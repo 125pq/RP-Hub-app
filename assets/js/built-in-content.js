@@ -604,10 +604,10 @@ window.RPHubLatestUpdate = Object.freeze({
     content: `
 ### RP-Hub 1.8.7
 
-- **预设适配DeepSeek V4 Pro正式版，支持思维链覆盖**
+- 预设适配DeepSeek V4 Pro正式版，支持思维链覆盖
 - 优化了部分预设的内容
 - 优化了生图世界书的内容
-- **优化了用量统计界面，新增耗时与速度显示**
+- 优化了用量统计界面，新增耗时与速度显示
 
 #### 更新时间：08/22/19:09
     `
