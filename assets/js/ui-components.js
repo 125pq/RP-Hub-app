@@ -1036,7 +1036,7 @@
                             </div>
                             <ul class="list-disc list-outside ml-9 space-y-1.5 text-sm text-yellow-700">
                                 <li>您可以在 “世界书 -> 自动生图” 手动管理此功能。</li>
-                                <li>前往 “设置” 可以切换生图风格与比例。</li>
+                                <li>前往 “设置” 可以切换生图版本、风格与比例。</li>
                             </ul>
                         </div>
                     </div>

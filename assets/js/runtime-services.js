@@ -250,10 +250,11 @@
         const rawText = await response.text();
         try {
             const data = parsePayload(rawText, response.status);
-            const message = data.choices?.[0]?.message || {};
+            const choice = data.choices?.[0] || {};
+            const message = choice.message || {};
             return {
                 content: message.content || '',
-                reasoning: extractNativeReasoning(message) || extractNativeReasoning(data.choices?.[0]),
+                reasoning: extractNativeReasoning(message) || extractNativeReasoning(choice),
                 usage: getApiUsagePayload(data)
             };
         } catch (error) {

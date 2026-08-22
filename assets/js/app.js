@@ -201,6 +201,7 @@ const app = createApp({
             fontFamilies: fontFamilyOptions,
             fontSizes: fontSizeOptions,
             imageCounts: imageGenCountOptions,
+            imageModels: imageModelOptions,
             imageSizes: imageSizeOptions,
             imageStyles: imageStyleOptions,
             popularModelFamilies,
@@ -616,6 +617,7 @@ const app = createApp({
             imageGenKey: '',
             imageStyle: 'vertical',
             customImageArtists: '',
+            imageModel: 'nai-diffusion-4-5-full',
             imageSize: '竖图',
             imageGenCount: 2,
             qualityModel: DEFAULT_API_CONFIG.qualityModel,
@@ -623,6 +625,12 @@ const app = createApp({
             fastModel: DEFAULT_API_CONFIG.fastModel,
             visionModel: ''
         });
+        const v5UnsupportedImageStyles = new Set(['r18', 'lolita25d', 'anime']);
+        const availableImageStyleOptions = computed(() => settings.imageModel === 'nai-diffusion-5-full'
+            ? imageStyleOptions.filter(option => !v5UnsupportedImageStyles.has(option.value))
+            : imageStyleOptions);
+        const getImageModelName = (value) => (imageModelOptions.find(option => option.value === value)?.label
+            || imageModelOptions[0].label).replace(/（[^）]*）$/, '');
         const normalizeFontFamily = (value) => ['modern', 'serif', 'system'].includes(value) ? value : 'modern';
         const normalizeFontSize = (value) => {
             const size = Number(value);
@@ -804,7 +812,7 @@ const app = createApp({
         }, { deep: true });
 
         // Watch image gen and model settings for sync
-        watch(() => [settings.imageGenKey, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
+        watch(() => [settings.imageGenKey, settings.imageModel, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
             syncSettingsToGenerator();
         });
 
@@ -1875,6 +1883,13 @@ const app = createApp({
                 settings.fontFamily = normalizeFontFamily(settings.fontFamily);
                 settings.fontSize = normalizeFontSize(settings.fontSize);
                 if (settings.reasoningEffort === 'xhigh') settings.reasoningEffort = 'max';
+                if (!imageModelOptions.some(option => option.value === settings.imageModel)) {
+                    settings.imageModel = imageModelOptions[0].value;
+                }
+                if (!imageSizeOptions.some(option => option.value === settings.imageSize)) {
+                    const legacySize = String(settings.imageSize || '');
+                    settings.imageSize = legacySize.includes('横') ? '横图' : legacySize.includes('方') ? '方图' : '竖图';
+                }
                 settings.fontFamilyVersion = 4;
                 applyFontFamily(settings.fontFamily);
                 delete settings.renderLayerLimit;
@@ -2287,14 +2302,16 @@ const app = createApp({
             const targetArtists = cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
             const styleName = imageStyleOptions.find(option => option.value === settings.imageStyle)?.label
                 || imageStyleOptions[0].label;
+            const modelName = getImageModelName(settings.imageModel);
 
-            // 动态替换 URL 中的 artist 和 size 参数
+            // 动态替换 URL 中的 model、artist 和 size 参数
             const encodedTargetArtists = encodeURIComponent(targetArtists);
             const oldReplacement = regex.replacement;
             let newReplacement = oldReplacement.replace(/artist=[\s\S]*?(&size=)/, 'artist=' + encodedTargetArtists + '$1');
             if (newReplacement === oldReplacement) {
                 newReplacement = oldReplacement.replace(/artist=[^&]+/, 'artist=' + encodedTargetArtists);
             }
+            newReplacement = newReplacement.replace(/model=[^&]+/, 'model=' + settings.imageModel);
             newReplacement = newReplacement.replace(/size=[^&]+/, 'size=' + settings.imageSize);
             regex.replacement = newReplacement;
 
@@ -2303,6 +2320,10 @@ const app = createApp({
             const oldArtist = oldReplacement.match(/artist=([\s\S]*?)&size=/)?.[1] || oldReplacement.match(/artist=([^&]+)/)?.[1];
             if (oldArtist !== encodedTargetArtists) {
                 messages.push(styleName);
+            }
+            const oldModel = oldReplacement.match(/model=([^&]+)/)?.[1];
+            if (oldModel !== settings.imageModel) {
+                messages.push(modelName);
             }
             // 检查 Size 变化
             const oldSize = oldReplacement.match(/size=([^&]+)/)?.[1];
@@ -2344,6 +2365,16 @@ const app = createApp({
                 updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
             }
         });
+
+        watch(() => settings.imageModel, (imageModel) => {
+            if (imageModel === 'nai-diffusion-5-full' && v5UnsupportedImageStyles.has(settings.imageStyle)) {
+                settings.imageStyle = 'vertical';
+            }
+            const messages = updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
+            if (isAutoImageGenEnabled.value && messages && messages.length > 0) {
+                showToast(`生图版本已切换：${getImageModelName(imageModel)}`, 'success');
+            }
+        }, { flush: 'sync' });
 
         watch(() => settings.imageSize, () => {
             const messages = updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
@@ -3908,7 +3939,6 @@ const app = createApp({
                     showToast('消息已保存', 'success');
                     return;
                 }
-
                 abortConversationBackgroundWork();
                 const snapshot = await ensureConversationMessageIds();
                 const affectedTurn = snapshot.turns.find(turnInfo =>
@@ -8169,7 +8199,7 @@ const app = createApp({
             const targetArtists = cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
 
             const encodedTargetArtists = encodeURIComponent(targetArtists);
-            const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=nai-diffusion-4-5-full&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
+            const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
                 regex: '/image###([\\s\\S]*?)###/g',
@@ -9662,7 +9692,7 @@ const app = createApp({
             updateModalRef, latestUpdateConfig,
             showConfirmModal, confirmMessage, modelMode, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
-            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
+            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength, summaryCompressionRate,
