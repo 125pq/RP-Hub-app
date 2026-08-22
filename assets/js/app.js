@@ -1372,6 +1372,8 @@ const app = createApp({
                 if (!getMainDb()) await initDB();
             },
             generateUUID,
+            getApiKey: () => settings.apiKey,
+            getApiUrl: () => settings.apiUrl,
             normalizeApiUsage,
             saveStoredValue: setStoredValue,
             toast: (...args) => showToast(...args)

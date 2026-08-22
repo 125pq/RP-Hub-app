@@ -72,11 +72,13 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
     const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, uiTemplateEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => [
         '<next_response>',
         '完整承接最新用户输入中已经发生的言行，结合当前场景继续剧情。',
+        cotEnabled
+            ? useThinkingTag
+                ? '按规则输出<thinking> 后再直接输出本轮正文；不要复述规则。'
+                : '先完成规定的COT，闭合</cot> 标签后再直接输出本轮正文；不要复述规则。'
+            : '',
         String(writingStylePrompt || '').trim(),
         '按系统中当前启用的人称、时间戳、NSFW及输出格式执行。',
-        cotEnabled
-            ? `先完成规定的COT，闭合${useThinkingTag ? '</thinking>' : '</cot>'} 标签后再直接输出本轮正文；不要复述规则。`
-            : '',
         autoImageGenEnabled
             ? `当前已开启自动生图，请按系统中的自动生图规则生成并插入${Math.min(8, Math.max(2, Number(imageGenCount) || 2))}张图片。`
             : '',
@@ -211,8 +213,9 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '    这些分片已按原对话时间顺序排列；它们不一定是今天或刚才发生的内容，请不要误当作当前现场，只把它们作为过往经历和关系背景参考。'
     ]);
 
-    const buildAutoImageGenPrompt = (imageGenCount) => `<auto_image_gen>\n用户已开启自动生图。每次回复都必须将${imageGenCount}张图片作为正文插图，按剧情先后分散插入各自对应段落之后，禁止连续输出多个图片或集中放在正文开头、结尾及同一位置。格式为：image###生成的提示词###，不得只输出文字正文。
-围绕当前剧情中的具体场景和人物生成${imageGenCount}张画面，每张图选择明确的剧情瞬间、视觉焦点和镜头。所有Tag使用逗号分隔，提示词必须详尽、细致且可直接绘制，不得使用笼统省略的Tag或脱离场景拼凑通用画面。
+    const buildAutoImageGenPrompt = (imageGenCount) => `<auto_image_gen>\n用户已开启自动生图。每次回复都必须将${imageGenCount}张图片作为正文插图，按剧情先后分散插入各自对应段落之后，禁止连续输出多个图片或集中放在正文开头、结尾及同一位置。格式为：image###英文Tag###，不得只输出文字正文。
+围绕当前剧情中的具体场景和人物生成${imageGenCount}张画面，每张图选择明确的剧情瞬间、视觉焦点和镜头。所有Tag必须使用英文并以英文逗号分隔，禁止中文Tag；提示词必须详尽、细致且可直接绘制，不得使用笼统省略的Tag或脱离场景拼凑通用画面。
+强制按“对应正文段落 → 该段图片 → 后续正文段落”的顺序穿插。第一张图片前、任意两张图片之间及最后一张图片后都必须有非空正文；严禁相邻输出图片、写完正文后再统一补图，或让图片成为整次回复的结尾。输出前必须检查并重排不符合此顺序的图片。
 注意：如为nsfw场景，生成的提示词必须带上 nsfw 标签；如果是同人/已有作品角色，角色名仍必须放在最前面，nsfw 紧跟其后。
 
 ### 提示词生成指导
@@ -264,7 +267,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
 # 角色一致性：稳定身份特征不得改变；仅因构图和遮挡临时移除不可见Tag。同人或固定角色使用准确且稳定的专属特征组合，对常驻特征【如：特定发型、异色瞳、专属装饰物】使用最高权重{{{Tag}}}。
 
 <生成格式>
-image###生成的提示词###
+image###英文Tag###
 </生成格式>
 </Tag_智能调整>
 
@@ -573,14 +576,14 @@ image###生成的提示词###
             ? ''
             : '\n- 必须闭合 </cot> 标签后再输出正文，禁止在未闭合标签前输出正文。';
 
-        return `<cot_protocol>
+        return `<thinking_protocol>
 ${openingInstruction}
 ${memoryFragmentSection}
 [情景意图分析]
 整理时间线、历史片段，按正确顺序分析过往事件、关系延续、未解情绪，以及 {{user}} 最新输入里的潜台词、情绪和真实需求。完整承接 {{user}} 已明确给出的言行，不得擅自解释真实意图。
 ${uiTemplateAnalysisSection}
 
-[角色与世界设定分析]
+[设定分析]
 结合角色设定、世界观和当前处境，分析角色此刻最合理的动机、边界、反应方式，以及环境会给行动带来的具体影响。
 
 [信息边界]
@@ -592,7 +595,7 @@ ${uiTemplateAnalysisSection}
 [最终检查]
 确认人物没有失真或越过认知边界，剧情因果成立。先判断是否应用<nsfw_rules>：当前剧情已经进入或正在明确推进NSFW内容时应用；否则忽略。随后按<writing_style>做最终检查。
 ${closingInstruction}
-</cot_protocol>`.replace(/\n{3,}/g, '\n\n');
+</thinking_protocol>`.replace(/\n{3,}/g, '\n\n');
     };
 
     window.RPHubBuiltinPresets = Object.freeze({
@@ -604,15 +607,17 @@ ${closingInstruction}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10195,
+    id: 10196,
     title: '网站公告',
     content: `
 ### RP-Hub 1.8.7
 
-- 预设适配DeepSeek V4 Pro正式版，支持思维链覆盖
+- 预设适配DeepSeek/GLM，支持思维链覆盖
+- 用量统计页面新增单次消耗额度显示
+- 用量统计界面新增耗时与速度显示
+- 支持兼容无尾部###标签的生图识别
 - 优化了部分预设的内容
 - 优化了生图世界书的内容
-- 优化了用量统计界面，新增耗时与速度显示
 
 #### 更新时间：08/22/19:09
     `

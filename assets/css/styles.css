@@ -1520,7 +1520,7 @@
             gap: 0.75rem;
             padding: 1.5rem;
             color: #fff;
-            background: rgba(15, 23, 42, 0.32);
+            background: rgba(15, 23, 42, 0.18);
             backdrop-filter: blur(4px);
             pointer-events: none;
         }
