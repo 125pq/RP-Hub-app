@@ -2098,7 +2098,7 @@ const app = createApp({
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
             const mainText = parseCot(message?.content || '').main;
-            const imageMatches = [...mainText.matchAll(/image###([\s\S]*?)###/g)];
+            const imageMatches = [...mainText.matchAll(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/g)];
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
@@ -3156,7 +3156,7 @@ const app = createApp({
             if (isAutoImageGenEnabled.value) return text; // 生图开启时保留
             return String(text)
                 .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, '')
-                .replace(/image###([\s\S]*?)###/gi, '')
+                .replace(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/gi, '')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -7966,7 +7966,7 @@ const app = createApp({
             const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
-                regex: '/image###([\\s\\S]*?)###/g',
+                regex: '/image###([^\\r\\n]*?)(?:###|(?=\\r?\\n)|$)/g',
             replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
