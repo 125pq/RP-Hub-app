@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.8.7",
+  "versionCode": 1080700,
+  "tag": "v1.8.7-android",
+  "notes": "## 上游 RP-Hub 1.8.7 更新说明\n\n- 预设适配DeepSeek正式版，支持思维链覆盖\r\n- 优化了部分预设的内容\r\n- 优化了生图世界书的内容\r\n- 优化了用量统计界面，新增耗时与速度显示\n\n## APK 校验\n\nAPK SHA-256：`bb9859af71359ab936ad0b3ec4f048872ea5f3e558206b5a3214875bfcef4986`\n",
+  "apk": {
+    "name": "RP-Hub-1.8.7-release.apk",
+    "sources": [
+      [
+        "https://github.com/125pq/RP-Hub-app/releases/download/v1.8.7-android/RP-Hub-1.8.7-release.apk"
+      ],
+      [
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.8.7-release.apk.part-000",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.8.7-release.apk.part-001",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.8.7-release.apk.part-002",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.8.7-release.apk.part-003",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.8.7-release.apk.part-004"
+      ]
+    ],
+    "size": 17431475,
+    "sha256": "bb9859af71359ab936ad0b3ec4f048872ea5f3e558206b5a3214875bfcef4986"
+  }
+}
