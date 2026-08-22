@@ -1483,9 +1483,13 @@
                             <!-- Main API Inputs -->
                             <div class="grid grid-cols-1 gap-5">
                                 <div class="group">
-                                    <label
-                                        class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">API
-                                        提供商</label>
+                                    <div class="mb-2 ml-1 flex items-center justify-between gap-3">
+                                        <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">API 提供商</label>
+                                        <a href="https://cdn.sta1n.cn/keys" target="_blank" rel="noopener noreferrer"
+                                            class="text-teal-600 hover:text-teal-700 hover:underline cursor-pointer transition-colors text-xs normal-case font-medium">
+                                            获取API
+                                        </a>
+                                    </div>
                                     <div class="relative mb-2 api-provider-selector-container">
                                         <button type="button" @click="showApiProviderSelector = !showApiProviderSelector"
                                             class="w-full h-12 bg-gray-50/60 border-2 border-gray-100 rounded-xl px-3 py-0 flex items-center justify-between text-left hover:bg-white hover:border-teal-300 hover:shadow-sm transition-all active:scale-[0.99]">
@@ -1660,15 +1664,22 @@
 
                                 <!-- Image Generation Settings -->
                                 <div class="pt-6 border-t border-gray-100 mt-6">
-                                    <h4 class="settings-section-heading">
-                                        <svg class="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor"
-                                            viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4">
-                                            </path>
-                                        </svg>
-                                        生图设置
-                                    </h4>
+                                    <div class="mb-4 flex items-center justify-between gap-3">
+                                        <h4 class="flex items-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                            <svg class="w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor"
+                                                viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4">
+                                                </path>
+                                            </svg>
+                                            生图设置
+                                        </h4>
+                                        <a href="https://www.qianxun1688.com/links/D07F549B" target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="text-teal-600 hover:text-teal-700 hover:underline cursor-pointer transition-colors text-xs normal-case font-medium">
+                                            获取生图密钥
+                                        </a>
+                                    </div>
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <!-- Image Key -->
                                         <div

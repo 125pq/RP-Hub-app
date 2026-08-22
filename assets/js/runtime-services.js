@@ -345,7 +345,6 @@
         confirm,
         ensureStorage,
         generateUUID,
-        getCharacterName,
         normalizeApiUsage,
         saveStoredValue,
         toast
@@ -435,8 +434,8 @@
                 timestamp: Date.now(),
                 type: meta.type || 'chat',
                 model: String(meta.model || ''),
-                detail: String(meta.detail || ''),
-                characterName: getCharacterName(),
+                durationMs: Number.isFinite(meta.durationMs) ? Math.max(0, meta.durationMs) : null,
+                outputCharacters: Number.isFinite(meta.outputCharacters) ? Math.max(0, meta.outputCharacters) : null,
                 ...normalizeApiUsage(usage)
             });
             saveTokenUsageHistoryNow().catch(error => console.error('Token usage history save failed:', error));

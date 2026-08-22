@@ -1906,7 +1906,19 @@
             'update:page', 'update:help-topic'
         ],
         setup() {
+            const formatDuration = (value) => {
+                if (!Number.isFinite(value)) return '--';
+                if (value < 1000) return `${Math.round(value)}ms`;
+                return `${Number((value / 1000).toFixed(1))}s`;
+            };
+            const formatOutputSpeed = (record) => {
+                if (!Number.isFinite(record?.durationMs) || record.durationMs <= 0
+                    || !Number.isFinite(record?.outputCharacters) || record.outputCharacters <= 0) return '--';
+                return `${Math.round(record.outputCharacters * 1000 / record.durationMs)}字/s`;
+            };
             return {
+                formatDuration,
+                formatOutputSpeed,
                 filterOptions: Object.freeze([
                     { value: 'all', label: '全部', position: '' },
                     { value: 'chat', label: '主对话', position: 'is-position-2' },
@@ -1966,14 +1978,14 @@
                     </div>
                 </div>
 
-                <div class="relative mb-6 flex items-center justify-between gap-4 rounded-2xl border border-primary-100 bg-white px-4 py-3.5 shadow-sm md:px-5">
-                    <div class="flex min-w-0 items-center text-base font-semibold text-gray-700"><span>总用量</span>
+                <div class="relative mb-6 flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                    <div class="flex min-w-0 items-center text-sm font-semibold text-gray-500"><span>总用量</span>
                         <settings-help topic="totalTokens" :open-topic="helpTopic" label="查看总用量说明" icon-class=""
                             popover-class="token-usage-help-popover" @toggle="$emit('update:help-topic', $event)">
                             汇总当前类型和时间筛选范围内，输入 Token（包括缓存读取）与输出 Token 的总和。
                         </settings-help>
                     </div>
-                    <span class="flex-none whitespace-nowrap text-xl font-semibold tabular-nums text-gray-800" style="font-family: 'Segoe UI Variable', 'Segoe UI', Arial, sans-serif">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</span>
+                    <div class="flex-shrink-0 whitespace-nowrap text-xl font-semibold tracking-tight tabular-nums text-gray-900">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</div>
                 </div>
 
                 <div class="flex items-center justify-between mb-3">
@@ -1983,37 +1995,39 @@
                 <div v-if="records.length > 0" class="space-y-3">
                     <article v-for="record in records" :key="record.id"
                         class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition-colors hover:border-gray-300">
-                        <div class="mb-3 flex items-start gap-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex min-w-0 items-center gap-2">
-                                    <span class="flex flex-shrink-0 items-center gap-1.5 text-sm font-semibold text-gray-600">
-                                        <span class="h-1.5 w-1.5 rounded-full bg-primary-400"></span>{{ getTypeLabel(record.type) }}
-                                    </span>
-                                    <span class="min-w-0 flex-1 truncate text-sm text-gray-600" :title="record.model">{{ record.model || '未知模型' }}</span>
-                                </div>
-                                <div v-if="record.characterName || record.detail" class="mt-1.5 min-w-0 truncate text-xs text-gray-400">
-                                    {{ [record.characterName, record.detail].filter(Boolean).join(' · ') }}
-                                </div>
+                        <div class="mb-3 min-w-0">
+                            <div class="flex min-w-0 items-center justify-between gap-3">
+                                <span class="min-w-0 flex-1 truncate text-sm text-gray-600" :title="record.model">{{ record.model || '未知模型' }}</span>
+                                <span class="flex-shrink-0 text-xs font-semibold text-gray-500">{{ getTypeLabel(record.type) }}</span>
                             </div>
-                            <time class="flex-shrink-0 text-xs text-gray-400">{{ formatTime(record.timestamp) }}</time>
+                            <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3">
+                                <div class="flex min-w-0 items-center gap-3 text-xs text-gray-400">
+                                    <span>耗时 {{ formatDuration(record.durationMs) }}</span>
+                                    <span>速度 {{ formatOutputSpeed(record) }}</span>
+                                </div>
+                                <time class="flex-shrink-0 text-xs text-gray-400">{{ formatTime(record.timestamp) }}</time>
+                            </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div class="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-3">
-                                <div class="flex items-center gap-1.5 text-xs font-medium text-gray-500"><span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>输入</div>
-                                <div class="mt-1.5 flex items-end gap-1 font-mono leading-none">
-                                    <span class="text-base font-bold text-gray-800">{{ formatCount(getUncachedInput(record)) }}</span>
+                        <div class="space-y-1.5 rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5">
+                            <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>输入
+                                </span>
+                                <span class="flex min-w-0 items-center gap-1 font-mono">
+                                    <span class="text-sm font-bold text-gray-800">{{ formatCount(getUncachedInput(record)) }}</span>
                                     <span v-if="Number(record.cacheReadTokens) > 0"
-                                        class="inline-flex items-center gap-0.5 text-sm font-normal text-gray-500/80">
-                                        <svg class="h-3.5 w-3.5 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
+                                        class="inline-flex min-w-0 items-center gap-0.5 text-sm font-bold text-gray-500/80"
+                                        title="缓存读取">
+                                        <svg class="h-4 w-4 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
                                         {{ formatCount(record.cacheReadTokens) }}
                                     </span>
-                                </div>
+                                </span>
                             </div>
-                            <div class="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-3">
-                                <div class="flex items-center gap-1.5 text-xs font-medium text-gray-500"><span class="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>输出</div>
-                                <div class="mt-1.5 flex items-end gap-1 font-mono leading-none">
-                                    <span class="text-base font-bold text-gray-800">{{ formatCount(record.outputTokens) }}</span>
-                                </div>
+                            <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>输出
+                                </span>
+                                <span class="font-mono text-sm font-bold text-gray-800">{{ formatCount(record.outputTokens) }}</span>
                             </div>
                         </div>
                     </article>

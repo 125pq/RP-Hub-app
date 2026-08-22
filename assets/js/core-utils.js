@@ -1007,7 +1007,7 @@ window.RPHubUtils = {
                 { value: '横图', label: '横图' },
                 { value: '方图', label: '方图' }
             ]),
-            imageCounts: Object.freeze([1, 2, 3, 4, 5, 6, 7, 8].map(count => ({
+            imageCounts: Object.freeze([2, 3, 4, 5, 6, 7, 8].map(count => ({
                 value: count,
                 label: `${count} 张`
             }))),
