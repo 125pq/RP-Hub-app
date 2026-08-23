@@ -762,7 +762,8 @@
                             </div>
                         </div>
                         <div v-if="settings.showLatestUsageBar && latestMainTokenUsage"
-                            class="mx-1 mb-2 grid grid-cols-3 divide-x divide-gray-200/80 overflow-hidden rounded-xl bg-gradient-to-r from-gray-50/90 via-white/90 to-gray-50/90 py-1.5 text-xs text-gray-500 shadow-inner md:text-[13px]">
+                            class="mx-1 mb-2 grid overflow-hidden rounded-xl bg-gradient-to-r from-gray-50/90 via-white/90 to-gray-50/90 py-1.5 text-xs text-gray-500 shadow-inner md:text-[13px]"
+                            style="grid-template-columns: 4fr 3fr 4fr;">
                             <span class="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-1" title="输入 Token">
                                 <span class="h-1.5 w-1.5 flex-none rounded-full bg-primary-500"></span>
                                 <span class="inline-flex min-w-0 items-center gap-1 font-mono font-semibold tabular-nums">
