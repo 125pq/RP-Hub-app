@@ -838,7 +838,7 @@
         try {
             const saved = JSON.parse(localStorage.getItem(CONTROL_PREFS_KEY) || '{}');
             if (saved && typeof saved === 'object') controlPrefs = {
-                themeMode: ['light', 'dark', 'system'].includes(saved.themeMode) ? saved.themeMode : 'system',
+                themeMode: 'system',
                 mirrorSquare: saved.mirrorSquare !== false
             };
         } catch (_) { /* use defaults */ }
@@ -852,7 +852,7 @@
     function applyThemePreference() {
         const prefs = getControlPrefs();
         const systemDark = !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-        const dark = prefs.themeMode === 'dark' || (prefs.themeMode === 'system' && systemDark);
+        const dark = systemDark;
         const root = document.documentElement;
         root.dataset.rphubThemeMode = prefs.themeMode;
         root.dataset.rphubTheme = dark ? 'dark' : 'light';
@@ -896,7 +896,7 @@
             .rphub-control-section:first-of-type { border-top:0; padding-top:0; }
             .rphub-control-section__title { margin:0 0 3px; font-size:13px; font-weight:800; }
             .rphub-control-section__hint { margin:0 0 10px; color:#64748b; font-size:11px; line-height:1.45; }
-            .rphub-control-mode-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+            .rphub-control-mode-grid { display:grid; grid-template-columns:1fr; gap:7px; }
             .rphub-control-mode, .rphub-backup-panel__btn { min-height:40px; padding:9px 8px; border:1px solid #dbe3ee; border-radius:10px; background:#fff; color:#475569; font-size:12px; font-weight:700; cursor:pointer; }
             .rphub-control-mode.is-active { border-color:#4f46e5; background:#eef2ff; color:#4338ca; }
             .rphub-control-row { display:flex; align-items:center; gap:10px; }
@@ -911,7 +911,7 @@
             .rphub-backup-panel__btn--primary { background:#4f46e5; border-color:#4f46e5; color:#fff; }
             .rphub-backup-status { font-size:11px; color:#475569; margin:10px 0 0; min-height:16px; line-height:1.45; }
             .rphub-backup-status--error { color: #dc2626; }
-            @media (max-width:480px) { .rphub-backup-panel { position:fixed; left:12px; right:12px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); width:auto; max-height:calc(100vh - 24px); } .rphub-control-mode-grid,.rphub-backup-panel__actions { grid-template-columns:1fr; } }
+            @media (max-width:480px) { .rphub-backup-panel { position:fixed; left:12px; right:12px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); width:auto; max-height:calc(100vh - 24px); } .rphub-backup-panel__actions { grid-template-columns:1fr; } }
         `;
         document.head.appendChild(style);
     }
@@ -962,7 +962,7 @@
             <button type="button" class="rphub-backup-button" title="打开本地控制中心">控制中心</button>
             <div class="rphub-backup-panel" hidden>
                 <div class="rphub-control-head"><div><p class="rphub-control-kicker">RP-HUB LOCAL</p><h2 class="rphub-control-title">本地控制中心</h2></div><button type="button" class="rphub-control-close" aria-label="关闭">×</button></div>
-                <section class="rphub-control-section"><h3 class="rphub-control-section__title">夜间模式</h3><p class="rphub-control-section__hint">只影响 RP-Hub 页面显示。</p><div class="rphub-control-mode-grid"><button type="button" class="rphub-control-mode" data-theme-mode="light">明亮</button><button type="button" class="rphub-control-mode" data-theme-mode="dark">夜间</button><button type="button" class="rphub-control-mode" data-theme-mode="system">跟随系统</button></div></section>
+                <section class="rphub-control-section"><h3 class="rphub-control-section__title">夜间模式</h3><p class="rphub-control-section__hint">跟随系统的深浅色设置。</p><div class="rphub-control-mode-grid"><button type="button" class="rphub-control-mode is-active" data-theme-mode="system">跟随系统</button></div></section>
                 <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">万相广场镜像</span><span class="rphub-control-row__hint" data-role="mirror-value"></span></div><button type="button" class="rphub-control-switch" data-action="toggle-mirror" role="switch" aria-checked="true" aria-label="切换万相广场镜像"></button></div></section>
                 <section class="rphub-control-section"><h3 class="rphub-control-section__title">整体备份</h3><p class="rphub-control-section__hint">导入前会先导出当前数据的恢复备份。</p><div class="rphub-backup-panel__actions">
                     <button type="button" class="rphub-backup-panel__btn rphub-backup-panel__btn--primary" data-action="export">导出整体备份</button><button type="button" class="rphub-backup-panel__btn" data-action="import">导入整体备份</button>
@@ -982,12 +982,6 @@
 
         anchorEl.querySelector('.rphub-backup-button').addEventListener('click', openPanel);
         anchorEl.querySelector('.rphub-control-close').addEventListener('click', closePanel);
-        anchorEl.querySelectorAll('[data-theme-mode]').forEach((button) => button.addEventListener('click', () => {
-            getControlPrefs().themeMode = button.dataset.themeMode;
-            saveControlPrefs();
-            applyThemePreference();
-            renderControlState();
-        }));
         anchorEl.querySelector('[data-action="toggle-mirror"]').addEventListener('click', () => {
             getControlPrefs().mirrorSquare = !getControlPrefs().mirrorSquare;
             saveControlPrefs();
