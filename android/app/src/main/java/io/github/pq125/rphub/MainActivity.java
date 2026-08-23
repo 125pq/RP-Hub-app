@@ -9,8 +9,6 @@ import android.webkit.URLUtil;
 import android.webkit.WebView;
 import android.widget.Toast;
 import com.getcapacitor.BridgeActivity;
-import androidx.webkit.WebSettingsCompat;
-import androidx.webkit.WebViewFeature;
 
 public class MainActivity extends BridgeActivity {
     private AppUpdateManager appUpdateManager;
@@ -20,20 +18,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeFilePlugin.class);
         registerPlugin(NativeClipboardPlugin.class);
         super.onCreate(savedInstanceState);
-        configureDarkMode();
         installWebViewDownloadListener();
         appUpdateManager = new AppUpdateManager(this);
         AttributionDialog.showIfNeeded(
             this,
             savedInstanceState == null ? appUpdateManager::checkOnColdStart : null
         );
-    }
-
-    private void configureDarkMode() {
-        WebView webView = getBridge().getWebView();
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.getSettings(), true);
-        }
     }
 
     /**
