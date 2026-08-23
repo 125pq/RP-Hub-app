@@ -21,6 +21,9 @@ release_apk/
 benchmark-results/raw/
 benchmark-results/traces/
 
+# Local LLM binaries, models, logs, and runtime state
+.local/
+
 # Release signing secrets
 *.keystore
 *.jks
