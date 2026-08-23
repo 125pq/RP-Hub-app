@@ -1,6 +1,6 @@
 {
   "name": "rp-hub-app",
-  "version": "1.8.5",
+  "version": "1.8.7",
   "private": true,
   "scripts": {
     "prepare:vendor": "node scripts/web/prepare-vendor.mjs",
