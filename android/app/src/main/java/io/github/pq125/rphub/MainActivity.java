@@ -19,7 +19,6 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(NativeFilePlugin.class);
         registerPlugin(NativeClipboardPlugin.class);
-        registerPlugin(NativeThemePlugin.class);
         super.onCreate(savedInstanceState);
         configureDarkMode();
         installWebViewDownloadListener();
