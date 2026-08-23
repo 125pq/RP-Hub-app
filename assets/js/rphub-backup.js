@@ -815,11 +815,101 @@
         return { recordCount, recovery };
     }
 
-    // --- Sidebar-hosted dynamic UI (does not modify ui-components.js) --------
-    // The "备份" entry lives inside the sidebar footer's user-card row — the same
-    // spot as the modified build's sync button — so it never overlays the page.
-    // The button is injected dynamically (MutationObserver) so Vue re-renders of
-    // the sidebar footer do not drop it.
+    // --- Sidebar-hosted control center UI (does not modify ui-components.js) ----
+    // This local layer owns presentation preferences and the full-backup actions.
+    // It intentionally stays outside the upstream Vue surface so upstream merges
+    // only need to keep the backup script hook.
+    const CONTROL_PREFS_KEY = 'rp_hub_ui_preferences';
+    const DEFAULT_CONTROL_PREFS = Object.freeze({ themeMode: 'system', mirrorSquare: true });
+    const SQUARE_URLS = Object.freeze({
+        original: 'https://rphforum.zeabur.app/',
+        mirror: 'https://rp.zhaoyangxx.ccwu.cc/'
+    });
+
+    let controlPrefs = { ...DEFAULT_CONTROL_PREFS };
+    let themeMediaQuery = null;
+    let themeMediaListener = null;
+    let squareObserver = null;
+
+    const readControlPrefs = () => {
+        try {
+            const saved = JSON.parse(localStorage.getItem(CONTROL_PREFS_KEY) || '{}');
+            if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+                controlPrefs = {
+                    ...DEFAULT_CONTROL_PREFS,
+                    ...saved,
+                    themeMode: ['light', 'dark', 'system'].includes(saved.themeMode) ? saved.themeMode : DEFAULT_CONTROL_PREFS.themeMode,
+                    mirrorSquare: saved.mirrorSquare !== false
+                };
+            }
+        } catch (_) {
+            controlPrefs = { ...DEFAULT_CONTROL_PREFS };
+        }
+        return controlPrefs;
+    };
+
+    const saveControlPrefs = () => {
+        try { localStorage.setItem(CONTROL_PREFS_KEY, JSON.stringify(controlPrefs)); } catch (_) { /* private mode */ }
+    };
+
+    const resolveThemeMode = () => controlPrefs.themeMode === 'system'
+        ? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : controlPrefs.themeMode;
+
+    const applyTheme = () => {
+        if (!document?.documentElement) return;
+        const resolved = resolveThemeMode();
+        document.documentElement.classList.toggle('rphub-night-mode', resolved === 'dark');
+        document.documentElement.dataset.rphubTheme = controlPrefs.themeMode;
+        document.documentElement.style.colorScheme = resolved;
+    };
+
+    const bindThemeMediaQuery = () => {
+        if (themeMediaQuery && themeMediaListener) themeMediaQuery.removeEventListener?.('change', themeMediaListener);
+        themeMediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') || null;
+        themeMediaListener = () => { if (controlPrefs.themeMode === 'system') applyTheme(); };
+        themeMediaQuery?.addEventListener?.('change', themeMediaListener);
+    };
+
+    const getSquareHost = () => controlPrefs.mirrorSquare ? SQUARE_URLS.mirror : SQUARE_URLS.original;
+    const syncSquareFrame = () => {
+        if (!document?.querySelectorAll) return;
+        document.querySelectorAll('iframe').forEach((frame) => {
+            const current = String(frame.getAttribute('src') || '');
+            if (!current.includes('rphforum.zeabur.app') && !current.includes('rp.zhaoyangxx.ccwu.cc')) return;
+            try {
+                const url = new URL(current, location.href);
+                const target = new URL(getSquareHost());
+                url.protocol = target.protocol;
+                url.host = target.host;
+                const nextSrc = url.toString();
+                if (nextSrc !== current) frame.setAttribute('src', nextSrc);
+            } catch (_) { /* malformed or relative iframe source */ }
+        });
+    };
+
+    const applyControlPrefs = () => {
+        applyTheme();
+        bindThemeMediaQuery();
+        syncSquareFrame();
+    };
+
+    readControlPrefs();
+    if (typeof window !== 'undefined') window.RPHubControlSettings = Object.freeze({
+        get: () => ({ ...controlPrefs }),
+        setThemeMode: (mode) => {
+            if (!['light', 'dark', 'system'].includes(mode)) return;
+            controlPrefs.themeMode = mode;
+            saveControlPrefs();
+            applyControlPrefs();
+        },
+        setMirrorSquare: (enabled) => {
+            controlPrefs.mirrorSquare = Boolean(enabled);
+            saveControlPrefs();
+            syncSquareFrame();
+        }
+    });
+
     let anchorEl = null;
     let statusEl = null;
     let fileInput = null;
@@ -831,7 +921,7 @@
     const setStatus = (text, isError = false) => {
         if (!statusEl) return;
         statusEl.textContent = text || '';
-        statusEl.classList.toggle('rphub-backup-status--error', isError);
+        statusEl.classList.toggle('rphub-control-status--error', isError);
     };
 
     function ensureStyles() {
@@ -841,45 +931,101 @@
         style.textContent = `
             .rphub-backup-anchor { position: relative; margin-left: auto; flex-shrink: 0; }
             .rphub-backup-anchor.is-collapsed { margin-left: 0; }
-            .rphub-backup-button { flex-shrink: 0; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; color: #2563eb; font-weight: 700; font-size: 13px; padding: 7px 12px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: border-color .2s, background-color .2s; white-space: nowrap; line-height: 1.2; }
-            .rphub-backup-button:hover { border-color: #bfdbfe; background: #eff6ff; }
-            .rphub-backup-panel { position: absolute; bottom: calc(100% + 8px); right: 0; width: 320px; max-width: 78vw; background: #fff; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.25); padding: 16px; color: #1f2937; z-index: 2147483001; }
-            .rphub-backup-panel__head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin-bottom: 8px; }
-            .rphub-backup-panel__close { border: 0; background: transparent; font-size: 18px; cursor: pointer; color: #6b7280; }
-            .rphub-backup-panel__intro { font-size: 12px; color: #6b7280; margin: 0 0 12px; line-height: 1.5; }
-            .rphub-backup-panel__actions { display: flex; flex-direction: column; gap: 8px; }
-            .rphub-backup-panel__btn { padding: 10px 12px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; font-size: 14px; cursor: pointer; text-align: center; }
-            .rphub-backup-panel__btn--primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
-            .rphub-backup-status { font-size: 12px; color: #374151; margin: 12px 0 0; min-height: 16px; }
-            .rphub-backup-status--error { color: #dc2626; }
+            .rphub-backup-button { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; border: 1px solid #e5e7eb; border-radius: 13px; background: #fff; color: #374151; font-weight: 750; font-size: 12px; padding: 8px 11px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: transform .18s, border-color .18s, background-color .18s; white-space: nowrap; line-height: 1.2; }
+            .rphub-backup-button:hover { border-color: #bfdbfe; background: #eff6ff; transform: translateY(-1px); }
+            .rphub-backup-button svg { width: 15px; height: 15px; }
+            .rphub-backup-panel { position: absolute; bottom: calc(100% + 12px); right: 0; width: min(336px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: min(70vh, 560px); overflow-x: hidden; overflow-y: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.06); padding: 18px; color: #172033; box-sizing: border-box; z-index: 2147483001; }
+            .rphub-control-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:16px; }
+            .rphub-control-kicker { margin:0 0 4px; color:#6b7280; font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+            .rphub-control-title { margin:0; color:#1f2937; font-size:18px; line-height:1.15; font-weight:850; }
+            .rphub-control-close { width:30px; height:30px; border:1px solid #dbe3ee; border-radius:10px; background:#fff; color:#6b7280; cursor:pointer; font-size:18px; line-height:1; }
+            .rphub-control-section { padding:14px 0; border-top:1px solid #e2e8f0; }
+            .rphub-control-section:first-of-type { border-top:0; padding-top:0; }
+            .rphub-control-section__head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+            .rphub-control-section__title { margin:0; font-size:13px; font-weight:800; color:#374151; }
+            .rphub-control-section__hint { margin:3px 0 0; color:#6b7280; font-size:11px; line-height:1.45; }
+            .rphub-control-mode-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:7px; }
+            .rphub-control-mode { border:1px solid #dbe3ee; border-radius:12px; background:#fff; color:#475569; padding:9px 6px; cursor:pointer; font-size:12px; font-weight:750; transition: border-color .18s, background-color .18s, color .18s; }
+            .rphub-control-mode:hover { border-color:#93c5fd; color:#1d4ed8; }
+            .rphub-control-mode.is-active { border-color:#4f46e5; background:#eef2ff; color:#4338ca; box-shadow:inset 0 0 0 1px rgba(37,99,235,.12); }
+            .rphub-control-row { display:flex; align-items:center; gap:12px; }
+            .rphub-control-row__icon { display:grid; place-items:center; width:34px; height:34px; border-radius:11px; background:#eff6ff; color:#2563eb; flex:0 0 auto; }
+            .rphub-control-row__icon svg { width:17px; height:17px; }
+            .rphub-control-row__body { min-width:0; flex:1; }
+            .rphub-control-row__title { display:block; color:#374151; font-size:13px; font-weight:800; }
+            .rphub-control-row__hint { display:block; margin-top:2px; color:#6b7280; font-size:11px; line-height:1.4; }
+            .rphub-control-switch { position:relative; width:42px; height:24px; flex:0 0 auto; border:0; border-radius:999px; background:#d1d5db; cursor:pointer; transition:background-color .18s; }
+            .rphub-control-switch::after { content:''; position:absolute; width:18px; height:18px; top:3px; left:3px; border-radius:50%; background:#fff; box-shadow:0 2px 5px rgba(15,23,42,.2); transition:transform .18s; }
+            .rphub-control-switch.is-on { background:#4f46e5; }
+            .rphub-control-switch.is-on::after { transform:translateX(18px); }
+            .rphub-backup-panel__actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+            .rphub-backup-panel__btn { display:flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:9px 10px; border-radius:11px; border:1px solid #dbe3ee; background:#fff; color:#334155; font-size:12px; font-weight:800; cursor:pointer; text-align:center; }
+            .rphub-backup-panel__btn:hover { border-color:#93c5fd; background:#f8fbff; }
+            .rphub-backup-panel__btn--primary { background:#4f46e5; border-color:#4f46e5; color:#fff; box-shadow:0 6px 14px rgba(29,78,216,.2); }
+            .rphub-backup-panel__btn--primary:hover { background:#4338ca; border-color:#4338ca; }
+            .rphub-control-status { font-size:11px; color:#475569; margin:10px 0 0; min-height:16px; line-height:1.45; }
+            .rphub-control-status--error { color:#dc2626; }
+            html.rphub-night-mode .rphub-backup-panel { background:#1f2937; border-color:#374151; color:#e5e7eb; }
+            html.rphub-night-mode .rphub-control-title, html.rphub-night-mode .rphub-control-section__title, html.rphub-night-mode .rphub-control-row__title { color:#f8fafc; }
+            html.rphub-night-mode .rphub-control-kicker, html.rphub-night-mode .rphub-control-section__hint, html.rphub-night-mode .rphub-control-row__hint, html.rphub-night-mode .rphub-control-status { color:#94a3b8; }
+            html.rphub-night-mode .rphub-control-section { border-color:#334155; }
+            html.rphub-night-mode .rphub-control-mode, html.rphub-night-mode .rphub-backup-panel__btn, html.rphub-night-mode .rphub-control-close { background:#374151; border-color:#4b5563; color:#e5e7eb; }
+            html.rphub-night-mode .rphub-control-mode.is-active { background:#172554; border-color:#60a5fa; color:#bfdbfe; }
+            html.rphub-night-mode .rphub-backup-panel__btn--primary { background:#4f46e5; color:#fff; }
+            html.rphub-night-mode .rphub-backup-button { background:#172554; border-color:#334155; color:#bfdbfe; }
+            html.rphub-night-mode .rphub-control-row__icon { background:#172554; color:#93c5fd; }
+            html.rphub-night-mode body { background:#111827 !important; color:#e5e7eb !important; }
+            html.rphub-night-mode .app-sidebar, html.rphub-night-mode [class~="bg-white"], html.rphub-night-mode [class~="bg-white/95"], html.rphub-night-mode [class~="bg-white/90"] { background-color:#1f2937 !important; border-color:#374151 !important; }
+            html.rphub-night-mode [class~="bg-gray-50"], html.rphub-night-mode [class~="bg-gray-100"] { background-color:#111827 !important; }
+            html.rphub-night-mode [class~="text-gray-900"], html.rphub-night-mode [class~="text-gray-800"], html.rphub-night-mode [class~="text-gray-700"] { color:#f3f4f6 !important; }
+            html.rphub-night-mode [class~="text-gray-600"], html.rphub-night-mode [class~="text-gray-500"], html.rphub-night-mode [class~="text-gray-400"] { color:#9ca3af !important; }
+            html.rphub-night-mode [class~="border-gray-100"], html.rphub-night-mode [class~="border-gray-200"] { border-color:#374151 !important; }
+            @media (max-width: 480px) { .rphub-backup-panel { position:fixed; left:12px; right:12px; bottom:calc(env(safe-area-inset-bottom, 0px) + 12px); width:auto; max-width:none; max-height:calc(100vh - 24px); transform:none; } .rphub-backup-panel__actions { grid-template-columns:1fr; } }
         `;
         document.head.appendChild(style);
     }
 
     function openPanel() {
         if (!panelEl) return;
-        panelEl.hidden = !panelEl.hidden;
-        if (!panelEl.hidden) setStatus('请选择操作。');
+        const shouldOpen = panelEl.hidden;
+        if (shouldOpen && window.matchMedia?.('(max-width: 480px)').matches && panelEl.parentNode !== document.body) {
+            document.body.appendChild(panelEl);
+            panelEl.classList.add('is-viewport-panel');
+        }
+        panelEl.hidden = !shouldOpen;
+        if (shouldOpen) { renderControlState(); setStatus(''); }
     }
 
     function closePanel() {
-        if (panelEl) panelEl.hidden = true;
+        if (!panelEl) return;
+        panelEl.hidden = true;
+        if (panelEl.classList?.contains?.('is-viewport-panel') && anchorEl?.isConnected) {
+            anchorEl.appendChild(panelEl);
+            panelEl.classList.remove('is-viewport-panel');
+        }
     }
 
-    // Inject (or re-inject) the backup button into the sidebar footer.
+    const renderControlState = () => {
+        if (!anchorEl || !panelEl) return;
+        const mode = controlPrefs.themeMode;
+        panelEl.querySelectorAll('[data-theme-mode]').forEach((button) => button.classList.toggle('is-active', button.dataset.themeMode === mode));
+        const mirrorButton = panelEl.querySelector('[data-action="toggle-mirror"]');
+        mirrorButton?.classList.toggle('is-on', controlPrefs.mirrorSquare);
+        mirrorButton?.setAttribute?.('aria-checked', String(controlPrefs.mirrorSquare));
+        const mirrorValue = panelEl.querySelector('[data-role="mirror-value"]');
+        if (mirrorValue) mirrorValue.textContent = controlPrefs.mirrorSquare ? '使用镜像地址' : '使用原站地址';
+    };
+
     function ensureSidebarButton() {
         if (!document?.body) return false;
         ensureStyles();
         if (anchorEl && anchorEl.isConnected) {
-            // Keep collapsed state reflected.
             const sidebar = document.querySelector('.app-sidebar');
             const collapsed = !!sidebar?.classList?.contains?.('md:w-16') || /md:w-16/.test(sidebar?.className || '');
-            if (anchorEl.classList.contains('is-collapsed') !== collapsed) {
-                anchorEl.classList.toggle('is-collapsed', collapsed);
-            }
+            anchorEl.classList.toggle('is-collapsed', collapsed);
+            renderControlState();
             return true;
         }
-
         const footer = document.querySelector('.safe-sidebar-footer');
         if (!footer) return false;
         let host = footer.querySelector('.flex.items-center');
@@ -888,96 +1034,99 @@
         anchorEl = document.createElement('div');
         anchorEl.className = 'rphub-backup-anchor';
         anchorEl.innerHTML = `
-            <button type="button" class="rphub-backup-button" title="整体备份 / 恢复">备份</button>
-            <div class="rphub-backup-panel" hidden>
-                <div class="rphub-backup-panel__head">
-                    <span>整体备份</span>
-                    <button type="button" class="rphub-backup-panel__close" aria-label="关闭">×</button>
+            <button type="button" class="rphub-backup-button" title="打开控制中心" aria-expanded="false">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m6.36.64-1.42 1.42M21 12h-2m-.64 6.36-1.42-1.42M12 21v-2m-6.36.64 1.42-1.42M3 12h2m.64-6.36 1.42 1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"></path></svg>
+                <span>控制中心</span>
+            </button>
+            <div class="rphub-backup-panel" hidden role="dialog" aria-label="控制中心">
+                <div class="rphub-control-head">
+                    <div><p class="rphub-control-kicker">RP-HUB LOCAL</p><h2 class="rphub-control-title">控制中心</h2></div>
+                    <button type="button" class="rphub-control-close" aria-label="关闭">×</button>
                 </div>
-                <p class="rphub-backup-panel__intro">导出全部角色、聊天、记忆、设置与小说数据，或从备份文件整体恢复。恢复会以快照为准覆盖本地数据。</p>
-                <div class="rphub-backup-panel__actions">
-                    <button type="button" class="rphub-backup-panel__btn rphub-backup-panel__btn--primary" data-action="export">导出整体备份</button>
-                    <button type="button" class="rphub-backup-panel__btn" data-action="import">导入整体备份</button>
-                </div>
-                <p class="rphub-backup-status"></p>
+                <section class="rphub-control-section">
+                    <div class="rphub-control-section__head"><div><h3 class="rphub-control-section__title">显示模式</h3><p class="rphub-control-section__hint">只影响当前 RP-Hub 页面，不改动系统设置。</p></div></div>
+                    <div class="rphub-control-mode-grid" role="group" aria-label="显示模式">
+                        <button type="button" class="rphub-control-mode" data-theme-mode="light">明亮</button>
+                        <button type="button" class="rphub-control-mode" data-theme-mode="dark">夜间</button>
+                        <button type="button" class="rphub-control-mode" data-theme-mode="system">跟随系统</button>
+                    </div>
+                </section>
+                <section class="rphub-control-section">
+                    <div class="rphub-control-row">
+                        <span class="rphub-control-row__icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3v18m9-9H3m15.36-6.36L5.64 18.36M18.36 18.36 5.64 5.64"></path></svg></span>
+                        <span class="rphub-control-row__body"><span class="rphub-control-row__title">万相广场镜像</span><span class="rphub-control-row__hint" data-role="mirror-value"></span></span>
+                        <button type="button" class="rphub-control-switch" data-action="toggle-mirror" role="switch" aria-label="切换万相广场镜像" aria-checked="true"></button>
+                    </div>
+                </section>
+                <section class="rphub-control-section">
+                    <div class="rphub-control-section__head"><div><h3 class="rphub-control-section__title">整体备份</h3><p class="rphub-control-section__hint">导入前会先导出当前数据的恢复备份。</p></div></div>
+                    <div class="rphub-backup-panel__actions">
+                        <button type="button" class="rphub-backup-panel__btn rphub-backup-panel__btn--primary" data-action="export">导出整体备份</button>
+                        <button type="button" class="rphub-backup-panel__btn" data-action="import">导入整体备份</button>
+                    </div>
+                    <p class="rphub-control-status"></p>
+                </section>
             </div>
         `;
         panelEl = anchorEl.querySelector('.rphub-backup-panel');
-        statusEl = anchorEl.querySelector('.rphub-backup-status');
-
+        statusEl = anchorEl.querySelector('.rphub-control-status');
+        const trigger = anchorEl.querySelector('.rphub-backup-button');
         fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = '.jsonl,application/jsonl,application/octet-stream';
         fileInput.hidden = true;
         document.body.appendChild(fileInput);
 
-        anchorEl.querySelector('.rphub-backup-button').addEventListener('click', openPanel);
-        anchorEl.querySelector('.rphub-backup-panel__close').addEventListener('click', closePanel);
+        trigger.addEventListener('click', () => { openPanel(); trigger.setAttribute?.('aria-expanded', String(!panelEl.hidden)); });
+        anchorEl.querySelector('.rphub-control-close').addEventListener('click', closePanel);
+        anchorEl.querySelectorAll('[data-theme-mode]').forEach((button) => button.addEventListener('click', () => {
+            window.RPHubControlSettings?.setThemeMode(button.dataset.themeMode);
+            renderControlState();
+        }));
+        anchorEl.querySelector('[data-action="toggle-mirror"]').addEventListener('click', () => {
+            window.RPHubControlSettings?.setMirrorSquare(!controlPrefs.mirrorSquare);
+            renderControlState();
+        });
         anchorEl.querySelector('[data-action="export"]').addEventListener('click', async () => {
             if (busy) return;
-            busy = true;
-            setStatus('正在导出...');
-            try {
-                const result = await exportBackup({ onStatus: setStatus });
-                setStatus(`已导出 ${result.filename}（${result.recordCount} 条记录）。`);
-            } catch (error) {
-                setStatus(error?.message || '导出失败。', true);
-            } finally {
-                busy = false;
-            }
+            busy = true; setStatus('正在导出...');
+            try { const result = await exportBackup({ onStatus: setStatus }); setStatus(`已导出 ${result.filename}（${result.recordCount} 条记录）。`); }
+            catch (error) { setStatus(error?.message || '导出失败。', true); }
+            finally { busy = false; }
         });
-        anchorEl.querySelector('[data-action="import"]').addEventListener('click', () => {
-            if (busy) return;
-            fileInput.value = '';
-            fileInput.click();
-        });
+        anchorEl.querySelector('[data-action="import"]').addEventListener('click', () => { if (!busy) { fileInput.value = ''; fileInput.click(); } });
         fileInput.addEventListener('change', async () => {
             const file = fileInput.files?.[0];
-            if (!file) return;
-            if (busy) return;
+            if (!file || busy) return;
             busy = true;
-            const confirmed = window.confirm(
-                '导入将按备份覆盖当前全部本地数据（角色、聊天、记忆、设置、小说、角色生成器）。\n\n恢复前会自动导出一份当前数据的恢复备份。\n\n确定继续吗？'
-            );
-            if (!confirmed) {
-                busy = false;
-                return;
-            }
+            const confirmed = window.confirm('导入将按备份覆盖当前全部本地数据（角色、聊天、记忆、设置、小说、角色生成器）。\n\n恢复前会自动导出一份当前数据的恢复备份。\n\n确定继续吗？');
+            if (!confirmed) { busy = false; return; }
             setStatus('正在处理备份...');
-            try {
-                const result = await importBackup(file, { onStatus: setStatus, onProgress: () => {} });
-                setStatus(`恢复完成（${result.recordCount} 条记录）。页面即将刷新...`);
-                setTimeout(() => { location.reload(); }, 300);
-            } catch (error) {
-                setStatus(error?.message || '导入失败，本地数据未被修改。', true);
-            } finally {
-                busy = false;
-            }
+            try { const result = await importBackup(file, { onStatus: setStatus, onProgress: () => {} }); setStatus(`恢复完成（${result.recordCount} 条记录）。页面即将刷新...`); setTimeout(() => { location.reload(); }, 300); }
+            catch (error) { setStatus(error?.message || '导入失败，本地数据未被修改。', true); }
+            finally { busy = false; }
         });
-
         host.appendChild(anchorEl);
+        renderControlState();
         return true;
     }
 
     function buildUI() {
-        if (uiInit) return;
-        if (!document?.body || !document?.createElement || !document?.head) return;
+        if (uiInit || !document?.body || !document?.createElement || !document?.head) return;
         uiInit = true;
+        applyControlPrefs();
         ensureSidebarButton();
-        // Keep the button present even if the sidebar footer re-renders.
-        if (typeof MutationObserver === 'function' && !observer) {
-            observer = new MutationObserver(() => ensureSidebarButton());
-            observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+        if (typeof MutationObserver === 'function') {
+            observer = new MutationObserver(() => { ensureSidebarButton(); syncSquareFrame(); });
+            observer.observe(document.documentElement || document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+            squareObserver = observer;
         }
     }
 
     function mountUI() {
         if (typeof document === 'undefined' || !document?.body || !document?.createElement) return;
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', buildUI, { once: true });
-        } else {
-            buildUI();
-        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', buildUI, { once: true });
+        else buildUI();
     }
 
     // Expose the module for tests / integration.
