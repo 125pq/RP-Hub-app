@@ -20,7 +20,10 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         installWebViewDownloadListener();
         appUpdateManager = new AppUpdateManager(this);
-        if (savedInstanceState == null) appUpdateManager.checkOnColdStart();
+        AttributionDialog.showIfNeeded(
+            this,
+            savedInstanceState == null ? appUpdateManager::checkOnColdStart : null
+        );
     }
 
     /**
