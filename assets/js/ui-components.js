@@ -1925,6 +1925,7 @@
             return {
                 formatDuration,
                 formatOutputSpeed,
+                formatQuota: quota => `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`,
                 filterOptions: Object.freeze([
                     { value: 'all', label: '全部', position: '' },
                     { value: 'chat', label: '主对话', position: 'is-position-2' },
@@ -1991,7 +1992,7 @@
                             汇总当前类型和时间筛选范围内，输入 Token（包括缓存读取）与输出 Token 的总和。
                         </settings-help>
                     </div>
-                    <div class="flex-shrink-0 whitespace-nowrap text-xl font-semibold tracking-tight tabular-nums text-gray-900">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</div>
+                    <div class="flex-shrink-0 whitespace-nowrap font-mono text-xl font-bold tabular-nums text-gray-900">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</div>
                 </div>
 
                 <div class="flex items-center justify-between mb-3">
@@ -2016,7 +2017,7 @@
                         </div>
                         <div class="space-y-1.5 rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5">
                             <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
-                                <span class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
                                     <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>输入
                                 </span>
                                 <span class="flex min-w-0 items-center gap-1 font-mono">
@@ -2030,10 +2031,16 @@
                                 </span>
                             </div>
                             <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
-                                <span class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
                                     <span class="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>输出
                                 </span>
                                 <span class="font-mono text-sm font-bold text-gray-800">{{ formatCount(record.outputTokens) }}</span>
+                            </div>
+                            <div v-if="Number.isFinite(record.actualQuota)" class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>消耗
+                                </span>
+                                <span class="font-mono text-sm font-bold text-gray-800" :title="record.usageGroup ? '计费分组：' + record.usageGroup : ''">{{ formatQuota(record.actualQuota) }}</span>
                             </div>
                         </div>
                     </article>

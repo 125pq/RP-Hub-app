@@ -163,6 +163,23 @@ marked.use({
     }
 });
 
+const RollingText = {
+    props: { value: { type: [String, Number], default: '' } },
+    setup(props) {
+        const text = computed(() => String(props.value ?? ''));
+        const characters = computed(() => Array.from(text.value));
+        return { characters, text };
+    },
+    template: `
+        <span class="inline-flex" :aria-label="text">
+            <span v-for="(character, index) in characters" :key="index" class="inline-grid overflow-hidden">
+                <transition name="usage-roll" appear>
+                    <span :key="character" class="col-start-1 row-start-1" aria-hidden="true">{{ character }}</span>
+                </transition>
+            </span>
+        </span>`
+};
+
 const app = createApp({
     components: {
         ActionConfirmModal,
@@ -183,6 +200,7 @@ const app = createApp({
         PresetEditorModal,
         RegexEditorModal,
         RetryConfirmModal,
+        RollingText,
         SettingsHelp,
         SettingsPageHeader,
         StatusNoticeModal,
@@ -604,6 +622,7 @@ const app = createApp({
 
             useCharacterBackground: true,
             immersiveMode: false,
+            showLatestUsageBar: false,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
             uiTemplateAnalysisDepth: 4,
@@ -1397,10 +1416,19 @@ const app = createApp({
                 if (!getMainDb()) await initDB();
             },
             generateUUID,
+            getApiKey: () => settings.apiKey,
+            getApiUrl: () => settings.apiUrl,
             normalizeApiUsage,
             saveStoredValue: setStoredValue,
             toast: (...args) => showToast(...args)
         });
+        const latestMainTokenUsage = computed(() => tokenUsageHistory.value.find(
+            record => record.type === 'chat' || record.type === 'tool_continuation'
+        ) || null);
+        const formatLatestTokenCount = value => `${(Number(value || 0) / 1000).toFixed(2)}k`;
+        const formatLatestUsageCost = quota => Number.isFinite(quota)
+            ? `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+            : '--';
         const {
             cleanupUnusedStorage,
             formatStorageSize,
@@ -2218,7 +2246,7 @@ const app = createApp({
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
             const mainText = parseCot(message?.content || '').main;
-            const imageMatches = [...mainText.matchAll(/image###([\s\S]*?)###/g)];
+            const imageMatches = [...mainText.matchAll(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/g)];
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
@@ -3276,7 +3304,7 @@ const app = createApp({
             if (isAutoImageGenEnabled.value) return text; // 生图开启时保留
             return String(text)
                 .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, '')
-                .replace(/image###([\s\S]*?)###/gi, '')
+                .replace(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/gi, '')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -4478,7 +4506,8 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
-        const appendNextResponsePrompt = (messageList, { cotEnabled = false, writingStylePrompt = '' } = {}) => {
+        const usesThinkingCotTag = (model) => /(?:deepseek|glm)/i.test(String(model || ''));
+        const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
                 message?.role === 'user'
                 && Array.isArray(message._sourceIndexes)
@@ -4487,7 +4516,10 @@ const app = createApp({
             if (!target) return;
 
             const prompt = BUILTIN_PROMPTS.buildNextResponsePrompt({
+                autoImageGenEnabled: isAutoImageGenEnabled.value,
                 cotEnabled,
+                imageGenCount: settings.imageGenCount,
+                useThinkingTag,
                 writingStylePrompt,
                 uiTemplateEnabled: settings.uiTemplateEnabled
                     && settings.uiTemplateMainModelAnalysis
@@ -4848,6 +4880,7 @@ const app = createApp({
             appendPendingUiTemplateCorrection(messages);
             appendNextResponsePrompt(messages, {
                 cotEnabled: cotPresets.length > 0,
+                useThinkingTag: usesThinkingCotTag(requestModel),
                 writingStylePrompt: writingStylePresets
                     .map(preset => preset.content
                         .replace(/^\s*<writing_style>\s*/i, '')
@@ -8126,7 +8159,7 @@ const app = createApp({
             const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
-                regex: '/image###([\\s\\S]*?)###/g',
+                regex: '/image###([^\\r\\n]*?)(?:###|(?=\\r?\\n)|$)/g',
             replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
@@ -9273,7 +9306,7 @@ const app = createApp({
                     uiTemplateAnalysisEnabled: settings.uiTemplateEnabled
                         && settings.uiTemplateMainModelAnalysis
                         && activeUiTemplates.value.length > 0,
-                    useDeepSeekOpening: /deepseek/i.test(String(settings.model || ''))
+                    useThinkingOpening: usesThinkingCotTag(settings.model)
                 });
                 const existingCotPreset = presets.value.find(p => p.name === cotPresetName);
                 if (!existingCotPreset) {
@@ -9433,7 +9466,6 @@ const app = createApp({
             removePlatformBackListener();
             removePlatformStateListener();
         });
-
         const switchProfile = (id) => {
             const profile = userProfiles.value.find(p => p.uuid === id);
             if (profile) {
@@ -9612,6 +9644,7 @@ const app = createApp({
             tokenUsageHistory, tokenUsagePage, tokenUsagePageCount, tokenUsageFilter, tokenUsageTimeFilter,
             showTokenUsageTimeFilter, tokenUsageTimeFilterOptions, tokenUsageTimeFilterLabel,
             filteredTokenUsageHistory, tokenUsageStats, displayedTokenUsageHistory,
+            latestMainTokenUsage, formatLatestTokenCount, formatLatestUsageCost,
             getUncachedInputTokens, formatTokenCount, formatTokenAggregate, formatTokenUsageTime, getTokenUsageTypeLabel, clearTokenUsageHistory,
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal

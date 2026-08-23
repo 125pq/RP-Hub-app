@@ -1311,7 +1311,7 @@
             left: 0.75rem;
         }
 
-        .token-usage-help-popover.is-right {
+.token-usage-help-popover.is-right {
             right: 0.75rem;
             left: auto;
         }
@@ -1520,7 +1520,7 @@
             gap: 0.75rem;
             padding: 1.5rem;
             color: #fff;
-            background: rgba(15, 23, 42, 0.32);
+            background: rgba(15, 23, 42, 0.18);
             backdrop-filter: blur(4px);
             pointer-events: none;
         }
@@ -2578,6 +2578,29 @@ opacity: 0;
 @media (max-width: 768px) and (orientation: portrait) {
     #active-tools-list .tool-description-preview {
         display: none;
+    }
+}
+
+.usage-roll-enter-active,
+.usage-roll-leave-active {
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease;
+    will-change: transform, opacity;
+}
+
+.usage-roll-enter-from {
+    opacity: 0;
+    transform: translateY(75%);
+}
+
+.usage-roll-leave-to {
+    opacity: 0;
+    transform: translateY(-75%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .usage-roll-enter-active,
+    .usage-roll-leave-active {
+        transition: none;
     }
 }
 
