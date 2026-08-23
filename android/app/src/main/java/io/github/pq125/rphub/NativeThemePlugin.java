@@ -21,14 +21,6 @@ public class NativeThemePlugin extends Plugin {
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
                     WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.getSettings(), allowed);
                 }
-                if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                    WebSettingsCompat.setForceDark(
-                        webView.getSettings(),
-                        allowed ? WebSettingsCompat.FORCE_DARK_ON : WebSettingsCompat.FORCE_DARK_OFF
-                    );
-                }
-                webView.invalidate();
-                webView.requestLayout();
                 call.resolve();
             } catch (RuntimeException error) {
                 call.reject("Unable to update theme", "theme_update_failed", error);
