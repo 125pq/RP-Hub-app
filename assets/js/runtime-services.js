@@ -512,7 +512,8 @@
         confirm,
         ensureStorage,
         generateUUID,
-        getCharacterName,
+        getApiKey,
+        getApiUrl,
         normalizeApiUsage,
         saveStoredValue,
         toast
@@ -596,16 +597,51 @@
             saveQueue = saveQueue.then(saveTask, saveTask);
             return saveQueue;
         };
+        const fetchLatestQuota = async (record, apiKey) => {
+            try {
+                const getLogKey = log => String(log?.request_id || [log?.created_at, log?.model_name, log?.prompt_tokens, log?.completion_tokens].join('|'));
+                for (const delay of [500, 5000]) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    const apiRoot = record.apiUrl.replace(/\/+$/, '').replace(/\/v1$/i, '');
+                    const response = await fetch(`${apiRoot}/api/log/token`, {
+                        headers: { Authorization: `Bearer ${apiKey}` }
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const payload = await response.json();
+                    const logs = Array.isArray(payload?.data) ? payload.data : (payload?.data?.items || []);
+                    const claimedLogs = new Set(tokenUsageHistory.value.map(item => item.usageLogKey).filter(Boolean));
+                    const log = logs.filter(item => !claimedLogs.has(getLogKey(item))
+                        && Number(item?.type) === 2
+                        && String(item?.model_name || '') === record.model
+                        && Math.abs(Number(item?.created_at) * 1000 - record.timestamp) < 120000
+                        && (!Number.isFinite(record.inputTokens) || Number(item?.prompt_tokens) === record.inputTokens)
+                        && (!Number.isFinite(record.outputTokens) || Number(item?.completion_tokens) === record.outputTokens))
+                        .sort((a, b) => Math.abs(Number(a.created_at) * 1000 - record.timestamp) - Math.abs(Number(b.created_at) * 1000 - record.timestamp))[0];
+                    if (!log || !Number.isFinite(Number(log.quota))) continue;
+                    record.actualQuota = Number(log.quota);
+                    record.usageGroup = String(log.group || '');
+                    record.usageLogKey = getLogKey(log);
+                    saveTokenUsageHistoryNow().catch(error => console.error('Token usage history save failed:', error));
+                    return;
+                }
+            } catch (error) {
+                console.warn('New API usage log fetch failed:', error);
+            }
+        };
         const recordApiUsage = (usage, meta = {}) => {
-            tokenUsageHistory.value.unshift({
+            const record = reactive({
                 id: generateUUID(),
                 timestamp: Date.now(),
                 type: meta.type || 'chat',
                 model: String(meta.model || ''),
-                detail: String(meta.detail || ''),
-                characterName: getCharacterName(),
+                apiUrl: String(getApiUrl?.() || ''),
+                durationMs: Number.isFinite(meta.durationMs) ? Math.max(0, meta.durationMs) : null,
+                outputCharacters: Number.isFinite(meta.outputCharacters) ? Math.max(0, meta.outputCharacters) : null,
                 ...normalizeApiUsage(usage)
             });
+            tokenUsageHistory.value.unshift(record);
+            const apiKey = String(getApiKey?.() || '').trim();
+            if (record.apiUrl && apiKey) fetchLatestQuota(record, apiKey);
             saveTokenUsageHistoryNow().catch(error => console.error('Token usage history save failed:', error));
         };
         const clearTokenUsageHistory = () => {

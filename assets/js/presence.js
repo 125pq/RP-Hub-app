@@ -47,17 +47,9 @@
                 const latestVersionId = parseVersionId(data.latestVersionId);
                 if (data.updateAvailable && latestVersionId > currentVersionId && latestVersionId > notifiedVersionId) {
                     notifiedVersionId = latestVersionId;
-                    // In the native APK, APK updates are handled by AppUpdateManager (which checks
-                    // the GitHub releases API and downloads/installs the APK). Refreshing the WebView
-                    // cannot replace the installed APK, so the web "refresh to update" prompt would be
-                    // misleading. The heartbeat still runs (presence stays online) — only the web
-                    // refresh prompt is suppressed for native builds.
-                    const isNativeApp = window.platformAdapter?.isNative?.() === true;
-                    if (!isNativeApp) {
-                        window.dispatchEvent(new CustomEvent('rphub:update-available', {
-                            detail: { versionId: latestVersionId }
-                        }));
-                    }
+                    window.dispatchEvent(new CustomEvent('rphub:update-available', {
+                        detail: { versionId: latestVersionId }
+                    }));
                 }
             } catch {
                 online.value = null;

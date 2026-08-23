@@ -63,9 +63,56 @@ assertAll(data, [
   'findUiTemplateUpdateBlock',
   'createDetailedJsonSyntaxError',
   // local processMainContent cache
+  'processMainContentImpl',
   'processMainContent',
-  'processMainContentCache'
+  'processMainContentCache',
+  "const imageStart = mainText.lastIndexOf('image###')",
+  "!imageTail.includes('###') && !/[\\r\\n]/.test(imageTail)"
 ], 'data-services.js contract');
+
+assert.match(app, /stripUiTemplateUpdateBlock,\s*processMainContent\s*\n\s*\} = window\.RPHubUiTemplateUtils/);
+assert.doesNotMatch(app, /const processMainContent\s*=/, 'app.js must use the shared cached processMainContent implementation');
+
+const dataServicesContext = {
+  window: {
+    RPHubBuiltinContent: { prompts: [] },
+    RPHubCardUtils: {
+      findLastUnprotectedMatch(source, pattern) {
+        const matcher = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+        let last = null;
+        let match;
+        while ((match = matcher.exec(source)) !== null) last = { index: match.index };
+        return last;
+      }
+    },
+    RPHubUtils: { parseCot: content => ({ main: String(content || '') }) },
+    __RPH_PERF__: {},
+    location: { href: 'https://example.test/' }
+  },
+  Vue: { markRaw: value => value, toRaw: value => value },
+  indexedDB: { open: () => { throw new Error('indexedDB is not used by this test'); } },
+  document: {
+    body: null,
+    documentElement: null,
+    readyState: 'loading',
+    createElement: () => ({ style: {}, setAttribute() {}, appendChild() {} }),
+    querySelectorAll: () => []
+  },
+  URL,
+  setTimeout: () => 0,
+  clearTimeout() {},
+  setInterval: () => 0,
+  clearInterval() {}
+};
+dataServicesContext.window.parent = dataServicesContext.window;
+runInNewContext(data, dataServicesContext);
+const sharedProcessMainContent = dataServicesContext.window.RPHubUiTemplateUtils.processMainContent;
+const incompleteImageResult = sharedProcessMainContent('正文 image###unfinished', true);
+assert.equal(incompleteImageResult.text, '正文 ', 'shared processMainContent must hide an unclosed image token while generating');
+assert.equal(incompleteImageResult.showSpinner, false, 'unclosed image token must not show the HTML spinner');
+const completeImageResult = sharedProcessMainContent('正文 image###finished###', true);
+assert.equal(completeImageResult.text, '正文 image###finished###', 'shared processMainContent must retain a closed image token');
+assert.equal(completeImageResult.showSpinner, false, 'closed image token must not show the HTML spinner');
 
 // ---- assets/js/ui-components.js ----
 const ui = await read('assets/js/ui-components.js');

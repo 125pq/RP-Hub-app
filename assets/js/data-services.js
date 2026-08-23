@@ -1682,6 +1682,13 @@ ${content}
     const processMainContentImpl = (mainText, isGeneratingState) => {
         mainText = stripUiTemplateUpdateBlock(mainText);
         if (!isGeneratingState) return { text: mainText, showSpinner: false };
+        const imageStart = mainText.lastIndexOf('image###');
+        if (imageStart !== -1) {
+            const imageTail = mainText.slice(imageStart + 'image###'.length);
+            if (!imageTail.includes('###') && !/[\r\n]/.test(imageTail)) {
+                mainText = mainText.slice(0, imageStart);
+            }
+        }
         const patterns = ['```html', '```vue', '<!DOCTYPE', '<div', '<style'];
         let earliestIndex = -1;
         for (const p of patterns) {

@@ -163,6 +163,23 @@ marked.use({
     }
 });
 
+const RollingText = {
+    props: { value: { type: [String, Number], default: '' } },
+    setup(props) {
+        const text = computed(() => String(props.value ?? ''));
+        const characters = computed(() => Array.from(text.value));
+        return { characters, text };
+    },
+    template: `
+        <span class="inline-flex" :aria-label="text">
+            <span v-for="(character, index) in characters" :key="index" class="inline-grid overflow-hidden">
+                <transition name="usage-roll" appear>
+                    <span :key="character" class="col-start-1 row-start-1" aria-hidden="true">{{ character }}</span>
+                </transition>
+            </span>
+        </span>`
+};
+
 const app = createApp({
     components: {
         ActionConfirmModal,
@@ -183,6 +200,7 @@ const app = createApp({
         PresetEditorModal,
         RegexEditorModal,
         RetryConfirmModal,
+        RollingText,
         SettingsHelp,
         SettingsPageHeader,
         StatusNoticeModal,
@@ -210,7 +228,6 @@ const app = createApp({
             uiTemplatePlacements: uiTemplatePlacementOptions,
             worldInfoPositions: worldInfoPositionOptions
         } = uiOptions;
-        const ACTIVE_TOOL_VECTOR_TYPE = activeToolConfig.types.vector;
         const ACTIVE_TOOL_KEYWORD_TYPE = activeToolConfig.types.keyword;
         const ACTIVE_TOOL_WEB_TYPE = activeToolConfig.types.web;
         const ACTIVE_TOOL_MIN_RESULT_COUNT = activeToolConfig.resultCount.min;
@@ -227,7 +244,6 @@ const app = createApp({
         const ACTIVE_TOOL_TAVILY_EXTRACT_ENDPOINT = activeToolConfig.tavily.extractEndpoint;
         const ACTIVE_TOOL_TAVILY_SEARCH_DEPTH = activeToolConfig.tavily.searchDepth;
         const ACTIVE_TOOL_TAVILY_EXTRACT_MAX_URLS = ACTIVE_TOOL_DEFAULT_RESULT_COUNT;
-        const createDefaultActiveTool = () => ({ ...activeToolConfig.defaults[0] });
         const getDefaultActiveToolDefinitions = () => activeToolConfig.defaults.map(tool => ({ ...tool }));
 
         // --- State ---
@@ -606,6 +622,7 @@ const app = createApp({
 
             useCharacterBackground: true,
             immersiveMode: false,
+            showLatestUsageBar: false,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
             uiTemplateAnalysisDepth: 4,
@@ -1200,7 +1217,7 @@ const app = createApp({
             return source
                 .replace(/[<>：:]/g, '')
                 .replace(/\s+/g, '_')
-                .trim() || 'tool_memory';
+                .trim() || 'tool_grep';
         };
 
         const normalizeActiveToolBaseCallName = (value) => normalizeActiveToolCallName(value)
@@ -1212,21 +1229,7 @@ const app = createApp({
 
         const normalizeActiveTool = (tool = {}) => {
             const resultCount = Number(tool.resultCount);
-            const rawCallName = normalizeActiveToolBaseCallName(tool.callName || tool.callPattern || 'tool_memory');
-            const removedWorldToolNames = [
-                'tool_world',
-                'tool_world_add',
-                'tool_world_cover',
-                'tool_world_list',
-                'tool_world_read',
-                'tool_world_edit'
-            ];
-            const isRemovedWorldTool = removedWorldToolNames.includes(rawCallName)
-                || ['world_info', 'world_info_list', 'world_info_read', 'world_info_edit'].includes(tool.type)
-                || removedWorldToolNames.includes(tool.id);
-            if (isRemovedWorldTool) {
-                return null;
-            }
+            const rawCallName = normalizeActiveToolBaseCallName(tool.callName || tool.callPattern || 'tool_grep');
             const isLegacyWebTool = rawCallName === 'tool_web'
                 || ['web_search', 'tavily', 'tavily_search'].includes(tool.type)
                 || ['tool_web', 'tool_web_add', 'tool_web_cover'].includes(tool.id)
@@ -1234,38 +1237,32 @@ const app = createApp({
             const callName = isLegacyWebTool ? 'tool_web' : rawCallName;
             const defaultTool = getDefaultActiveToolDefinitions()
                 .find(item => item.id === (isLegacyWebTool ? 'tool_web' : tool.id) || item.callName === callName);
-            const fallback = defaultTool || createDefaultActiveTool();
-            const normalizedCallName = defaultTool ? defaultTool.callName : callName;
+            if (!defaultTool) return null;
+            const fallback = defaultTool;
+            const normalizedCallName = fallback.callName;
             const resultCountVersion = Number(tool.resultCountVersion) || 1;
-            const isDefaultTool = !!defaultTool;
-            const normalizedType = isDefaultTool ? fallback.type : (tool.type || fallback.type || ACTIVE_TOOL_VECTOR_TYPE);
-            const description = isDefaultTool
-                ? fallback.description
-                : String(tool.description || fallback.description).trim();
+            const normalizedType = fallback.type;
             const countMin = getActiveToolResultCountMin({ type: normalizedType });
             const countMax = getActiveToolResultCountMax({ type: normalizedType });
             let normalizedResultCount = Number.isFinite(resultCount)
                 ? Math.max(countMin, Math.min(countMax, Math.round(resultCount)))
                 : (fallback.resultCount || ACTIVE_TOOL_DEFAULT_RESULT_COUNT);
             if (resultCountVersion < ACTIVE_TOOL_RESULT_COUNT_VERSION
-                && isDefaultTool
                 && normalizedCallName === fallback.callName
                 && normalizedType !== ACTIVE_TOOL_WEB_TYPE
                 && (!Number.isFinite(resultCount) || Math.round(resultCount) <= ACTIVE_TOOL_MIN_RESULT_COUNT || Math.round(resultCount) === 10)) {
                 normalizedResultCount = ACTIVE_TOOL_DEFAULT_RESULT_COUNT;
             }
             const normalized = {
-                id: isDefaultTool ? fallback.id : (tool.id || generateUUID()),
-                name: isDefaultTool ? fallback.name : (String(tool.name || fallback.name).trim() || fallback.name),
+                id: fallback.id,
+                name: fallback.name,
                 enabled: tool.enabled !== false,
                 type: normalizedType,
                 callName: normalizedCallName,
                 resultCount: normalizedResultCount,
                 resultCountVersion: ACTIVE_TOOL_RESULT_COUNT_VERSION,
-                description: description || fallback.description,
-                displayDescription: isDefaultTool
-                    ? fallback.displayDescription
-                    : (String(tool.displayDescription || fallback.displayDescription).trim() || fallback.displayDescription)
+                description: fallback.description,
+                displayDescription: fallback.displayDescription
             };
             if (normalizedType === ACTIVE_TOOL_WEB_TYPE) {
                 normalized.tavilyApiKey = String(tool.tavilyApiKey || tool.apiKey || fallback.tavilyApiKey || '').trim();
@@ -1419,11 +1416,19 @@ const app = createApp({
                 if (!getMainDb()) await initDB();
             },
             generateUUID,
-            getCharacterName: () => currentCharacter.value?.name || '',
+            getApiKey: () => settings.apiKey,
+            getApiUrl: () => settings.apiUrl,
             normalizeApiUsage,
             saveStoredValue: setStoredValue,
             toast: (...args) => showToast(...args)
         });
+        const latestMainTokenUsage = computed(() => tokenUsageHistory.value.find(
+            record => record.type === 'chat' || record.type === 'tool_continuation'
+        ) || null);
+        const formatLatestTokenCount = value => `${(Number(value || 0) / 1000).toFixed(2)}k`;
+        const formatLatestUsageCost = quota => Number.isFinite(quota)
+            ? `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+            : '--';
         const {
             cleanupUnusedStorage,
             formatStorageSize,
@@ -1890,6 +1895,7 @@ const app = createApp({
                     const legacySize = String(settings.imageSize || '');
                     settings.imageSize = legacySize.includes('横') ? '横图' : legacySize.includes('方') ? '方图' : '竖图';
                 }
+                settings.imageGenCount = Math.min(8, Math.max(2, Math.round(Number(settings.imageGenCount) || 2)));
                 settings.fontFamilyVersion = 4;
                 applyFontFamily(settings.fontFamily);
                 delete settings.renderLayerLimit;
@@ -2240,7 +2246,7 @@ const app = createApp({
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
             const mainText = parseCot(message?.content || '').main;
-            const imageMatches = [...mainText.matchAll(/image###([\s\S]*?)###/g)];
+            const imageMatches = [...mainText.matchAll(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/g)];
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
@@ -3298,7 +3304,7 @@ const app = createApp({
             if (isAutoImageGenEnabled.value) return text; // 生图开启时保留
             return String(text)
                 .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, '')
-                .replace(/image###([\s\S]*?)###/gi, '')
+                .replace(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/gi, '')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -3686,6 +3692,7 @@ const app = createApp({
             reader.readAsDataURL(file);
         });
         const recognizeChatImage = async (image) => {
+            const requestStartedAt = Date.now();
             try {
                 const result = await requestChatCompletion({
                     url: getApiEndpoint('chat/completions'),
@@ -3718,7 +3725,8 @@ const app = createApp({
                 recordApiUsage(result.usage, {
                     type: 'image_recognition',
                     model: settings.visionModel,
-                    detail: image.name
+                    durationMs: Date.now() - requestStartedAt,
+                    outputCharacters: description.length
                 });
                 return true;
             } catch (error) {
@@ -4092,6 +4100,7 @@ const app = createApp({
 
                 await Promise.all(templates.map(async (template) => {
                     const model = fallbackModel;
+                    const requestStartedAt = Date.now();
                     try {
                         const currentVariableJson = JSON.stringify(template.variableState || {}, null, 2);
                         const variableSchemaText = stringifyUiSchema(template.variableSchema).trim();
@@ -4136,7 +4145,8 @@ const app = createApp({
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
                             model,
-                            detail: template.name || ''
+                            durationMs: Date.now() - requestStartedAt,
+                            outputCharacters: content.length
                         });
                         pendingTemplateUpdates.push({ template, updates, model });
                     } catch (e) {
@@ -4438,14 +4448,7 @@ const app = createApp({
         };
 
         const getEnabledActiveTools = () => normalizeActiveTools()
-            .filter(tool => tool.enabled !== false && tool.callName)
-            .filter(tool => memorySettings.mode === MEMORY_MODE_VECTOR || !isVectorActiveTool(tool));
-
-        const isVectorActiveTool = (tool) => tool?.type === ACTIVE_TOOL_VECTOR_TYPE
-            || normalizeActiveToolBaseCallName(tool?.callName) === 'tool_memory';
-
-        const isKeywordActiveTool = (tool) => tool?.type === ACTIVE_TOOL_KEYWORD_TYPE
-            || normalizeActiveToolBaseCallName(tool?.callName) === 'tool_grep';
+            .filter(tool => tool.enabled !== false && tool.callName);
 
         const isWebActiveTool = (tool) => tool?.type === ACTIVE_TOOL_WEB_TYPE
             || normalizeActiveToolBaseCallName(tool?.callName) === 'tool_web'
@@ -4453,8 +4456,6 @@ const app = createApp({
             || /tavily|联网搜索/i.test(String(tool?.name || ''));
 
         const getActiveToolDisplayDescription = (tool) => tool?.displayDescription || '暂无说明';
-
-        const shouldSuppressStandardVectorMemoryRecall = () => false;
 
         const appendActiveToolReminderToLatestUserMessage = (msgArray) => {
             if (getEnabledActiveTools().length === 0) return msgArray;
@@ -4478,7 +4479,7 @@ const app = createApp({
         };
 
         const getActiveToolCallLabels = (tool) => {
-            const baseCallName = normalizeActiveToolBaseCallName(tool?.callName || 'tool_memory');
+            const baseCallName = normalizeActiveToolBaseCallName(tool?.callName || 'tool_grep');
             return {
                 add: `${baseCallName}_add`,
                 cover: `${baseCallName}_cover`
@@ -4497,7 +4498,7 @@ const app = createApp({
                         resultCount: tool.resultCount,
                         addCallName: labels.add,
                         coverCallName: labels.cover,
-                        kind: isWebActiveTool(tool) ? 'web' : (isKeywordActiveTool(tool) ? 'keyword' : 'vector')
+                        kind: isWebActiveTool(tool) ? 'web' : 'keyword'
                     };
                 }),
                 reminder: getActiveToolLatestUserReminder(),
@@ -4505,7 +4506,8 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
-        const appendNextResponsePrompt = (messageList, { cotEnabled = false, writingStylePrompt = '' } = {}) => {
+        const usesThinkingCotTag = (model) => /(?:deepseek|glm)/i.test(String(model || ''));
+        const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
                 message?.role === 'user'
                 && Array.isArray(message._sourceIndexes)
@@ -4514,7 +4516,10 @@ const app = createApp({
             if (!target) return;
 
             const prompt = BUILTIN_PROMPTS.buildNextResponsePrompt({
+                autoImageGenEnabled: isAutoImageGenEnabled.value,
                 cotEnabled,
+                imageGenCount: settings.imageGenCount,
+                useThinkingTag,
                 writingStylePrompt,
                 uiTemplateEnabled: settings.uiTemplateEnabled
                     && settings.uiTemplateMainModelAnalysis
@@ -4539,6 +4544,9 @@ const app = createApp({
             const continuationTargetMessage = continueAssistantMessageId
                 ? chatHistory.value.find(msg => msg && msg.role === 'assistant' && msg.id === continueAssistantMessageId) || null
                 : null;
+            const initialAssistantOutputLength = continuationTargetMessage
+                ? String(continuationTargetMessage.content || '').length + String(continuationTargetMessage.reasoning || '').length
+                : 0;
             if (!continuationTargetMessage && activeToolDepth === 0) {
                 resetActiveToolResultContext();
             }
@@ -4872,19 +4880,19 @@ const app = createApp({
             appendPendingUiTemplateCorrection(messages);
             appendNextResponsePrompt(messages, {
                 cotEnabled: cotPresets.length > 0,
+                useThinkingTag: usesThinkingCotTag(requestModel),
                 writingStylePrompt: writingStylePresets
                     .map(preset => preset.content
                         .replace(/^\s*<writing_style>\s*/i, '')
                         .replace(/\s*<\/writing_style>\s*$/i, ''))
-                    .concat(/deepseek/i.test(requestModel) ? '正文最少1000字。' : [])
+                .concat(/deepseek/i.test(requestModel) ? '正文最少800字。' : [])
                     .join('\n\n')
             });
 
             let selectedVectorMemories = [];
             if (memorySettings.enabled
                 && memorySettings.mode === MEMORY_MODE_VECTOR
-                && memories.value.length > 0
-                && !shouldSuppressStandardVectorMemoryRecall()) {
+                && memories.value.length > 0) {
                 selectedVectorMemories = await selectVectorMemoriesForContext(abortController.value.signal, {
                     excludedTurns: getRetainedRecentMemoryTurns(postprocessedChatHistory)
                 });
@@ -5100,10 +5108,17 @@ const app = createApp({
                         }
                     }
                 }
+                const duration = Date.now() - generationStartTime;
+                const outputCharacters = assistantMessage
+                    ? Math.max(0, String(assistantMessage.content || '').length
+                        + String(assistantMessage.reasoning || '').length
+                        - initialAssistantOutputLength)
+                    : 0;
                 recordApiUsage(responseUsage, {
                     type: activeToolDepth > 0 ? 'tool_continuation' : 'chat',
                     model: requestModel,
-                    detail: activeToolDepth > 0 ? `第 ${activeToolDepth} 次续写` : ''
+                    durationMs: duration,
+                    outputCharacters
                 });
 
                 if (assistantMessage) {
@@ -5112,7 +5127,6 @@ const app = createApp({
                         applyMainModelUiTemplateUpdates(assistantMessage, requestModel);
                     }
 
-                    const duration = Date.now() - generationStartTime;
                     recentGenerationTimes.value.push({ id: assistantMessage.id, duration });
                     if (recentGenerationTimes.value.length > 5) recentGenerationTimes.value.shift();
                 }
@@ -5393,11 +5407,12 @@ const app = createApp({
             return content;
         };
 
-        const requestClassicMemoryCompletion = async (requestMessages, detail, signal) => {
+        const requestClassicMemoryCompletion = async (requestMessages, signal) => {
             const model = String(memorySettings.classicModel || '').trim();
             if (!settings.apiUrl || !settings.apiKey) throw new Error('请先配置 API 地址和 Key');
             if (!model) throw new Error('请先选择总结模式副模型');
 
+            const requestStartedAt = Date.now();
             const response = await fetch(getApiEndpoint('chat/completions'), {
                 method: 'POST',
                 headers: {
@@ -5419,7 +5434,12 @@ const app = createApp({
                 .replace(/^(?:最新对话总结|总结)[:：]\s*/i, '')
                 .trim();
             if (!summary) throw new Error('副模型没有返回有效总结');
-            recordApiUsage(extractApiUsageFromText(rawText), { type: 'summary', model, detail });
+            recordApiUsage(extractApiUsageFromText(rawText), {
+                type: 'summary',
+                model,
+                durationMs: Date.now() - requestStartedAt,
+                outputCharacters: summary.length
+            });
             return summary.replace(/\n{3,}/g, '\n\n');
         };
 
@@ -5448,7 +5468,7 @@ const app = createApp({
                 role: 'user',
                 content: BUILTIN_PROMPTS.buildClassicSummaryFinalInstruction(job.turn)
             });
-            return requestClassicMemoryCompletion(requestMessages, `第 ${job.turn} 轮`, signal);
+            return requestClassicMemoryCompletion(requestMessages, signal);
         };
 
         const requestClassicSecondarySummary = async (group, signal) => {
@@ -5470,7 +5490,7 @@ const app = createApp({
                 role: 'user',
                 content: ordered.map(memory => `【第 ${memory.turn} 轮】\n${memory.summary}`).join('\n\n')
             }];
-            return requestClassicMemoryCompletion(requestMessages, `第 ${startTurn}-${endTurn} 轮二次压缩`, signal);
+            return requestClassicMemoryCompletion(requestMessages, signal);
         };
 
         const getSecondaryClassicSourceMemories = (memory) => prepareClassicMemoriesForRuntime(
@@ -5810,6 +5830,7 @@ const app = createApp({
             const normalizedInputs = inputs.map(input => String(input || '').trim());
             if (normalizedInputs.some(input => !input)) throw new Error('嵌入内容不能为空');
 
+            const requestStartedAt = Date.now();
             const response = await fetch(getApiEndpoint('embeddings'), {
                 method: 'POST',
                 headers: {
@@ -5847,7 +5868,8 @@ const app = createApp({
             recordApiUsage(getApiUsagePayload(data), {
                 type: 'embedding',
                 model,
-                detail: `${normalizedInputs.length} 条输入`
+                durationMs: Date.now() - requestStartedAt,
+                outputCharacters: 0
             });
             return vectors;
         };
@@ -6320,27 +6342,6 @@ const app = createApp({
             isVectorMemorySearching.value = false;
         };
 
-        const searchVectorMemoriesForTool = async (query, limit, signal) => {
-            const cleanQuery = trimMemoryText(stripVectorMemoryCode(query), 800);
-            if (!cleanQuery) return [];
-
-            const excludedTurns = getCurrentRetainedVectorMemoryTurns();
-            const vectorMemories = memories.value
-                .filter(isEnabledVectorMemory)
-                .filter(memory => isEmbeddingLike(memory.embedding) && memory.embedding.length > 0)
-                .filter(memory => {
-                    const turn = Number(memory.turn) || 0;
-                    return turn <= 0 || !excludedTurns.has(turn);
-                });
-            if (vectorMemories.length === 0) return [];
-
-            const [queryVector] = await requestMemoryEmbeddings([`工具检索：${cleanQuery}`], signal);
-            const queryTerms = extractVectorQueryTerms(cleanQuery);
-            return (await scoreVectorMemories(vectorMemories, queryVector, queryTerms, signal))
-                .slice(0, Math.max(ACTIVE_TOOL_MIN_RESULT_COUNT, Math.min(ACTIVE_TOOL_MAX_RESULT_COUNT, Number(limit) || ACTIVE_TOOL_DEFAULT_RESULT_COUNT)))
-                .map(toScoredVectorMemory);
-        };
-
         const extractKeywordToolTerms = (query) => {
             const cleanQuery = trimMemoryText(stripVectorMemoryCode(query), 300);
             if (!cleanQuery) return [];
@@ -6613,7 +6614,7 @@ const app = createApp({
         const formatActiveToolNoticeContext = (tool, query, mode = 'add', status = 'empty', message = '') => {
             const title = escapeXmlAttribute(tool?.name || '工具');
             const modeValue = mode === 'cover' ? 'cover' : 'add';
-            const labels = getActiveToolCallLabels(tool || createDefaultActiveTool());
+            const labels = getActiveToolCallLabels(tool);
             const callName = escapeXmlAttribute(modeValue === 'cover' ? labels.cover : labels.add);
             const cleanQuery = trimMemoryText(query, 800);
             const statusValue = escapeXmlAttribute(status || 'notice');
@@ -6630,7 +6631,7 @@ const app = createApp({
 
         const normalizeActiveToolResultContext = (resultContext, tool, query, mode = 'add') => {
             const text = String(resultContext || '').trim();
-            const hasResultBody = /<(?:description|error|memory_fragment|dialogue_fragment|web_source|web_page|failed_page)\b/i.test(text);
+            const hasResultBody = /<(?:description|error|dialogue_fragment|web_source|web_page|failed_page)\b/i.test(text);
             if (!text || text === '</active_tool_result>' || !text.includes('<active_tool_result') || !hasResultBody) {
                 return formatActiveToolNoticeContext(
                     tool,
@@ -6724,60 +6725,30 @@ const app = createApp({
                     '</active_tool_result>'
                 ].filter(Boolean).join('\n');
             }
-            if (isKeywordActiveTool(tool)) {
-                if (!Array.isArray(results) || results.length === 0) {
-                    return [
-                        `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="empty">`,
-                        `  <description>本次关键词检索没有检索成功，没有找到包含该关键词的对话片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请换更贴近原文的关键词再次调用，不要编造未出现过的对话内容。</description>`,
-                        '</active_tool_result>'
-                    ].join('\n');
-                }
-
-                const formattedResults = results.map(item => {
-                    const turnValue = escapeXmlAttribute(item.turn || '?');
-                    const roleValue = escapeXmlAttribute(item.role || 'unknown');
-                    const speakerValue = escapeXmlAttribute(item.speaker || '');
-                    const matchedValue = escapeXmlAttribute((item.matchedTerms || []).join(', '));
-                    const fragmentText = indentXmlText(item.dialogueText || '', 4);
-                    return [
-                        `  <dialogue_fragment turn="${turnValue}" role="${roleValue}" speaker="${speakerValue}" matched="${matchedValue}">`,
-                        fragmentText,
-                        '  </dialogue_fragment>'
-                    ].join('\n');
-                }).join('\n\n');
-
-                return [
-                    `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}">`,
-                    `  <description>以下是系统根据关键词从当前对话历史中精确抓取到的原文片段。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据这些原文片段继续回答，不要把没有出现过的内容说成事实；如果仍不足以明确回答，请换更贴近原文的关键词继续调用工具。</description>`,
-                    formattedResults,
-                    '</active_tool_result>'
-                ].join('\n');
-            }
             if (!Array.isArray(results) || results.length === 0) {
                 return [
                     `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="empty">`,
-                    `  <description>本次向量记忆没有检索成功，没有找到可用记忆片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请先判断当前上下文是否已经明确且足够；如果仍不够明确完整，请换更具体的检索内容再次调用，不要重复完全相同的查询。</description>`,
+                    `  <description>本次关键词检索没有检索成功，没有找到包含该关键词的对话片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请换更贴近原文的关键词再次调用，不要编造未出现过的对话内容。</description>`,
                     '</active_tool_result>'
                 ].join('\n');
             }
 
-            const formattedResults = sortVectorMemoriesByTime(results).map(memory => {
-                const turnValue = escapeXmlAttribute(memory.turn || '?');
-                const scoreValue = escapeXmlAttribute(Number.isFinite(memory.vectorScore)
-                    ? `${(memory.vectorScore * 100).toFixed(1)}%`
-                    : 'unknown');
-                const storyTimeValue = escapeXmlAttribute(memory.storyTime || '');
-                const fragmentText = indentXmlText(memory.paragraph || memory.summary || memory.sourceText || '', 4);
+            const formattedResults = results.map(item => {
+                const turnValue = escapeXmlAttribute(item.turn || '?');
+                const roleValue = escapeXmlAttribute(item.role || 'unknown');
+                const speakerValue = escapeXmlAttribute(item.speaker || '');
+                const matchedValue = escapeXmlAttribute((item.matchedTerms || []).join(', '));
+                const fragmentText = indentXmlText(item.dialogueText || '', 4);
                 return [
-                    `  <memory_fragment turn="${turnValue}" similarity="${scoreValue}" story_time="${storyTimeValue}">`,
+                    `  <dialogue_fragment turn="${turnValue}" role="${roleValue}" speaker="${speakerValue}" matched="${matchedValue}">`,
                     fragmentText,
-                    '  </memory_fragment>'
+                    '  </dialogue_fragment>'
                 ].join('\n');
             }).join('\n\n');
 
             return [
                 `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}">`,
-                `  <description>以下是系统根据上一条正文工具调用检索到的向量记忆。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请用这些结果继续回答用户，不要复述工具调用标签，也不要把这些内容当作当前现场；如果结果仍不足以明确回答，或仍有疑点，请换更具体的检索内容继续调用工具。</description>`,
+                `  <description>以下是系统根据关键词从当前对话历史中精确抓取到的原文片段。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据这些原文片段继续回答，不要把没有出现过的内容说成事实；如果仍不足以明确回答，请换更贴近原文的关键词继续调用工具。</description>`,
                 formattedResults,
                 '</active_tool_result>'
             ].join('\n');
@@ -6929,11 +6900,11 @@ const app = createApp({
         const createActiveToolUi = (toolCall, initialStatus = 'queued') => ({
             id: generateUUID(),
             toolId: toolCall.tool?.id || '',
-            toolType: toolCall.tool?.type || ACTIVE_TOOL_VECTOR_TYPE,
+            toolType: toolCall.tool?.type || ACTIVE_TOOL_KEYWORD_TYPE,
             toolResultCount: toolCall.tool?.resultCount || ACTIVE_TOOL_DEFAULT_RESULT_COUNT,
-            name: toolCall.tool?.name || '向量记忆主动检索',
-            callName: toolCall.callLabel || toolCall.tool?.callName || 'tool_memory_add',
-            baseCallName: toolCall.tool?.callName || 'tool_memory',
+            name: toolCall.tool?.name || '关键词检索',
+            callName: toolCall.callLabel || toolCall.tool?.callName || 'tool_grep_add',
+            baseCallName: toolCall.tool?.callName || 'tool_grep',
             mode: toolCall.mode || 'add',
             query: toolCall.query || '',
             raw: toolCall.raw,
@@ -6953,24 +6924,20 @@ const app = createApp({
                 || toolCall?.callName
                 || ''
             );
-            if (toolCall?.toolType === ACTIVE_TOOL_KEYWORD_TYPE || baseCallName === 'tool_grep') {
-                return ACTIVE_TOOL_KEYWORD_TYPE;
-            }
             if (toolCall?.toolType === ACTIVE_TOOL_WEB_TYPE || baseCallName === 'tool_web') {
                 return ACTIVE_TOOL_WEB_TYPE;
             }
-            if (toolCall?.toolType === ACTIVE_TOOL_VECTOR_TYPE || baseCallName === 'tool_memory') {
-                return ACTIVE_TOOL_VECTOR_TYPE;
+            if (toolCall?.toolType === ACTIVE_TOOL_KEYWORD_TYPE || baseCallName === 'tool_grep') {
+                return ACTIVE_TOOL_KEYWORD_TYPE;
             }
-            return baseCallName || toolCall?.toolId || ACTIVE_TOOL_VECTOR_TYPE;
+            return '';
         };
 
         const getToolCallDisplayName = (toolCall) => {
             const groupKey = getActiveToolUiGroupKey(toolCall);
-            if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) return '关键词检索';
             if (groupKey === ACTIVE_TOOL_WEB_TYPE) return 'Tavily 联网搜索';
-            if (groupKey === ACTIVE_TOOL_VECTOR_TYPE) return '向量记忆主动检索';
-            return toolCall?.name || '向量记忆主动检索';
+            if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) return '关键词检索';
+            return toolCall?.name || '工具调用';
         };
 
         const getToolCallModeText = (toolCall) => {
@@ -6987,8 +6954,7 @@ const app = createApp({
             if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) {
                 return mode === 'cover' ? '覆盖关键词检索' : '关键词检索';
             }
-
-            return mode === 'cover' ? '覆盖向量检索' : '向量检索';
+            return '工具调用';
         };
 
         const TOOL_CALL_RUNNING_STATUSES = ['running', 'receiving', 'queued'];
@@ -7211,10 +7177,10 @@ const app = createApp({
                 message._activeToolPendingUiId = toolUi.id;
             }
             toolUi.toolId = toolCall.tool?.id || toolUi.toolId || '';
-            toolUi.toolType = toolCall.tool?.type || toolUi.toolType || ACTIVE_TOOL_VECTOR_TYPE;
+            toolUi.toolType = toolCall.tool?.type || toolUi.toolType || ACTIVE_TOOL_KEYWORD_TYPE;
             toolUi.name = toolCall.tool?.name || toolUi.name || '工具';
-            toolUi.callName = toolCall.callLabel || toolUi.callName || 'tool_memory_add';
-            toolUi.baseCallName = toolCall.tool?.callName || toolUi.baseCallName || 'tool_memory';
+            toolUi.callName = toolCall.callLabel || toolUi.callName || 'tool_grep_add';
+            toolUi.baseCallName = toolCall.tool?.callName || toolUi.baseCallName || 'tool_grep';
             toolUi.mode = toolCall.mode || toolUi.mode || 'add';
             toolUi.query = getPendingToolCallQueryPreview(toolCall);
             toolUi.reason = cleanActiveToolCallReason(toolCall.reason || toolUi.reason || '');
@@ -7305,7 +7271,7 @@ const app = createApp({
             const baseCallName = normalizeActiveToolBaseCallName(
                 toolUi?.baseCallName
                 || toolUi?.callName
-                || 'tool_memory'
+                || 'tool_grep'
             );
             const enabledMatch = getEnabledActiveTools().find(tool => (
                 tool.id === toolUi?.toolId
@@ -7315,11 +7281,12 @@ const app = createApp({
             return getDefaultActiveToolDefinitions().find(tool => (
                 tool.id === toolUi?.toolId
                 || normalizeActiveToolBaseCallName(tool.callName) === baseCallName
-            )) || createDefaultActiveTool();
+            )) || null;
         };
 
         const buildActiveToolCallFromUi = (toolUi) => {
             const tool = resolveActiveToolForUi(toolUi);
+            if (!tool) return null;
             return {
                 tool,
                 mode: toolUi?.mode || 'add',
@@ -7335,7 +7302,7 @@ const app = createApp({
             let toolUis = Array.isArray(assistantMessage?.toolCalls)
                 ? assistantMessage.toolCalls.filter(toolCall => ['queued', 'running'].includes(toolCall?.status))
                 : [];
-            let toolCalls = toolUis.map(buildActiveToolCallFromUi).filter(toolCall => toolCall.query);
+            let toolCalls = toolUis.map(buildActiveToolCallFromUi).filter(toolCall => toolCall?.query);
 
             if (toolCalls.length === 0) {
                 toolCalls = findActiveToolCallsInAssistantMessage(assistantMessage);
@@ -7403,25 +7370,15 @@ const app = createApp({
                         await saveChatHistoryNow();
                     }
 
-                    if (isVectorActiveTool(toolCall.tool) && !memorySettings.enabled) {
-                        throw new Error('记忆系统未开启，无法执行向量检索。');
-                    }
-
-                    const results = isKeywordActiveTool(toolCall.tool)
-                        ? searchDialogueByKeywordForTool(toolCall.query, toolCall.tool.resultCount, {
-                            excludeMessageId: assistantMessage.id
-                        })
-                        : isWebActiveTool(toolCall.tool)
+                    const results = isWebActiveTool(toolCall.tool)
                         ? await searchWebByTavilyForTool(
                             toolCall.query,
                             toolCall.tool,
                             toolAbort.signal
                         )
-                        : await searchVectorMemoriesForTool(
-                            toolCall.query,
-                            toolCall.tool.resultCount,
-                            toolAbort.signal
-                        );
+                        : searchDialogueByKeywordForTool(toolCall.query, toolCall.tool.resultCount, {
+                            excludeMessageId: assistantMessage.id
+                        });
                     if (toolAbort.signal.aborted) throw createAbortReason('Generation cancelled by user');
 
                     const resultContext = normalizeActiveToolResultContext(
@@ -8202,7 +8159,7 @@ const app = createApp({
             const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
-                regex: '/image###([\\s\\S]*?)###/g',
+                regex: '/image###([^\\r\\n]*?)(?:###|(?=\\r?\\n)|$)/g',
             replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
@@ -8224,7 +8181,7 @@ const app = createApp({
 
             // 2. 自动生图世界书
             const autoImageGenWIName = '自动生图';
-            const imageGenCount = Math.min(8, Math.max(1, Number(settings.imageGenCount) || 2));
+            const imageGenCount = Math.min(8, Math.max(2, Number(settings.imageGenCount) || 2));
             const autoImageGenWIContent = {
                 comment: autoImageGenWIName,
                 keys: [],
@@ -9348,7 +9305,8 @@ const app = createApp({
                     memoryEnabled: memorySettings.enabled,
                     uiTemplateAnalysisEnabled: settings.uiTemplateEnabled
                         && settings.uiTemplateMainModelAnalysis
-                        && activeUiTemplates.value.length > 0
+                        && activeUiTemplates.value.length > 0,
+                    useThinkingOpening: usesThinkingCotTag(settings.model)
                 });
                 const existingCotPreset = presets.value.find(p => p.name === cotPresetName);
                 if (!existingCotPreset) {
@@ -9368,7 +9326,8 @@ const app = createApp({
                 () => memorySettings.enabled,
                 () => settings.uiTemplateEnabled,
                 () => settings.uiTemplateMainModelAnalysis,
-                () => activeUiTemplates.value.length
+                () => activeUiTemplates.value.length,
+                () => settings.model
             ], syncCotPresetContent);
             removeLegacyUserRegex();
 
@@ -9507,7 +9466,6 @@ const app = createApp({
             removePlatformBackListener();
             removePlatformStateListener();
         });
-
         const switchProfile = (id) => {
             const profile = userProfiles.value.find(p => p.uuid === id);
             if (profile) {
@@ -9686,6 +9644,7 @@ const app = createApp({
             tokenUsageHistory, tokenUsagePage, tokenUsagePageCount, tokenUsageFilter, tokenUsageTimeFilter,
             showTokenUsageTimeFilter, tokenUsageTimeFilterOptions, tokenUsageTimeFilterLabel,
             filteredTokenUsageHistory, tokenUsageStats, displayedTokenUsageHistory,
+            latestMainTokenUsage, formatLatestTokenCount, formatLatestUsageCost,
             getUncachedInputTokens, formatTokenCount, formatTokenAggregate, formatTokenUsageTime, getTokenUsageTypeLabel, clearTokenUsageHistory,
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
