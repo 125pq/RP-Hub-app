@@ -10,8 +10,8 @@
 
     特性：
       - 每步进度显示（[1/5] ...）
-      - 构建失败自动重试（--BuildRetries，默认 2 次额外重试）
-      - 设备未连接自动等待并重试（--DeviceRetries / --DeviceWaitSeconds）
+      - 构建失败自动重试（-BuildRetries，默认 2 次额外重试）
+      - 设备未连接自动等待并重试（-DeviceRetries / -DeviceWaitSeconds）
       - 安装失败自动重试
       - 每步返回清晰成功/失败信息；任一失败返回非零退出码
 
@@ -152,6 +152,11 @@ if (-not $SkipBuild) {
 } else {
     Write-Step '2/5 跳过构建 (-SkipBuild)，使用已存在的 APK'
     $targetApk = Join-Path $debugApkDir "$ApkName.apk"
+    if (-not (Test-Path -LiteralPath $targetApk) -and $ApkName -eq 'RP-Hub-debug') {
+        $latestApk = Get-ChildItem -LiteralPath $debugApkDir -Filter '*-debug.apk' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($latestApk) { $targetApk = $latestApk.FullName }
+    }
     if (-not (Test-Path -LiteralPath $targetApk)) {
         Write-Result "找不到 APK: $targetApk (请先构建或去掉 -SkipBuild)" -IsError
         exit 2
