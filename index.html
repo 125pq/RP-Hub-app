@@ -348,7 +348,7 @@
                 <!-- Chat Messages -->
                 <div ref="chatContainer" @click="showChatModelSelector = false"
                     @scroll="handleChatScroll"
-                    class="flex-1 overflow-y-auto overflow-x-hidden px-2 pt-14 md:pt-16 pb-44 md:pb-60 relative z-0 space-y-12 md:space-y-14 transition-all duration-500"
+                    class="flex-1 overflow-y-auto overflow-x-hidden px-2 pt-14 md:pt-16 pb-52 md:pb-60 relative z-0 space-y-12 md:space-y-14 transition-all duration-500"
                     :class="!settings.useCharacterBackground || !currentCharacter || !currentCharacter?.avatar ? 'bg-gray-50' : ''">
                     <div v-if="!currentCharacter"
                         class="flex flex-col items-center justify-center h-full text-gray-500">
@@ -761,6 +761,30 @@
                                 </button>
                             </div>
                         </div>
+                        <div v-if="settings.showLatestUsageBar && latestMainTokenUsage"
+                            class="mx-1 mb-2 grid grid-cols-3 divide-x divide-gray-200/80 overflow-hidden rounded-xl bg-gradient-to-r from-gray-50/90 via-white/90 to-gray-50/90 py-1.5 text-xs text-gray-500 shadow-inner md:text-[13px]">
+                            <span class="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-1" title="输入 Token">
+                                <span class="h-1.5 w-1.5 flex-none rounded-full bg-primary-500"></span>
+                                <span class="inline-flex min-w-0 items-center gap-1 font-mono font-semibold tabular-nums">
+                                    <rolling-text class="text-gray-700" :value="formatLatestTokenCount(getUncachedInputTokens(latestMainTokenUsage))"></rolling-text>
+                                    <span v-if="Number(latestMainTokenUsage.cacheReadTokens) > 0"
+                                        class="inline-flex min-w-0 items-center gap-0.5 text-gray-500/80" title="缓存读取">
+                                        <svg class="h-3.5 w-3.5 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
+                                        <rolling-text :value="formatLatestTokenCount(latestMainTokenUsage.cacheReadTokens)"></rolling-text>
+                                    </span>
+                                </span>
+                            </span>
+                            <span class="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-1" title="输出 Token">
+                                <span class="h-1.5 w-1.5 flex-none rounded-full bg-yellow-400"></span>
+                                <rolling-text class="font-mono font-semibold tabular-nums text-gray-700"
+                                    :value="formatLatestTokenCount(latestMainTokenUsage.outputTokens)"></rolling-text>
+                            </span>
+                            <span class="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-1" title="本次请求消耗">
+                                <span class="h-1.5 w-1.5 flex-none rounded-full bg-green-500"></span>
+                                <rolling-text class="font-mono font-semibold tabular-nums text-gray-700"
+                                    :value="formatLatestUsageCost(latestMainTokenUsage.actualQuota)"></rolling-text>
+                            </span>
+                        </div>
                         <div class="relative w-full flex justify-between items-center mb-2 px-1">
                             <!-- Left controls: AutoImage -->
                             <div class="flex items-center gap-2">
@@ -910,6 +934,13 @@
                                                             <span>沉浸模式</span>
                                                             <span class="relative inline-flex flex-none items-center">
                                                                 <input v-model="settings.immersiveMode" type="checkbox" class="settings-toggle-input sr-only">
+                                                                <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
+                                                            </span>
+                                                        </label>
+                                                        <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50">
+                                                            <span>最新用量</span>
+                                                            <span class="relative inline-flex flex-none items-center">
+                                                                <input v-model="settings.showLatestUsageBar" type="checkbox" class="settings-toggle-input sr-only">
                                                                 <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
                                                             </span>
                                                         </label>
