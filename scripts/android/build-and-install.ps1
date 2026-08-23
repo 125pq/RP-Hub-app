@@ -46,16 +46,47 @@ $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $workspaceRoot = Split-Path -Parent $projectRoot
 $buildScript = Join-Path $PSScriptRoot 'build-android-debug.ps1'
 $debugApkDir = Join-Path $projectRoot 'debug_apk'
-$toolchainAdb = Join-Path $workspaceRoot '.android-toolchain\android-sdk\platform-tools\adb.exe'
-# 优先使用工具链 adb；找不到则解析 PATH 里的 adb。不能用 Test-Path 检查裸命令名。
-$pathAdb = Get-Command adb.exe -ErrorAction SilentlyContinue
-$adb = if (Test-Path -LiteralPath $toolchainAdb) {
-    $toolchainAdb
-} elseif ($pathAdb) {
-    $pathAdb.Source
-} else {
-    $null
+function Find-Adb {
+    # 不依赖 Get-Command：从 .bat 启动的 Windows PowerShell 可能拿不到
+    # 用户 PATH，但 Android SDK 环境变量仍然可用。
+    $localSdk = if ($env:LOCALAPPDATA) {
+        Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+    } else {
+        $null
+    }
+    $sdkRoots = @(
+        (Join-Path $workspaceRoot '.android-toolchain\android-sdk'),
+        (Join-Path $projectRoot '.android-toolchain\android-sdk'),
+        $env:ANDROID_HOME,
+        $env:ANDROID_SDK_ROOT,
+        $localSdk
+    )
+
+    foreach ($sdkRoot in ($sdkRoots | Where-Object { $_ } | Select-Object -Unique)) {
+        $candidate = Join-Path $sdkRoot 'platform-tools\adb.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    # PATH 可能包含引号、空项或相对路径；逐项检查可兼容 PS 5.1。
+    foreach ($pathEntry in (($env:Path -split ';') | Where-Object { $_ })) {
+        $entry = $pathEntry.Trim().Trim('"')
+        if (-not $entry) { continue }
+        $candidate = Join-Path $entry 'adb.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    # 最后保留系统命令解析作为兜底（例如 PATHEXT/应用执行别名场景）。
+    $command = Get-Command adb.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($command -and $command.Source) { return $command.Source }
+    return $null
 }
+
+$adb = Find-Adb
 $appId = 'io.github.pq125.rphub.debug'
 
 function Write-Step([string]$message) {
