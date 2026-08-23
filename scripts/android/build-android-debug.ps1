@@ -47,6 +47,18 @@ function Find-AndroidSdk {
     throw 'Android SDK Platform 35 and Build Tools 35.0.0 were not found. Set ANDROID_HOME.'
 }
 
+function Get-Sha256Hex([string]$Path) {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha256.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 $jdkHome = Find-JdkHome
 $androidSdk = Find-AndroidSdk
 $previousErrorActionPreference = $ErrorActionPreference
@@ -87,10 +99,10 @@ try {
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
 
     $apk = Get-Item -LiteralPath $outputApk
-    $hash = Get-FileHash -LiteralPath $outputApk -Algorithm SHA256
+    $hash = Get-Sha256Hex $outputApk
     Write-Output "APK=$($apk.FullName)"
     Write-Output "APK_BYTES=$($apk.Length)"
-    Write-Output "APK_SHA256=$($hash.Hash.ToLowerInvariant())"
+    Write-Output "APK_SHA256=$hash"
 } finally {
     Pop-Location
 }
