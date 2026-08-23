@@ -857,7 +857,11 @@
         root.dataset.rphubThemeMode = prefs.themeMode;
         root.dataset.rphubTheme = dark ? 'dark' : 'light';
         root.classList.toggle('rphub-night-mode', dark);
-        root.style.colorScheme = dark ? 'dark' : 'light';
+        // MainActivity enables algorithmic darkening. A dark color-scheme hint
+        // tells WebView the page already owns dark colors and suppresses that
+        // pass; the inverse hint therefore maps the local preference to the
+        // desired final appearance.
+        root.style.colorScheme = dark ? 'light' : 'dark';
     }
 
     function bindSystemTheme() {
