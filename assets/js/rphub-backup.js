@@ -854,7 +854,8 @@
         const systemDark = !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
         const dark = prefs.themeMode === 'dark' || (prefs.themeMode === 'system' && systemDark);
         const root = document.documentElement;
-        root.dataset.rphubTheme = prefs.themeMode;
+        root.dataset.rphubThemeMode = prefs.themeMode;
+        root.dataset.rphubTheme = dark ? 'dark' : 'light';
         root.classList.toggle('rphub-night-mode', dark);
         root.style.colorScheme = dark ? 'dark' : 'light';
     }
