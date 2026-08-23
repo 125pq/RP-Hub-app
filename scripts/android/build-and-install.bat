@@ -42,4 +42,4 @@ if "%EXITCODE%"=="0" (
 )
 echo.
 pause
-endlocal
+endlocal & exit /b %EXITCODE%
