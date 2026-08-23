@@ -827,6 +827,7 @@
     let panelEl = null;
     let observer = null;
     let uiInit = false;
+    let themeMediaQuery = null;
     const CONTROL_PREFS_KEY = 'rp_hub_ui_preferences';
     const DEFAULT_CONTROL_PREFS = Object.freeze({ themeMode: 'system', mirrorSquare: true });
     let controlPrefs = null;
@@ -850,9 +851,21 @@
 
     function applyThemePreference() {
         const prefs = getControlPrefs();
-        const dark = prefs.themeMode === 'dark' || (prefs.themeMode === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
-        document.documentElement.classList.toggle('rphub-night-mode', !!dark);
-        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        const systemDark = !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+        const dark = prefs.themeMode === 'dark' || (prefs.themeMode === 'system' && systemDark);
+        const root = document.documentElement;
+        root.dataset.rphubTheme = prefs.themeMode;
+        root.classList.toggle('dark', dark);
+        root.classList.toggle('rphub-night-mode', dark);
+        root.style.colorScheme = dark ? 'dark' : 'light';
+    }
+
+    function bindSystemTheme() {
+        themeMediaQuery?.removeEventListener?.('change', applyThemePreference);
+        themeMediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') || null;
+        themeMediaQuery?.addEventListener?.('change', () => {
+            if (getControlPrefs().themeMode === 'system') applyThemePreference();
+        });
     }
 
     const setStatus = (text, isError = false) => {
@@ -1027,6 +1040,7 @@
         if (!document?.body || !document?.createElement || !document?.head) return;
         uiInit = true;
         applyThemePreference();
+        bindSystemTheme();
         ensureSidebarButton();
         // Keep the button present even if the sidebar footer re-renders.
         if (typeof MutationObserver === 'function' && !observer) {
