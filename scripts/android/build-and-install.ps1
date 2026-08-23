@@ -47,8 +47,15 @@ $workspaceRoot = Split-Path -Parent $projectRoot
 $buildScript = Join-Path $PSScriptRoot 'build-android-debug.ps1'
 $debugApkDir = Join-Path $projectRoot 'debug_apk'
 $toolchainAdb = Join-Path $workspaceRoot '.android-toolchain\android-sdk\platform-tools\adb.exe'
-# 优先使用工具链 adb；找不到则退化为 PATH 里的 adb
-$adb = if (Test-Path -LiteralPath $toolchainAdb) { $toolchainAdb } else { 'adb' }
+# 优先使用工具链 adb；找不到则解析 PATH 里的 adb。不能用 Test-Path 检查裸命令名。
+$pathAdb = Get-Command adb.exe -ErrorAction SilentlyContinue
+$adb = if (Test-Path -LiteralPath $toolchainAdb) {
+    $toolchainAdb
+} elseif ($pathAdb) {
+    $pathAdb.Source
+} else {
+    $null
+}
 $appId = 'io.github.pq125.rphub.debug'
 
 function Write-Step([string]$message) {
@@ -63,16 +70,16 @@ function Write-Result([string]$message, [switch]$IsError) {
     }
 }
 
-function Invoke-Adb([string]$arguments, [switch]$AllowFail) {
+function Invoke-Adb([string[]]$arguments, [switch]$AllowFail) {
     # PS5.1 treats native stderr as NativeCommandError under 'Stop'. Relax around
     # the call, then inspect $LASTEXITCODE ourselves.
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $out = & $adb $arguments 2>&1
+    $out = & $adb @arguments 2>&1
     $code = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     if ($code -ne 0 -and -not $AllowFail) {
-        throw "adb $arguments 失败 (exit=$code): $out"
+        throw "adb $($arguments -join ' ') 失败 (exit=$code): $out"
     }
     return @{ Output = ($out -join "`n"); ExitCode = $code }
 }
@@ -96,8 +103,8 @@ if (-not (Test-Path -LiteralPath $buildScript)) {
     Write-Result "找不到构建脚本: $buildScript" -IsError
     exit 1
 }
-if (-not (Test-Path -LiteralPath $adb)) {
-    Write-Result "找不到 adb.exe: $adb" -IsError
+if (-not $adb) {
+    Write-Result '找不到 adb.exe。请安装 Android SDK platform-tools，或将 adb 加入 PATH。' -IsError
     exit 1
 }
 Write-Result "adb = $adb"
@@ -128,6 +135,12 @@ if (-not $SkipBuild) {
         } catch {
             if ($attempt -lt $BuildRetries) { continue }
             Write-Result "构建失败: $($_.Exception.Message)" -IsError
+            if ($buildOutput) {
+                Write-Host "构建日志（末尾）:" -ForegroundColor DarkGray
+                ($buildOutput -split "`n" | Select-Object -Last 30) | ForEach-Object {
+                    Write-Host "  $_" -ForegroundColor DarkGray
+                }
+            }
             exit 2
         }
     }
@@ -137,10 +150,10 @@ if (-not $SkipBuild) {
     $sizeMb = [math]::Round((Get-Item -LiteralPath $targetApk).Length / 1MB, 2)
     Write-Result "构建成功 -> $targetApk ($sizeMb MB)"
 } else {
-    Write-Step '2/5 跳过构建 (--SkipBuild)，使用已存在的 APK'
+    Write-Step '2/5 跳过构建 (-SkipBuild)，使用已存在的 APK'
     $targetApk = Join-Path $debugApkDir "$ApkName.apk"
     if (-not (Test-Path -LiteralPath $targetApk)) {
-        Write-Result "找不到 APK: $targetApk (请先构建或去掉 --SkipBuild)" -IsError
+        Write-Result "找不到 APK: $targetApk (请先构建或去掉 -SkipBuild)" -IsError
         exit 2
     }
     Write-Result "使用现成 APK = $targetApk"
@@ -160,7 +173,7 @@ Write-Result 'adb 服务已启动'
 Write-Step '4/5 检测 adb 设备 (USB 或无线)'
 $device = $null
 for ($attempt = 1; $attempt -le $DeviceRetries; $attempt++) {
-    $dev = Invoke-Adb 'devices' -AllowFail
+    $dev = Invoke-Adb @('devices') -AllowFail
     $deviceLine = ($dev.Output -split "`n") |
         Where-Object { $_ -match '^\S+\s+device\s*$' } |
         Select-Object -First 1
@@ -179,13 +192,17 @@ for ($attempt = 1; $attempt -le $DeviceRetries; $attempt++) {
 }
 
 # 端口转发：手机 3080 -> PC 3080（等价 connect-phone-dsh.bat 约定）
-& $adb reverse tcp:3080 tcp:3080 2>&1 | Out-Null
+$reverse = Invoke-Adb @('-s', $device, 'reverse', 'tcp:3080', 'tcp:3080') -AllowFail
+if ($reverse.ExitCode -ne 0) {
+    Write-Result "端口转发失败: $($reverse.Output)" -IsError
+    exit 3
+}
 Write-Host "  端口转发已设置 (phone 3080 -> PC 3080)" -ForegroundColor DarkGray
 # ---------------------------------------------------------------------------
 # [5/5] 安装到手机（失败自动重试）
 # ---------------------------------------------------------------------------
 if ($SkipInstall) {
-    Write-Step '5/5 跳过安装 (--SkipInstall)'
+    Write-Step '5/5 跳过安装 (-SkipInstall)'
     Write-Result "已完成构建与连接，未安装。APK: $targetApk"
     exit 0
 }
@@ -199,7 +216,7 @@ for ($attempt = 0; $attempt -le $installRetries; $attempt++) {
         Start-Sleep -Seconds 3
     }
     Write-Host "  安装中 (attempt $($attempt+1)/$($installRetries+1)) ..."
-    $ins = Invoke-Native { & $adb install -r -t $targetApk }
+    $ins = Invoke-Native { & $adb -s $device install -r -t $targetApk }
     $installCode = $ins.ExitCode
     $installOut = $ins.Output
     if ($installCode -eq 0 -and $installOut -match 'Success') {
@@ -214,7 +231,7 @@ for ($attempt = 0; $attempt -le $installRetries; $attempt++) {
 
 if ($installed) {
     Write-Result '安装成功'
-    $version = Invoke-Adb "shell dumpsys package $appId" -AllowFail
+    $version = Invoke-Adb @('-s', $device, 'shell', 'dumpsys', 'package', $appId) -AllowFail
     $verLine = ($version.Output | Where-Object { $_ -match 'versionName=' } | Select-Object -First 1)
     if ($verLine) {
         $verName = ($verLine -replace '.*versionName=([^\s]+).*', '$1')

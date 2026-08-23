@@ -19,8 +19,8 @@ if not exist "%SCRIPT%" (
 )
 
 echo [*] 开始执行一键链路（打 debug 包 -^> adb 连接 -^> 安装）...
-echo     如需跳过构建用现成 APK:  build-and-install.bat --SkipBuild
-echo     如需只构建不安装:       build-and-install.bat --SkipInstall
+echo     如需跳过构建用现成 APK:  build-and-install.bat -SkipBuild
+echo     如需只构建不安装:       build-and-install.bat -SkipInstall
 echo.
 echo     按任意键开始，或关闭窗口取消...
 pause >nul
