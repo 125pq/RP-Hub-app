@@ -858,6 +858,10 @@
         root.classList.toggle('dark', dark);
         root.classList.toggle('rphub-night-mode', dark);
         root.style.colorScheme = dark ? 'dark' : 'light';
+        try {
+            const nativeTheme = window.Capacitor?.Plugins?.NativeTheme;
+            nativeTheme?.setDarkMode?.({ enabled: dark });
+        } catch (_) { /* browser/webview without native theme bridge */ }
     }
 
     function bindSystemTheme() {
