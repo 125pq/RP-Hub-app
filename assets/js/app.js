@@ -1585,7 +1585,7 @@ const app = createApp({
 
         // Square State
         const isSquareLoading = ref(true);
-        const squareUrl = ref('https://rphforum.zeabur.app/');
+        const squareUrl = ref('https://rp.zhaoyangxx.ccwu.cc/');
 
         const onSquareLoad = () => {
             isSquareLoading.value = false;
@@ -1630,7 +1630,7 @@ const app = createApp({
                 generatorUrl.value = `./character/index.html?t=${Date.now()}`;
             } else if (newView === 'square') {
                 isSquareLoading.value = true;
-                squareUrl.value = `https://rphforum.zeabur.app/?t=${Date.now()}`;
+                squareUrl.value = `https://rp.zhaoyangxx.ccwu.cc/?t=${Date.now()}`;
             } else if (newView === 'novel') {
                 isNovelLoading.value = true;
                 novelUrl.value = `./novel/index.html?t=${Date.now()}`;
