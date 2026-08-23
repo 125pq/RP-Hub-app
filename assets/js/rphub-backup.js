@@ -855,9 +855,11 @@
         const dark = prefs.themeMode === 'dark' || (prefs.themeMode === 'system' && systemDark);
         const root = document.documentElement;
         root.dataset.rphubTheme = prefs.themeMode;
-        root.classList.toggle('dark', dark);
         root.classList.toggle('rphub-night-mode', dark);
-        root.style.colorScheme = dark ? 'dark' : 'light';
+        // MainActivity provides algorithmic darkening. Declaring a dark color
+        // scheme suppresses that pass, so the WebView hint is intentionally the
+        // inverse of the resolved UI preference.
+        root.style.colorScheme = dark ? 'light' : 'dark';
     }
 
     function bindSystemTheme() {
