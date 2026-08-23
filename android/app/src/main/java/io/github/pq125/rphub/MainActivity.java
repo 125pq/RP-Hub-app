@@ -21,7 +21,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeClipboardPlugin.class);
         registerPlugin(NativeThemePlugin.class);
         super.onCreate(savedInstanceState);
-        configureDarkMode(false);
+        configureDarkMode();
         installWebViewDownloadListener();
         appUpdateManager = new AppUpdateManager(this);
         AttributionDialog.showIfNeeded(
@@ -30,10 +30,10 @@ public class MainActivity extends BridgeActivity {
         );
     }
 
-    private void configureDarkMode(boolean allowed) {
+    private void configureDarkMode() {
         WebView webView = getBridge().getWebView();
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.getSettings(), allowed);
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.getSettings(), true);
         }
     }
 
