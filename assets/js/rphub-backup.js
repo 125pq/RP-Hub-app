@@ -855,8 +855,8 @@
         const dark = prefs.themeMode === 'dark' || (prefs.themeMode === 'system' && systemDark);
         const root = document.documentElement;
         root.dataset.rphubTheme = prefs.themeMode;
+        root.classList.toggle('dark', dark);
         root.classList.toggle('rphub-night-mode', dark);
-        root.dataset.rphubResolvedTheme = dark ? 'dark' : 'light';
         root.style.colorScheme = dark ? 'dark' : 'light';
     }
 
@@ -907,35 +907,6 @@
             .rphub-backup-panel__btn--primary { background:#4f46e5; border-color:#4f46e5; color:#fff; }
             .rphub-backup-status { font-size:11px; color:#475569; margin:10px 0 0; min-height:16px; line-height:1.45; }
             .rphub-backup-status--error { color: #dc2626; }
-            html.rphub-night-mode body { background:#111827 !important; color:#e5e7eb !important; }
-            html.rphub-night-mode .app-sidebar,
-            html.rphub-night-mode [class~="bg-white"],
-            html.rphub-night-mode [class~="bg-white/95"],
-            html.rphub-night-mode [class~="bg-white/90"] { background-color:#1f2937 !important; border-color:#374151 !important; }
-            html.rphub-night-mode [class~="bg-gray-50"],
-            html.rphub-night-mode [class~="bg-gray-100"] { background-color:#111827 !important; }
-            html.rphub-night-mode [class~="text-gray-900"],
-            html.rphub-night-mode [class~="text-gray-800"],
-            html.rphub-night-mode [class~="text-gray-700"] { color:#f3f4f6 !important; }
-            html.rphub-night-mode [class~="text-gray-600"],
-            html.rphub-night-mode [class~="text-gray-500"],
-            html.rphub-night-mode [class~="text-gray-400"] { color:#9ca3af !important; }
-            html.rphub-night-mode [class~="border-gray-100"],
-            html.rphub-night-mode [class~="border-gray-200"] { border-color:#374151 !important; }
-            html.rphub-night-mode .rphub-backup-panel { background:#1f2937; border-color:#374151; color:#e5e7eb; }
-            html.rphub-night-mode .rphub-control-title,
-            html.rphub-night-mode .rphub-control-section__title,
-            html.rphub-night-mode .rphub-control-row__title { color:#f8fafc; }
-            html.rphub-night-mode .rphub-control-kicker,
-            html.rphub-night-mode .rphub-control-section__hint,
-            html.rphub-night-mode .rphub-control-row__hint,
-            html.rphub-night-mode .rphub-backup-status { color:#94a3b8; }
-            html.rphub-night-mode .rphub-control-section { border-color:#334155; }
-            html.rphub-night-mode .rphub-control-mode,
-            html.rphub-night-mode .rphub-backup-panel__btn,
-            html.rphub-night-mode .rphub-control-close { background:#374151; border-color:#4b5563; color:#e5e7eb; }
-            html.rphub-night-mode .rphub-control-mode.is-active { background:#172554; border-color:#60a5fa; color:#bfdbfe; }
-            html.rphub-night-mode .rphub-backup-button { background:#172554; border-color:#334155; color:#bfdbfe; }
             @media (max-width:480px) { .rphub-backup-panel { position:fixed; left:12px; right:12px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); width:auto; max-height:calc(100vh - 24px); } .rphub-control-mode-grid,.rphub-backup-panel__actions { grid-template-columns:1fr; } }
         `;
         document.head.appendChild(style);
