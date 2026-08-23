@@ -838,7 +838,7 @@
         try {
             const saved = JSON.parse(localStorage.getItem(CONTROL_PREFS_KEY) || '{}');
             if (saved && typeof saved === 'object') controlPrefs = {
-                themeMode: 'system',
+                themeMode: saved.themeMode === 'off' ? 'off' : 'system',
                 mirrorSquare: saved.mirrorSquare !== false
             };
         } catch (_) { /* use defaults */ }
@@ -852,7 +852,7 @@
     function applyThemePreference() {
         const prefs = getControlPrefs();
         const systemDark = !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-        const dark = systemDark;
+        const dark = getControlPrefs().themeMode === 'system' && systemDark;
         const root = document.documentElement;
         root.dataset.rphubThemeMode = prefs.themeMode;
         root.dataset.rphubTheme = dark ? 'dark' : 'light';
@@ -935,6 +935,12 @@
         mirror?.setAttribute?.('aria-checked', String(prefs.mirrorSquare));
         const value = panelEl.querySelector('[data-role="mirror-value"]');
         if (value) value.textContent = prefs.mirrorSquare ? '当前使用镜像地址' : '当前使用原站地址';
+        const theme = panelEl.querySelector('[data-action="toggle-system-theme"]');
+        const following = prefs.themeMode === 'system';
+        theme?.classList.toggle('is-on', following);
+        theme?.setAttribute?.('aria-checked', String(following));
+        const themeValue = panelEl.querySelector('[data-role="theme-value"]');
+        if (themeValue) themeValue.textContent = following ? '当前跟随系统深浅色' : '当前不跟随系统';
     }
 
     // Inject (or re-inject) the backup button into the sidebar footer.
@@ -962,7 +968,7 @@
             <button type="button" class="rphub-backup-button" title="打开本地控制中心">控制中心</button>
             <div class="rphub-backup-panel" hidden>
                 <div class="rphub-control-head"><div><p class="rphub-control-kicker">RP-HUB LOCAL</p><h2 class="rphub-control-title">本地控制中心</h2></div><button type="button" class="rphub-control-close" aria-label="关闭">×</button></div>
-                <section class="rphub-control-section"><h3 class="rphub-control-section__title">夜间模式</h3><p class="rphub-control-section__hint">跟随系统的深浅色设置。</p><div class="rphub-control-mode-grid"><button type="button" class="rphub-control-mode is-active" data-theme-mode="system">跟随系统</button></div></section>
+                <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">跟随系统</span><span class="rphub-control-row__hint" data-role="theme-value"></span></div><button type="button" class="rphub-control-switch" data-action="toggle-system-theme" role="switch" aria-checked="true" aria-label="切换跟随系统"></button></div></section>
                 <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">万相广场镜像</span><span class="rphub-control-row__hint" data-role="mirror-value"></span></div><button type="button" class="rphub-control-switch" data-action="toggle-mirror" role="switch" aria-checked="true" aria-label="切换万相广场镜像"></button></div></section>
                 <section class="rphub-control-section"><h3 class="rphub-control-section__title">整体备份</h3><p class="rphub-control-section__hint">导入前会先导出当前数据的恢复备份。</p><div class="rphub-backup-panel__actions">
                     <button type="button" class="rphub-backup-panel__btn rphub-backup-panel__btn--primary" data-action="export">导出整体备份</button><button type="button" class="rphub-backup-panel__btn" data-action="import">导入整体备份</button>
@@ -982,6 +988,13 @@
 
         anchorEl.querySelector('.rphub-backup-button').addEventListener('click', openPanel);
         anchorEl.querySelector('.rphub-control-close').addEventListener('click', closePanel);
+        anchorEl.querySelector('[data-action="toggle-system-theme"]').addEventListener('click', () => {
+            const prefs = getControlPrefs();
+            prefs.themeMode = prefs.themeMode === 'system' ? 'off' : 'system';
+            saveControlPrefs();
+            applyThemePreference();
+            renderControlState();
+        });
         anchorEl.querySelector('[data-action="toggle-mirror"]').addEventListener('click', () => {
             getControlPrefs().mirrorSquare = !getControlPrefs().mirrorSquare;
             saveControlPrefs();
