@@ -859,7 +859,9 @@
         root.classList.toggle('rphub-night-mode', dark);
         const nativeTheme = window.Capacitor?.Plugins?.NativeTheme;
         nativeTheme?.setAlgorithmicDarkening?.({ allowed: dark }).catch?.(() => {});
-        root.style.colorScheme = dark ? 'dark' : 'light';
+        // Algorithmic darkening is suppressed when WebView is told the page is
+        // already dark, so use the inverse hint while native darkening is on.
+        root.style.colorScheme = dark ? 'light' : 'dark';
     }
 
     function bindSystemTheme() {
