@@ -831,6 +831,7 @@
     const CONTROL_PREFS_KEY = 'rp_hub_ui_preferences';
     const DEFAULT_CONTROL_PREFS = Object.freeze({ themeMode: 'system', mirrorSquare: true });
     let controlPrefs = null;
+    const mirrorSquareListeners = new Set();
 
     function getControlPrefs() {
         if (controlPrefs) return controlPrefs;
@@ -847,6 +848,28 @@
 
     function saveControlPrefs() {
         try { localStorage.setItem(CONTROL_PREFS_KEY, JSON.stringify(getControlPrefs())); } catch (_) { /* private mode */ }
+    }
+
+    function getMirrorSquarePreference() {
+        return getControlPrefs().mirrorSquare;
+    }
+
+    function onMirrorSquareChange(listener) {
+        if (typeof listener !== 'function') return () => {};
+        mirrorSquareListeners.add(listener);
+        return () => mirrorSquareListeners.delete(listener);
+    }
+
+    function setMirrorSquarePreference(enabled) {
+        const next = Boolean(enabled);
+        const prefs = getControlPrefs();
+        if (prefs.mirrorSquare === next) return;
+        prefs.mirrorSquare = next;
+        saveControlPrefs();
+        renderControlState();
+        mirrorSquareListeners.forEach((listener) => {
+            try { listener(next); } catch (_) { /* integration listeners are isolated */ }
+        });
     }
 
     function applyThemePreference() {
@@ -996,9 +1019,7 @@
             renderControlState();
         });
         anchorEl.querySelector('[data-action="toggle-mirror"]').addEventListener('click', () => {
-            getControlPrefs().mirrorSquare = !getControlPrefs().mirrorSquare;
-            saveControlPrefs();
-            renderControlState();
+            setMirrorSquarePreference(!getMirrorSquarePreference());
         });
         anchorEl.querySelector('[data-action="export"]').addEventListener('click', async () => {
             if (busy) return;
@@ -1083,6 +1104,8 @@
         restoreSnapshotFile,
         StreamSnapshotRestorer,
         SnapshotLineReader,
+        getMirrorSquarePreference,
+        onMirrorSquareChange,
         bridge: RPHubBackupBridge,
         mountUI
     });

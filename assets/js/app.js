@@ -1584,8 +1584,23 @@ const app = createApp({
         };
 
         // Square State
+        // Wanxiang Square mirror preference hook.
+        const SQUARE_URLS = Object.freeze({
+            original: 'https://rphforum.zeabur.app/',
+            mirror: 'https://rp.zhaoyangxx.ccwu.cc/'
+        });
+        const getSquareUrl = (cacheBust = false) => {
+            const mirrorEnabled = window.RPHubBackup?.getMirrorSquarePreference?.() !== false;
+            const baseUrl = mirrorEnabled ? SQUARE_URLS.mirror : SQUARE_URLS.original;
+            return cacheBust ? `${baseUrl}?t=${Date.now()}` : baseUrl;
+        };
         const isSquareLoading = ref(true);
-        const squareUrl = ref('https://rp.zhaoyangxx.ccwu.cc/');
+        const squareUrl = ref(getSquareUrl());
+        const stopSquareMirrorChange = window.RPHubBackup?.onMirrorSquareChange?.(() => {
+            if (currentView.value !== 'square') return;
+            isSquareLoading.value = true;
+            squareUrl.value = getSquareUrl(true);
+        }) || (() => {});
 
         const onSquareLoad = () => {
             isSquareLoading.value = false;
@@ -1630,7 +1645,7 @@ const app = createApp({
                 generatorUrl.value = `./character/index.html?t=${Date.now()}`;
             } else if (newView === 'square') {
                 isSquareLoading.value = true;
-                squareUrl.value = `https://rp.zhaoyangxx.ccwu.cc/?t=${Date.now()}`;
+                squareUrl.value = getSquareUrl(true);
             } else if (newView === 'novel') {
                 isNovelLoading.value = true;
                 novelUrl.value = `./novel/index.html?t=${Date.now()}`;
@@ -9449,6 +9464,8 @@ const app = createApp({
         }
 
         onBeforeUnmount(() => {
+            // Release the cross-module preference listener.
+            stopSquareMirrorChange();
             window.RPHubOffscreenIframeLifecycle?.detach();
             generatedImageObserver?.disconnect();
             generatedImageTasks.clear();
