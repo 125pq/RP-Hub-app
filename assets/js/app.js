@@ -367,6 +367,7 @@ const app = createApp({
         let activeToolQueueAbortController = null;
         const abortController = ref(null);
         const userInput = ref('');
+        const pendingCardInteraction = ref('');
         const pendingChatImages = ref([]);
         const pendingChatImageReadCount = ref(0);
         let chatImageSelectionEpoch = 0;
@@ -956,15 +957,43 @@ const app = createApp({
             if (role === 'assistant') return 'bg-purple-100 text-purple-700 border-purple-200';
             return 'bg-red-100 text-red-700 border-red-200';
         };
-        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
+        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字|(?:指尖|指节|指关节)[^。！？!?\n]*(?:发白|泛白)|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
-        const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱|手术刀)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
+        const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
         const blockedStyleWordPattern = /极其/g;
         const quotedDialoguePattern = /(“[\s\S]*?”|『[\s\S]*?』|"[\s\S]*?")/g;
         const standaloneRenderedContentPattern = /^(?:\s|<!--[\s\S]*?-->)*(?:```|<!doctype\b|<\?xml\b|<html\b|<(?:head|body|style|script|template|svg|canvas|iframe|div|section|article|aside|header|footer|main|nav|form|table|ul|ol|pre|p|img)\b)/i;
         const isStandaloneRenderedContent = text => standaloneRenderedContentPattern.test(String(text || ''));
         const loggedBlockedStyleFragments = new Set();
-        const filterBlockedStyleText = (text, { log = false } = {}) => {
+        const openStyleFilterMessageKey = ref('');
+        const getStyleFilterMessageKey = (message, index) => String(message?.id || `message-${index}`);
+        const isStyleFilterDetailsOpen = (message, index) => (
+            openStyleFilterMessageKey.value === getStyleFilterMessageKey(message, index)
+        );
+        const toggleStyleFilterDetails = (message, index) => {
+            const key = getStyleFilterMessageKey(message, index);
+            openStyleFilterMessageKey.value = openStyleFilterMessageKey.value === key ? '' : key;
+        };
+        const normalizeStyleFilterHit = fragment => String(fragment || '')
+            .trim()
+            .replace(/^[，,；;]\s*/, '')
+            .replace(/^(?:\*\*|__)/, '')
+            .replace(/(?:\*\*|__)$/, '')
+            .trim();
+        const styleFilterHighlightPattern = /(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字|指尖|指节|指关节|发白|泛白|不是|而是|又像(?:是)?|(?:更|倒|反倒)?像是|极其)/g;
+        const getStyleFilterHitSegments = fragment => {
+            const text = String(fragment || '');
+            const segments = [];
+            let lastIndex = 0;
+            for (const match of text.matchAll(styleFilterHighlightPattern)) {
+                if (match.index > lastIndex) segments.push({ text: text.slice(lastIndex, match.index), matched: false });
+                segments.push({ text: match[0], matched: true });
+                lastIndex = match.index + match[0].length;
+            }
+            if (lastIndex < text.length) segments.push({ text: text.slice(lastIndex), matched: false });
+            return segments.length ? segments : [{ text, matched: false }];
+        };
+        const filterBlockedStyleText = (text, { log = false, collect = null } = {}) => {
             const source = String(text || '');
             if (isStandaloneRenderedContent(source)) return source;
             const removedFragments = [];
@@ -983,6 +1012,9 @@ const app = createApp({
                     .replace(/[ \t]+\n/g, '\n')
                     .replace(/\n{3,}/g, '\n\n'))
                 .join(''));
+            if (Array.isArray(collect)) {
+                collect.push(...removedFragments.map(normalizeStyleFilterHit).filter(Boolean));
+            }
             if (log) {
                 const newFragments = removedFragments.filter(fragment => fragment && !loggedBlockedStyleFragments.has(fragment));
                 newFragments.forEach(fragment => loggedBlockedStyleFragments.add(fragment));
@@ -3537,6 +3569,9 @@ const app = createApp({
             chatImageSelectionEpoch++;
             pendingChatImages.value = [];
         };
+        const clearPendingCardInteraction = () => {
+            pendingCardInteraction.value = '';
+        };
         const removePendingChatImage = (id) => {
             pendingChatImages.value = pendingChatImages.value.filter(image => image.id !== id);
         };
@@ -3644,16 +3679,18 @@ const app = createApp({
         };
 
         const sendMessage = async () => {
-            if ((!userInput.value.trim() && pendingChatImages.value.length === 0) || isConversationBusy.value || isRecognizingImages.value) return;
+            if ((!userInput.value.trim() && pendingChatImages.value.length === 0 && !pendingCardInteraction.value) || isConversationBusy.value || isRecognizingImages.value) return;
             if (pendingChatImages.value.some(image => image.status !== 'ready')) {
                 showToast('请先移除识别失败的图片', 'warning');
                 return;
             }
 
             const content = userInput.value.trim();
+            const cardInteraction = pendingCardInteraction.value;
             const imageAttachments = pendingChatImages.value.map(({ dataUrl, description }) => ({ dataUrl, description }));
             const startTime = Date.now(); // Record click time
             userInput.value = '';
+            clearPendingCardInteraction();
             clearPendingChatImages();
 
             let finalContent = content;
@@ -3662,17 +3699,29 @@ const app = createApp({
                 sysInstruction.value = ''; // Auto clear after sending
             }
 
-            // Add user message locally with NAME
-            chatHistory.value.push({
-                role: 'user',
-                name: user.name,
-                content: finalContent,
-                shouldAnimate: true,
-                skipReveal: true,
-                isSelf: true,
-                avatar: user.avatar,
-                imageAttachments
-            });
+            if (cardInteraction) {
+                chatHistory.value.push({
+                    role: 'user',
+                    content: cardInteraction,
+                    isSelf: true,
+                    isTriggered: true,
+                    shouldAnimate: true,
+                    skipReveal: true
+                });
+            }
+            if (finalContent || imageAttachments.length) {
+                // Add user message locally with NAME
+                chatHistory.value.push({
+                    role: 'user',
+                    name: user.name,
+                    content: finalContent,
+                    shouldAnimate: true,
+                    skipReveal: true,
+                    isSelf: true,
+                    avatar: user.avatar,
+                    imageAttachments
+                });
+            }
             await nextTick();
 
             // Single player
@@ -3689,6 +3738,7 @@ const app = createApp({
         const clearChat = () => {
             confirmAction('确定要清空聊天记录吗？记忆也将一并清空，此操作无法撤销。', () => {
                 clearPendingChatImages();
+                clearPendingCardInteraction();
                 abortConversationBackgroundWork();
                 resetChatRenderWindow();
                 chatHistory.value = [];
@@ -3796,6 +3846,10 @@ const app = createApp({
                     finalContent = msg.originalCot + '\n\n' + finalContent;
                 }
                 msg.content = finalContent;
+                if (contentChanged) {
+                    delete msg.styleFilterHits;
+                    openStyleFilterMessageKey.value = '';
+                }
                 clearMessageEditState(msg);
                 if (!contentChanged) {
                     await saveChatHistoryNow();
@@ -4739,7 +4793,7 @@ const app = createApp({
                     .map(preset => preset.content
                         .replace(/^\s*<writing_style>\s*/i, '')
                         .replace(/\s*<\/writing_style>\s*$/i, ''))
-                .concat(/deepseek/i.test(requestModel) ? '正文最少600字。' : [])
+                .concat(/deepseek/i.test(requestModel) ? '正文最少700字。' : [])
                     .join('\n\n')
             });
 
@@ -5007,7 +5061,21 @@ const app = createApp({
                     chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: error.message });
                 }
             } finally {
-                if (assistantMessage?.content) assistantMessage.content = filterBlockedStyleText(assistantMessage.content, { log: true });
+                if (assistantMessage?.content) {
+                    const styleFilterHits = [];
+                    assistantMessage.content = filterBlockedStyleText(assistantMessage.content, {
+                        log: true,
+                        collect: styleFilterHits
+                    });
+                    const previousHits = continuingAssistantMessage && Array.isArray(assistantMessage.styleFilterHits)
+                        ? assistantMessage.styleFilterHits
+                        : [];
+                    const combinedHits = [...previousHits, ...styleFilterHits]
+                        .map(normalizeStyleFilterHit)
+                        .filter(Boolean);
+                    if (combinedHits.length) assistantMessage.styleFilterHits = combinedHits;
+                    else delete assistantMessage.styleFilterHits;
+                }
                 if (continuationToolCall && continuationToolCall.status === 'continuing') {
                     continuationToolCall.status = 'done';
                 }
@@ -8043,6 +8111,14 @@ const app = createApp({
                 if (msg.role === 'assistant' && msg.isSummaryOpen === undefined && hasThinkingOrTools(msg)) {
                     msg.isSummaryOpen = false;
                 }
+                if (msg.role === 'assistant' && Array.isArray(msg.styleFilterHits)) {
+                    msg.styleFilterHits = msg.styleFilterHits
+                        .map(normalizeStyleFilterHit)
+                        .filter(Boolean);
+                    if (!msg.styleFilterHits.length) delete msg.styleFilterHits;
+                } else {
+                    delete msg.styleFilterHits;
+                }
                 return msg;
             });
 
@@ -8436,6 +8512,7 @@ const app = createApp({
             const target = storyBranches.value.find(branch => branch.id === branchId);
             if (!char?.uuid || !target || branchId === activeStoryBranchId.value || storyBranchSwitching.value) return;
             clearPendingChatImages();
+            clearPendingCardInteraction();
             storyBranchSwitching.value = true;
             try {
                 if (!await saveCurrentStoryBranchState()) return;
@@ -8537,6 +8614,7 @@ const app = createApp({
                 return;
             }
             clearPendingChatImages();
+            clearPendingCardInteraction();
             const switchEpoch = ++_characterSwitchEpoch;
             const isLatestSwitch = () => switchEpoch === _characterSwitchEpoch;
             switchingCharacterIndex.value = index;
@@ -9040,23 +9118,17 @@ const app = createApp({
 
         // Expose triggerSlash for character cards (Defined early)
         window.triggerSlash = async (text) => {
-            if (!text) return;
+            const command = String(text || '').trim();
+            if (!command) return;
 
-            if (isGenerating.value) {
+            if (isConversationBusy.value) {
                 showToast('正在生成中，请稍后...', 'warning');
                 return;
             }
 
-            const startTime = Date.now(); // Record trigger time
-
-            // Add user message with explicit reactivity update
-            const newMessage = { role: 'user', content: text, isSelf: true, isTriggered: true, shouldAnimate: true, skipReveal: true };
-            // Push and force update to ensure v-if picks up the new property
-            chatHistory.value = [...chatHistory.value, newMessage];
-
+            pendingCardInteraction.value = command;
             await nextTick();
-
-            await generateResponse(startTime);
+            inputBox.value?.focus();
         };
 
         // Lifecycle
@@ -9501,10 +9573,11 @@ const app = createApp({
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
             updateModalRef, latestUpdateConfig,
             showConfirmModal, confirmMessage, modelMode, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
-            isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
+            isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingCardInteraction, clearPendingCardInteraction, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
             user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
+            isStyleFilterDetailsOpen, toggleStyleFilterDetails, getStyleFilterHitSegments,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength, summaryCompressionRate,
             editingCharacter, editingPreset, editingUiTemplate, toasts, chatContainer, isChatFullscreen, isMobileKeyboardOpen, inputBox, messageElements,
             isGeneratorLoading, generatorUrl, onGeneratorLoad, // Generator exports
