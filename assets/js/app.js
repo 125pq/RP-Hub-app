@@ -3,6 +3,7 @@ const { useStorageManagement, useTokenUsage } = window.RPHubComposables;
 const { createMessageRenderer } = window.RPHubMessageRenderer;
 const { AppSidebar } = window.RPHubLayoutComponents;
 const { requestChatCompletion } = window.RPHubApiClient;
+const { buildApiEndpoint } = window.RPHubApiUtils;
 const {
     ActionConfirmModal,
     ActiveToolEditorModal,
@@ -1108,7 +1109,6 @@ const app = createApp({
             embeddingModel: '',
             classicModel: '',
             vectorTopK: MEMORY_VECTOR_DEFAULT_TOP_K,
-            defaultDepth: MEMORY_VECTOR_DEFAULT_DEPTH,
             vectorKeepFloors: VECTOR_KEEP_FLOORS_DEFAULT,
             summaryKeepFloors: SUMMARY_KEEP_FLOORS_DEFAULT,
             classicConcurrency: CLASSIC_MEMORY_DEFAULT_CONCURRENCY
@@ -1175,7 +1175,7 @@ const app = createApp({
             if (!memorySettings.classicModel && memorySettings.model) {
                 memorySettings.classicModel = String(memorySettings.model).trim();
             }
-            ['model', 'autoExtract', 'keepFloors', 'similarityThreshold', 'summaryLevel', `re${'rankEnabled'}`, `re${'rankModel'}`].forEach(key => {
+            ['model', 'autoExtract', 'keepFloors', 'similarityThreshold', 'summaryLevel', 'defaultDepth', `re${'rankEnabled'}`, `re${'rankModel'}`].forEach(key => {
                 delete memorySettings[key];
             });
             memorySettings.mode = memorySettings.mode === MEMORY_MODE_CLASSIC
@@ -1201,7 +1201,6 @@ const app = createApp({
             memorySettings.vectorTopK = Number.isFinite(vectorTopK)
                 ? Math.max(MEMORY_VECTOR_MIN_TOP_K, Math.min(MEMORY_VECTOR_MAX_TOP_K, vectorTopK))
                 : MEMORY_VECTOR_DEFAULT_TOP_K;
-            memorySettings.defaultDepth = MEMORY_VECTOR_DEFAULT_DEPTH;
         };
 
         const normalizeActiveToolCallName = (value) => {
@@ -1387,6 +1386,8 @@ const app = createApp({
             displayedTokenUsageHistory,
             filteredTokenUsageHistory,
             formatTokenAggregate,
+            formatLatestTokenCount,
+            formatLatestUsageCost,
             formatTokenCount,
             formatTokenUsageTime,
             getTokenUsageTypeLabel,
@@ -1401,7 +1402,8 @@ const app = createApp({
             tokenUsageStats,
             tokenUsageTimeFilter,
             tokenUsageTimeFilterLabel,
-            tokenUsageTimeFilterOptions
+            tokenUsageTimeFilterOptions,
+            latestMainTokenUsage
         } = useTokenUsage({
             pageSize: LIST_PAGE_SIZE,
             cloneForStorage,
@@ -1416,13 +1418,6 @@ const app = createApp({
             saveStoredValue: setStoredValue,
             toast: (...args) => showToast(...args)
         });
-        const latestMainTokenUsage = computed(() => tokenUsageHistory.value.find(
-            record => record.type === 'chat' || record.type === 'tool_continuation'
-        ) || null);
-        const formatLatestTokenCount = value => `${(Number(value || 0) / 1000).toFixed(2)}k`;
-        const formatLatestUsageCost = quota => Number.isFinite(quota)
-            ? `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
-            : '--';
         const {
             cleanupUnusedStorage,
             formatStorageSize,
@@ -3359,12 +3354,6 @@ const app = createApp({
         };
 
         // API & Models
-        const getApiEndpoint = (path) => {
-            const baseUrl = String(settings.apiUrl || '').replace(/\/+$/, '');
-            const apiUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
-            return `${apiUrl}/${String(path || '').replace(/^\/+/, '')}`;
-        };
-
         const fetchModels = async (isManual = false) => {
             const apiKey = String(settings.apiKey || '').trim();
             if (!apiKey) {
@@ -3373,7 +3362,7 @@ const app = createApp({
             }
             try {
                 if (isManual) showToast('正在获取模型列表...', 'info');
-                const url = getApiEndpoint('models');
+                const url = buildApiEndpoint(settings.apiUrl, 'models');
                 const response = await fetch(url, {
                     headers: { 'Authorization': `Bearer ${apiKey}` }
                 });
@@ -3466,7 +3455,7 @@ const app = createApp({
                 return;
             }
             await checkConnectionStatus(apiStatus, apiLatency, 'API', signal => (
-                fetch(getApiEndpoint('models'), {
+            fetch(buildApiEndpoint(settings.apiUrl, 'models'), {
                     headers: { 'Authorization': `Bearer ${settings.apiKey}` },
                     signal
                 })
@@ -3585,7 +3574,7 @@ const app = createApp({
             const requestStartedAt = Date.now();
             try {
                 const result = await requestChatCompletion({
-                    url: getApiEndpoint('chat/completions'),
+                url: buildApiEndpoint(settings.apiUrl, 'chat/completions'),
                     apiKey: settings.apiKey,
                     model: settings.visionModel,
                     temperature: 0.2,
@@ -3970,7 +3959,7 @@ const app = createApp({
                 markUiTemplateStatus('skipped', '未选模型');
                 return false;
             }
-            const url = getApiEndpoint('chat/completions');
+            const url = buildApiEndpoint(settings.apiUrl, 'chat/completions');
 
             try {
                 const updateRun = startUiTemplateUpdateRun();
@@ -4815,7 +4804,7 @@ const app = createApp({
                 messages,
                 worldInfoGroups: wiGroups,
                 vectorMemories: vectorMemoriesForContext,
-                vectorDepth: Number(memorySettings.defaultDepth) || MEMORY_VECTOR_DEFAULT_DEPTH,
+                vectorDepth: MEMORY_VECTOR_DEFAULT_DEPTH,
                 safeTargetLimit
             });
             messages = appendActiveToolReminderToLatestUserMessage(messages);
@@ -4953,7 +4942,7 @@ const app = createApp({
 
             try {
                 const responseResult = await requestChatCompletion({
-                    url: getApiEndpoint('chat/completions'),
+                url: buildApiEndpoint(settings.apiUrl, 'chat/completions'),
                     apiKey: settings.apiKey,
                     model: requestModel,
                     messages: apiMessages,
@@ -5322,7 +5311,7 @@ const app = createApp({
             if (!model) throw new Error('请先选择总结模式副模型');
 
             const requestStartedAt = Date.now();
-            const response = await fetch(getApiEndpoint('chat/completions'), {
+            const response = await fetch(buildApiEndpoint(settings.apiUrl, 'chat/completions'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -5732,7 +5721,7 @@ const app = createApp({
             if (normalizedInputs.some(input => !input)) throw new Error('嵌入内容不能为空');
 
             const requestStartedAt = Date.now();
-            const response = await fetch(getApiEndpoint('embeddings'), {
+            const response = await fetch(buildApiEndpoint(settings.apiUrl, 'embeddings'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

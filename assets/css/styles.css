@@ -953,6 +953,16 @@
             transform: scale(0.97);
         }
 
+        .message-style-filter-popover {
+            max-width: calc(100vw - 1.5rem);
+        }
+
+        @media (max-width: 767px) {
+            .message-style-filter-popover {
+                transform: translateX(-65%);
+            }
+        }
+
         .message-action-button--danger:hover {
             color: #dc2626;
             background: rgba(254, 242, 242, 0.82);

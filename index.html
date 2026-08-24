@@ -694,7 +694,7 @@
                                         <div v-if="msg.role === 'assistant' && Array.isArray(msg.styleFilterHits) && msg.styleFilterHits.length"
                                             class="relative flex-none">
                                             <div v-if="isStyleFilterDetailsOpen(msg, index)" @click.stop
-                                                class="absolute bottom-full left-1/2 z-30 mb-2 w-[min(20rem,calc(100vw-1.5rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-gray-200 bg-white/95 shadow-xl backdrop-blur-xl">
+                                                class="message-style-filter-popover absolute bottom-full left-1/2 z-30 mb-2 w-[min(20rem,calc(100vw-1.5rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-gray-200 bg-white/95 shadow-xl backdrop-blur-xl">
                                                 <div class="border-b border-gray-100 bg-gray-50/80 px-3 py-2">
                                                     <span class="text-xs font-bold text-gray-700">文风过滤详情</span>
                                                 </div>
@@ -2857,6 +2857,7 @@
     </div>
 
     <script>
+        document.write('<script src="assets/js/api-utils.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/built-in-content.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/core-utils.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/data-services.js?v=' + new Date().getTime() + '"><\/script>');
