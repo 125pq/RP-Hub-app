@@ -574,7 +574,7 @@
 
                                     <!-- Message Actions -->
                                     <div v-if="!msg.isEditing_Message && !isMessageThinkingOrRunning(msg) && !(index === chatHistory.length - 1 && !msg.isSelf && (isGenerating || isRemoteGenerating)) && !(msg.isSelf && isConversationBusy && !chatHistory.slice(index + 1).some(m => m.isSelf))"
-                                        :class="['message-action-bar absolute bottom-0 -mb-9 md:-mb-10 flex items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200', msg.isSelf ? 'right-0' : 'left-0']">
+                                        :class="['message-action-bar absolute bottom-0 -mb-9 md:-mb-10 flex items-center transition-opacity duration-200', msg.isSelf ? 'right-0' : 'left-0', isStyleFilterDetailsOpen(msg, index) ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100']">
                                         <button v-if="index === chatHistory.length - 1"
                                             @click="regenerateMessage(index)"
                                             class="message-action-button"
@@ -625,6 +625,38 @@
                                                 </path>
                                             </svg>
                                         </button>
+                                        <div v-if="msg.role === 'assistant' && Array.isArray(msg.styleFilterHits) && msg.styleFilterHits.length"
+                                            class="relative flex-none">
+                                            <div v-if="isStyleFilterDetailsOpen(msg, index)" @click.stop
+                                                class="absolute bottom-full left-1/2 z-30 mb-2 w-[min(20rem,calc(100vw-1.5rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-gray-200 bg-white/95 shadow-xl backdrop-blur-xl">
+                                                <div class="border-b border-gray-100 bg-gray-50/80 px-3 py-2">
+                                                    <span class="text-xs font-bold text-gray-700">文风过滤详情</span>
+                                                </div>
+                                                <div class="max-h-56 space-y-1.5 overflow-y-auto p-2.5 custom-scrollbar">
+                                                    <div v-for="(fragment, filterIndex) in msg.styleFilterHits"
+                                                        :key="index + '-style-filter-' + filterIndex"
+                                                        class="flex items-start gap-1.5 rounded-xl border border-gray-100 bg-gray-50/70 px-2.5 py-2">
+                                                        <span class="w-3 flex-none text-right text-[11px] font-semibold leading-5 text-gray-900">{{ filterIndex + 1 }}</span>
+                                                        <span class="min-w-0 break-words text-xs leading-5 text-gray-600"><template
+                                                                v-for="(segment, segmentIndex) in getStyleFilterHitSegments(fragment)"
+                                                                :key="filterIndex + '-segment-' + segmentIndex"><span
+                                                                    :class="segment.matched ? 'font-semibold text-blue-500' : ''">{{ segment.text }}</span></template></span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <button @click.stop="toggleStyleFilterDetails(msg, index)"
+                                                class="message-style-filter-button"
+                                                :class="{ 'is-active': isStyleFilterDetailsOpen(msg, index) }"
+                                                :title="'查看本条回复过滤的 ' + msg.styleFilterHits.length + ' 处内容'">
+                                                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18M6 9h12M9 14h6M11 19h2"></path>
+                                                </svg>
+                                                <svg class="h-3 w-3 transition-transform" :class="{ 'rotate-180': isStyleFilterDetailsOpen(msg, index) }"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -671,6 +703,29 @@
                     class="absolute bottom-0 left-0 right-0 w-full p-2 md:p-3 z-30 pointer-events-none flex justify-center flex-shrink-0 transition-all duration-300 input-area-mobile">
                     <div
                         class="relative w-full max-w-lg md:max-w-[30rem] pointer-events-auto p-2.5 md:p-3 bg-white/90 backdrop-blur-xl border border-white/40 shadow-lg rounded-3xl ring-1 ring-black/5 transition-all duration-300 flex flex-col input-island">
+                        <transition enter-active-class="transition-all duration-200 ease-out"
+                            enter-from-class="opacity-0 translate-y-2 scale-95"
+                            enter-to-class="opacity-100 translate-y-0 scale-100"
+                            leave-active-class="transition-all duration-150 ease-in"
+                            leave-from-class="opacity-100 translate-y-0 scale-100"
+                            leave-to-class="opacity-0 translate-y-2 scale-95">
+                            <div v-if="pendingCardInteraction"
+                                :class="pendingChatImages.length ? 'bottom-[calc(100%+7.25rem)] md:bottom-[calc(100%+8.75rem)]' : 'bottom-[calc(100%+0.65rem)]'"
+                                class="absolute left-1 right-1 z-[3] flex justify-center">
+                                <div class="flex min-w-0 max-w-full items-center gap-2 rounded-2xl border border-primary-200/80 bg-white/95 px-3 py-2 text-xs shadow-lg ring-1 ring-black/5 backdrop-blur-xl">
+                                    <svg class="h-3.5 w-3.5 flex-none text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
+                                    <span class="flex-none font-bold text-primary-600">卡片交互</span>
+                                    <span class="min-w-0 truncate text-gray-600" :title="pendingCardInteraction">{{ pendingCardInteraction }}</span>
+                                    <button type="button" @click="clearPendingCardInteraction" class="flex h-5 w-5 flex-none items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600" title="取消卡片交互" aria-label="取消卡片交互">
+                                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </transition>
                         <div v-if="pendingChatImages.length"
                             class="absolute left-3 bottom-[calc(100%+0.65rem)] z-[2] flex flex-nowrap gap-2.5 w-max max-w-[calc(100%-1.5rem)] overflow-x-auto py-1 pr-1">
                             <div v-for="image in pendingChatImages" :key="image.id"
@@ -909,7 +964,7 @@
                             <!-- Send/Stop Button -->
                             <div class="flex-shrink-0 flex items-center gap-1">
                                 <button v-if="!isConversationBusy" @click="sendMessage"
-                                    :disabled="(!userInput.trim() && pendingChatImages.length === 0) || isRecognizingImages || pendingChatImages.some(image => image.status !== 'ready')"
+                                    :disabled="(!userInput.trim() && pendingChatImages.length === 0 && !pendingCardInteraction) || isRecognizingImages || pendingChatImages.some(image => image.status !== 'ready')"
                                     class="p-2 md:p-2.5 bg-primary-600 text-white rounded-2xl md:hover:bg-primary-700 md:hover:shadow-lg md:hover:-translate-y-0.5 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all shadow-md flex items-center justify-center w-[44px] h-[44px] md:w-[46px] md:h-[46px]"
                                     title="发送">
                                     <svg class="w-5 h-5 transform rotate-90" fill="none"
@@ -1900,6 +1955,7 @@
 
                 <div id="presets-list" class="space-y-4">
                     <div v-for="(preset, index) in presets" :key="preset.name + index"
+                        v-show="preset.name !== '第二人称' && preset.name !== '第三人称'"
                         class="bg-white p-4 rounded-xl border border-gray-200 flex items-center justify-between group shadow-sm hover:shadow-md transition-all">
                         <div class="flex items-center flex-1 min-w-0 mr-4">
                             <div class="cursor-move text-gray-400 mr-3 hover:text-gray-600 flex-shrink-0" title="拖动排序">
@@ -2304,22 +2360,6 @@
                                     <input type="range" v-model.number="memorySettings.vectorTopK" min="10" max="20" step="1"
                                         class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                                 </div>
-                                <div class="settings-field">
-                                    <div class="flex justify-between items-center mb-2">
-                                        <div class="relative flex items-center">
-                                            <label class="text-sm font-semibold text-gray-700">最低召回相关度</label>
-                                            <settings-help topic="similarity" :open-topic="settingsHelpTopic"
-                                                label="查看最低召回相关度说明" @toggle="settingsHelpTopic = $event">
-                                                控制记忆分片的最低匹配程度。数值越高，不相关内容越少，但可能漏掉间接相关的记忆；数值越低，召回的记忆分片越多，同时也会增加关联较弱的结果。
-                                            </settings-help>
-                                        </div>
-                                        <span class="text-xs font-mono font-bold text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1 whitespace-nowrap">{{
-                                            memorySettings.similarityThreshold + '%'
-                                            }}</span>
-                                    </div>
-                                    <input type="range" v-model.number="memorySettings.similarityThreshold" min="40" max="65" step="5"
-                                        class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
-                                </div>
                             </template>
 
                             <div v-else class="settings-field">
@@ -2336,41 +2376,6 @@
                                     <span :class="memorySettings.classicModel ? 'text-gray-700' : 'text-gray-400'">{{
                                         memorySettings.classicModel || '请选择总结模式副模型' }}</span>
                                 </button>
-                            </div>
-
-                            <div v-if="memorySettings.mode === 'classic'"
-                                class="settings-field">
-                                <div class="relative mb-2 flex items-center">
-                                    <label class="text-sm font-semibold text-gray-700">总结程度</label>
-                                    <settings-help topic="summaryLevel" :open-topic="settingsHelpTopic"
-                                        label="查看总结程度说明" @toggle="settingsHelpTopic = $event">
-                                        控制每轮总结的目标篇幅。不同模型对中文字数的理解和遵循能力不同，实际结果可能略有偏差。
-                                    </settings-help>
-                                </div>
-                                <div class="segmented-switch segmented-switch--compact segmented-switch--three w-full">
-                                    <div class="segmented-switch__indicator" :class="{
-                                        'is-position-2': memorySettings.summaryLevel === 'balanced',
-                                        'is-position-3': memorySettings.summaryLevel === 'detailed'
-                                    }"></div>
-                                    <button type="button" @click="memorySettings.summaryLevel = 'concise'"
-                                        class="segmented-switch__option"
-                                        :class="{ 'is-active': memorySettings.summaryLevel === 'concise' }"
-                                        aria-label="精简总结，50 到 80 字">
-                                        精简
-                                    </button>
-                                    <button type="button" @click="memorySettings.summaryLevel = 'balanced'"
-                                        class="segmented-switch__option"
-                                        :class="{ 'is-active': memorySettings.summaryLevel === 'balanced' }"
-                                        aria-label="均衡总结，100 到 130 字">
-                                        均衡
-                                    </button>
-                                    <button type="button" @click="memorySettings.summaryLevel = 'detailed'"
-                                        class="segmented-switch__option"
-                                        :class="{ 'is-active': memorySettings.summaryLevel === 'detailed' }"
-                                        aria-label="详细总结，200 到 250 字">
-                                        详细
-                                    </button>
-                                </div>
                             </div>
 
                             <div v-if="memorySettings.mode === 'classic'" class="settings-field">

@@ -13,6 +13,8 @@ const [packageJson, debugScript, releaseScript, helper] = await Promise.all([
 
 const packageVersion = JSON.parse(packageJson).version;
 const helperPath = path.resolve('scripts/android/build-utils.ps1');
+const powershellCommand = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
+const powershellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command'];
 assert.match(debugScript, /build-utils\.ps1/);
 assert.match(releaseScript, /build-utils\.ps1/);
 assert.match(
@@ -41,7 +43,7 @@ assert.match(releaseScript, /android-36/);
 function runVersion(packagePath, environmentValue, expectFailure = false) {
   const envLiteral = environmentValue === null ? '$null' : JSON.stringify(environmentValue);
   const command = `. '${helperPath.replaceAll("'", "''")}'; Get-RPHubBuildVersion '${packagePath.replaceAll("'", "''")}' ${envLiteral}`;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { encoding: 'utf8' });
+  const result = spawnSync(powershellCommand, [...powershellArgs, command], { encoding: 'utf8' });
   if (expectFailure) {
     assert.notEqual(result.status, 0, `Expected version selection failure: ${environmentValue}`);
     return;
@@ -82,7 +84,7 @@ try {
   const filePath = path.join(hashRoot, 'known.txt');
   await writeFile(filePath, 'RP-Hub Capacitor 8\n', 'utf8');
   const hashCommand = `. '${helperPath.replaceAll("'", "''")}'; Get-RPHubSha256Hex '${filePath.replaceAll("'", "''")}'`;
-  const hashResult = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', hashCommand], { encoding: 'utf8' });
+  const hashResult = spawnSync(powershellCommand, [...powershellArgs, hashCommand], { encoding: 'utf8' });
   assert.equal(hashResult.status, 0, hashResult.stderr);
   assert.equal(hashResult.stdout.trim(), '9543bc53b2918785025db5979aded11d8729af35e43888632e4af4b689b10222');
 } finally {
