@@ -134,10 +134,7 @@ const {
     setStoredValue,
     unwrapForStorage
 } = window.RPHubStorage;
-const {
-    prompts: BUILTIN_PROMPTS,
-    summaryLengthRequirements: SUMMARY_LENGTH_REQUIREMENTS
-} = window.RPHubBuiltinContent;
+const { prompts: BUILTIN_PROMPTS } = window.RPHubBuiltinContent;
 const {
     activeTools: activeToolConfig,
     apiProviderOptions,
@@ -961,7 +958,7 @@ const app = createApp({
         };
         const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
-        const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
+        const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱|手术刀)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
         const blockedStyleWordPattern = /极其/g;
         const quotedDialoguePattern = /(“[\s\S]*?”|『[\s\S]*?』|"[\s\S]*?")/g;
         const standaloneRenderedContentPattern = /^(?:\s|<!--[\s\S]*?-->)*(?:```|<!doctype\b|<\?xml\b|<html\b|<(?:head|body|style|script|template|svg|canvas|iframe|div|section|article|aside|header|footer|main|nav|form|table|ul|ol|pre|p|img)\b)/i;
@@ -1054,9 +1051,7 @@ const app = createApp({
         const MEMORY_VECTOR_MIN_TOP_K = 10;
         const MEMORY_VECTOR_MAX_TOP_K = 20;
         const MEMORY_VECTOR_DEFAULT_TOP_K = 10;
-        const MEMORY_VECTOR_MIN_SIMILARITY = 40;
-        const MEMORY_VECTOR_MAX_SIMILARITY = 65;
-        const MEMORY_VECTOR_DEFAULT_SIMILARITY = 50;
+        const MEMORY_VECTOR_SIMILARITY_THRESHOLD = 45;
         const MEMORY_VECTOR_DEFAULT_DEPTH = 1;
         const CLASSIC_MEMORY_MIN_CONCURRENCY = 1;
         const CLASSIC_MEMORY_MAX_CONCURRENCY = 10;
@@ -1071,7 +1066,6 @@ const app = createApp({
         const SUMMARY_KEEP_FLOORS_MIN = 10;
         const SUMMARY_KEEP_FLOORS_MAX = 40;
         const SUMMARY_KEEP_FLOORS_DEFAULT = 20;
-        const SUMMARY_LEVEL_DEFAULT = 'balanced';
         const LIST_PAGE_SIZE = 10;
         const memories = ref([]);
         const classicMemories = ref([]);
@@ -1082,11 +1076,9 @@ const app = createApp({
             embeddingModel: '',
             classicModel: '',
             vectorTopK: MEMORY_VECTOR_DEFAULT_TOP_K,
-            similarityThreshold: MEMORY_VECTOR_DEFAULT_SIMILARITY,
             defaultDepth: MEMORY_VECTOR_DEFAULT_DEPTH,
             vectorKeepFloors: VECTOR_KEEP_FLOORS_DEFAULT,
             summaryKeepFloors: SUMMARY_KEEP_FLOORS_DEFAULT,
-            summaryLevel: SUMMARY_LEVEL_DEFAULT,
             classicConcurrency: CLASSIC_MEMORY_DEFAULT_CONCURRENCY
         });
         const isBatchExtracting = ref(false);
@@ -1151,7 +1143,7 @@ const app = createApp({
             if (!memorySettings.classicModel && memorySettings.model) {
                 memorySettings.classicModel = String(memorySettings.model).trim();
             }
-            ['model', 'autoExtract', 'keepFloors', `re${'rankEnabled'}`, `re${'rankModel'}`].forEach(key => {
+            ['model', 'autoExtract', 'keepFloors', 'similarityThreshold', 'summaryLevel', `re${'rankEnabled'}`, `re${'rankModel'}`].forEach(key => {
                 delete memorySettings[key];
             });
             memorySettings.mode = memorySettings.mode === MEMORY_MODE_CLASSIC
@@ -1172,18 +1164,11 @@ const app = createApp({
                 SUMMARY_KEEP_FLOORS_MAX,
                 SUMMARY_KEEP_FLOORS_DEFAULT
             );
-            if (!SUMMARY_LENGTH_REQUIREMENTS[memorySettings.summaryLevel]) {
-                memorySettings.summaryLevel = SUMMARY_LEVEL_DEFAULT;
-            }
             memorySettings.classicConcurrency = normalizeClassicMemoryConcurrency(memorySettings.classicConcurrency);
             const vectorTopK = Number(memorySettings.vectorTopK);
             memorySettings.vectorTopK = Number.isFinite(vectorTopK)
                 ? Math.max(MEMORY_VECTOR_MIN_TOP_K, Math.min(MEMORY_VECTOR_MAX_TOP_K, vectorTopK))
                 : MEMORY_VECTOR_DEFAULT_TOP_K;
-            const similarityThreshold = Number(memorySettings.similarityThreshold);
-            memorySettings.similarityThreshold = Number.isFinite(similarityThreshold)
-                ? Math.max(MEMORY_VECTOR_MIN_SIMILARITY, Math.min(MEMORY_VECTOR_MAX_SIMILARITY, Math.round(similarityThreshold)))
-                : MEMORY_VECTOR_DEFAULT_SIMILARITY;
             memorySettings.defaultDepth = MEMORY_VECTOR_DEFAULT_DEPTH;
         };
 
@@ -4754,7 +4739,7 @@ const app = createApp({
                     .map(preset => preset.content
                         .replace(/^\s*<writing_style>\s*/i, '')
                         .replace(/\s*<\/writing_style>\s*$/i, ''))
-                .concat(/deepseek/i.test(requestModel) ? '正文最少800字。' : [])
+                .concat(/deepseek/i.test(requestModel) ? '正文最少600字。' : [])
                     .join('\n\n')
             });
 
@@ -5300,15 +5285,11 @@ const app = createApp({
         };
 
         const requestClassicMemorySummary = async (job, signal) => {
-            const summaryLengthRequirement = SUMMARY_LENGTH_REQUIREMENTS[memorySettings.summaryLevel]
-                || SUMMARY_LENGTH_REQUIREMENTS[SUMMARY_LEVEL_DEFAULT];
-
             const requestMessages = [{
                 role: 'system',
                 content: BUILTIN_PROMPTS.buildClassicSummarySystemPrompt({
                     userName: user.name,
-                    characterName: currentCharacter.value?.name,
-                    lengthRequirement: summaryLengthRequirement
+                    characterName: currentCharacter.value?.name
                 })
             }];
 
@@ -5330,14 +5311,11 @@ const app = createApp({
             const ordered = [...group].sort((a, b) => Number(a.turn) - Number(b.turn));
             const startTurn = Number(ordered[0]?.turn) || 1;
             const endTurn = Number(ordered[ordered.length - 1]?.turn) || startTurn;
-            const lengthRequirement = SUMMARY_LENGTH_REQUIREMENTS[memorySettings.summaryLevel]
-                || SUMMARY_LENGTH_REQUIREMENTS[SUMMARY_LEVEL_DEFAULT];
             const requestMessages = [{
                 role: 'system',
                 content: BUILTIN_PROMPTS.buildClassicSecondarySummaryPrompt({
                     userName: user.name,
                     characterName: currentCharacter.value?.name,
-                    lengthRequirement,
                     startTurn,
                     endTurn
                 })
@@ -5908,8 +5886,7 @@ const app = createApp({
         );
 
         const passesMemorySimilarityThreshold = (score) => {
-            const threshold = Number(memorySettings.similarityThreshold) || MEMORY_VECTOR_DEFAULT_SIMILARITY;
-            return score >= threshold / 100;
+            return score >= MEMORY_VECTOR_SIMILARITY_THRESHOLD / 100;
         };
 
         const getRecentUserMemoryQueries = (limit = 3) => {

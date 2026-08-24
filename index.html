@@ -2370,22 +2370,6 @@
                                     <input type="range" v-model.number="memorySettings.vectorTopK" min="10" max="20" step="1"
                                         class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                                 </div>
-                                <div class="settings-field">
-                                    <div class="flex justify-between items-center mb-2">
-                                        <div class="relative flex items-center">
-                                            <label class="text-sm font-semibold text-gray-700">最低召回相关度</label>
-                                            <settings-help topic="similarity" :open-topic="settingsHelpTopic"
-                                                label="查看最低召回相关度说明" @toggle="settingsHelpTopic = $event">
-                                                控制记忆分片的最低匹配程度。数值越高，不相关内容越少，但可能漏掉间接相关的记忆；数值越低，召回的记忆分片越多，同时也会增加关联较弱的结果。
-                                            </settings-help>
-                                        </div>
-                                        <span class="text-xs font-mono font-bold text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1 whitespace-nowrap">{{
-                                            memorySettings.similarityThreshold + '%'
-                                            }}</span>
-                                    </div>
-                                    <input type="range" v-model.number="memorySettings.similarityThreshold" min="40" max="65" step="5"
-                                        class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
-                                </div>
                             </template>
 
                             <div v-else class="settings-field">
@@ -2402,41 +2386,6 @@
                                     <span :class="memorySettings.classicModel ? 'text-gray-700' : 'text-gray-400'">{{
                                         memorySettings.classicModel || '请选择总结模式副模型' }}</span>
                                 </button>
-                            </div>
-
-                            <div v-if="memorySettings.mode === 'classic'"
-                                class="settings-field">
-                                <div class="relative mb-2 flex items-center">
-                                    <label class="text-sm font-semibold text-gray-700">总结程度</label>
-                                    <settings-help topic="summaryLevel" :open-topic="settingsHelpTopic"
-                                        label="查看总结程度说明" @toggle="settingsHelpTopic = $event">
-                                        控制每轮总结的目标篇幅。不同模型对中文字数的理解和遵循能力不同，实际结果可能略有偏差。
-                                    </settings-help>
-                                </div>
-                                <div class="segmented-switch segmented-switch--compact segmented-switch--three w-full">
-                                    <div class="segmented-switch__indicator" :class="{
-                                        'is-position-2': memorySettings.summaryLevel === 'balanced',
-                                        'is-position-3': memorySettings.summaryLevel === 'detailed'
-                                    }"></div>
-                                    <button type="button" @click="memorySettings.summaryLevel = 'concise'"
-                                        class="segmented-switch__option"
-                                        :class="{ 'is-active': memorySettings.summaryLevel === 'concise' }"
-                                        aria-label="精简总结，50 到 80 字">
-                                        精简
-                                    </button>
-                                    <button type="button" @click="memorySettings.summaryLevel = 'balanced'"
-                                        class="segmented-switch__option"
-                                        :class="{ 'is-active': memorySettings.summaryLevel === 'balanced' }"
-                                        aria-label="均衡总结，100 到 130 字">
-                                        均衡
-                                    </button>
-                                    <button type="button" @click="memorySettings.summaryLevel = 'detailed'"
-                                        class="segmented-switch__option"
-                                        :class="{ 'is-active': memorySettings.summaryLevel === 'detailed' }"
-                                        aria-label="详细总结，200 到 250 字">
-                                        详细
-                                    </button>
-                                </div>
                             </div>
 
                             <div v-if="memorySettings.mode === 'classic'" class="settings-field">
