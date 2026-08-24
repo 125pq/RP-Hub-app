@@ -32,6 +32,10 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.RejectedExecutionException;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -52,14 +56,85 @@ final class AppUpdateManager {
     private final MainActivity activity;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean destroyed = new AtomicBoolean(false);
+    private final AtomicBoolean checkInProgress = new AtomicBoolean(false);
     private final AtomicBoolean downloadCancelled = new AtomicBoolean(false);
-    private final AtomicBoolean sourceSwitchRequested = new AtomicBoolean(false);
-    private final Runnable coldStartCheck = () -> {
-        if (!destroyed.get()) executor.execute(this::checkQuietly);
-    };
+    private final AtomicInteger requestedSourceIndex = new AtomicInteger(-1);
+    private final AtomicInteger currentSourceIndex = new AtomicInteger(-1);
+    private final AtomicInteger availableSourceCount = new AtomicInteger(1);
+    private final ConnectionGate connectionGate = new ConnectionGate();
+    private final AtomicReference<CheckRequest> activeCheck = new AtomicReference<>();
+    private final Runnable coldStartCheck = this::checkQuietly;
     private AppUpdateRelease pendingInstall;
     private File pendingApk;
     private ProgressDialog progressDialog;
+
+    interface CheckCallback {
+        void onComplete(String status, String message);
+
+        default void onCancelled(String message) {
+            onComplete("cancelled", message);
+        }
+    }
+
+    static final class CheckRequest {
+        final CheckCallback callback;
+        final AtomicBoolean settled = new AtomicBoolean(false);
+
+        CheckRequest(CheckCallback callback) {
+            this.callback = callback;
+        }
+
+        void complete(String status, String message) {
+            if (settled.compareAndSet(false, true)) callback.onComplete(status, message);
+        }
+
+        void cancel(String message) {
+            if (settled.compareAndSet(false, true)) callback.onCancelled(message);
+        }
+    }
+
+    static final class ConnectionGate {
+        private final AtomicLong generation = new AtomicLong(0L);
+        private final AtomicReference<HttpURLConnection> activeConnection = new AtomicReference<>();
+        private final Object lock = new Object();
+
+        long generation() {
+            return generation.get();
+        }
+
+        void check(long expectedGeneration) throws IOException {
+            if (expectedGeneration >= 0 && generation.get() != expectedGeneration) {
+                throw new IOException("用户切换下载源");
+            }
+        }
+
+        void install(HttpURLConnection connection, long expectedGeneration) throws IOException {
+            synchronized (lock) {
+                try {
+                    check(expectedGeneration);
+                } catch (IOException error) {
+                    connection.disconnect();
+                    throw error;
+                }
+                activeConnection.set(connection);
+            }
+        }
+
+        void clear(HttpURLConnection connection) {
+            synchronized (lock) {
+                activeConnection.compareAndSet(connection, null);
+            }
+        }
+
+        void invalidate() {
+            HttpURLConnection connection;
+            synchronized (lock) {
+                generation.incrementAndGet();
+                connection = activeConnection.getAndSet(null);
+            }
+            if (connection != null) connection.disconnect();
+        }
+    }
 
     AppUpdateManager(MainActivity activity) {
         this.activity = activity;
@@ -82,20 +157,64 @@ final class AppUpdateManager {
     void destroy() {
         activity.getWindow().getDecorView().removeCallbacks(coldStartCheck);
         downloadCancelled.set(true);
+        connectionGate.invalidate();
+        CheckRequest request = activeCheck.getAndSet(null);
+        if (request != null) request.cancel("更新检查已取消");
         dismissProgress();
         destroyed.set(true);
         executor.shutdownNow();
     }
 
     private void checkQuietly() {
-        try {
-            AppUpdateRelease release = fetchLatestRelease();
-            if (release == null || release.versionCode <= installedVersionCode()) return;
-            runOnUiThread(() -> showUpdateDialog(release));
-        } catch (Exception error) {
-            // Cold-start update checks are best-effort and must never interrupt normal app startup.
-            Log.i(TAG, "Update check skipped: " + error.getMessage());
+        checkNow((status, message) -> {
+            if ("failed".equals(status) || "cancelled".equals(status)) {
+                Log.i(TAG, "Update check skipped: " + message);
+            }
+        });
+    }
+
+    void checkNow(CheckCallback callback) {
+        CheckRequest request = new CheckRequest(callback);
+        if (!checkInProgress.compareAndSet(false, true)) {
+            request.complete("busy", "正在检查更新");
+            return;
         }
+        activeCheck.set(request);
+        try {
+            executor.execute(() -> runCheck(request));
+        } catch (RejectedExecutionException error) {
+            finishCheck(request);
+            request.cancel("更新检查服务已关闭");
+        }
+    }
+
+    private void runCheck(CheckRequest request) {
+        try {
+            if (destroyed.get()) {
+                request.cancel("更新检查已取消");
+                return;
+            }
+            try {
+                AppUpdateRelease release = fetchLatestRelease();
+                if (release == null || release.versionCode <= installedVersionCode()) {
+                    request.complete("latest", "已是最新版本");
+                    return;
+                }
+                request.complete("update_available", "发现新版本 " + release.versionName);
+                runOnUiThread(() -> {
+                    if (!destroyed.get()) showUpdateDialog(release);
+                });
+            } catch (Exception error) {
+                request.complete("failed", safeMessage(error));
+            }
+        } finally {
+            finishCheck(request);
+        }
+    }
+
+    private void finishCheck(CheckRequest request) {
+        activeCheck.compareAndSet(request, null);
+        checkInProgress.set(false);
     }
 
     private AppUpdateRelease fetchLatestRelease() throws IOException, JSONException {
@@ -225,6 +344,10 @@ final class AppUpdateManager {
 
     private void startDownload(AppUpdateRelease release) {
         downloadCancelled.set(false);
+        requestedSourceIndex.set(-1);
+        currentSourceIndex.set(-1);
+        connectionGate.invalidate();
+        availableSourceCount.set(Math.max(1, release.apkSources.size()));
         showProgress(release);
         executor.execute(() -> {
             File destination = new File(new File(activity.getCacheDir(), "updates"), release.apkName);
@@ -251,18 +374,26 @@ final class AppUpdateManager {
 
     private void downloadAndVerify(AppUpdateRelease release, File destination) throws Exception {
         Exception lastError = null;
-        for (int index = 0; index < release.apkSources.size(); index++) {
+        int index = 0;
+        for (int attempt = 0; attempt < release.apkSources.size(); attempt++) {
+            int requested = requestedSourceIndex.getAndSet(-1);
+            if (requested >= 0 && requested < release.apkSources.size()) index = requested;
             List<String> parts = release.apkSources.get(index);
-            sourceSwitchRequested.set(false);
+            currentSourceIndex.set(index);
+            long generation = connectionGate.generation();
             publishSourceStatus(index + 1, release.apkSources.size());
             try {
-                downloadAndVerifyFromParts(release, destination, parts, index < release.apkSources.size() - 1);
+                downloadAndVerifyFromParts(release, destination, parts, release.apkSources.size() > 1, generation);
                 Log.i(TAG, "Verified APK source with " + parts.size() + " part(s)");
                 return;
             } catch (Exception error) {
                 if (downloadCancelled.get()) throw error;
                 lastError = error;
                 Log.i(TAG, "APK source failed, trying next (" + error.getMessage() + ")");
+                int next = requestedSourceIndex.getAndSet(-1);
+                index = next >= 0 && next < release.apkSources.size()
+                    ? next
+                    : (index + 1) % release.apkSources.size();
             }
         }
         throw new IOException("所有 APK 下载源均失败", lastError);
@@ -272,7 +403,8 @@ final class AppUpdateManager {
         AppUpdateRelease release,
         File destination,
         List<String> partUrls,
-        boolean switchWhenSlow
+        boolean switchWhenSlow,
+        long generation
     ) throws Exception {
         File parent = destination.getParentFile();
         if (parent == null || (!parent.exists() && !parent.mkdirs())) throw new IOException("无法创建更新缓存目录");
@@ -285,24 +417,30 @@ final class AppUpdateManager {
         try (FileOutputStream output = new FileOutputStream(temporary)) {
             byte[] buffer = new byte[64 * 1024];
             for (String partUrl : partUrls) {
-                HttpURLConnection connection = openConnectionFollowingRedirects(partUrl);
-                try (InputStream input = new BufferedInputStream(connection.getInputStream())) {
-                    int count;
-                    while ((count = input.read(buffer)) != -1) {
-                        if (downloadCancelled.get() || Thread.currentThread().isInterrupted()) throw new IOException("下载已取消");
-                        if (sourceSwitchRequested.get()) throw new IOException("用户切换下载源");
-                        output.write(buffer, 0, count);
-                        digest.update(buffer, 0, count);
-                        downloaded += count;
-                        long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
-                        long bytesPerSecond = downloaded * 1000L / Math.max(1L, elapsed);
-                        publishProgress(downloaded, release.apkSize, bytesPerSecond);
-                        if (switchWhenSlow && elapsed >= SLOW_SOURCE_GRACE_MS
-                            && bytesPerSecond < MIN_DOWNLOAD_BYTES_PER_SECOND) {
-                            throw new IOException("当前下载源速度过慢（" + (bytesPerSecond / 1024L) + " KB/s），正在切换");
+                HttpURLConnection connection = openConnectionFollowingRedirects(partUrl, generation);
+                try {
+                    connectionGate.check(generation);
+                    InputStream rawInput = connection.getInputStream();
+                    connectionGate.check(generation);
+                    try (InputStream input = new BufferedInputStream(rawInput)) {
+                        int count;
+                        while ((count = input.read(buffer)) != -1) {
+                            if (downloadCancelled.get() || Thread.currentThread().isInterrupted()) throw new IOException("下载已取消");
+                            connectionGate.check(generation);
+                            output.write(buffer, 0, count);
+                            digest.update(buffer, 0, count);
+                            downloaded += count;
+                            long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
+                            long bytesPerSecond = downloaded * 1000L / Math.max(1L, elapsed);
+                            publishProgress(downloaded, release.apkSize, bytesPerSecond);
+                            if (switchWhenSlow && elapsed >= SLOW_SOURCE_GRACE_MS
+                                && bytesPerSecond < MIN_DOWNLOAD_BYTES_PER_SECOND) {
+                                throw new IOException("当前下载源速度过慢（" + (bytesPerSecond / 1024L) + " KB/s），正在切换");
+                            }
                         }
                     }
                 } finally {
+                    connectionGate.clear(connection);
                     connection.disconnect();
                 }
             }
@@ -385,10 +523,11 @@ final class AppUpdateManager {
         progressDialog.setIndeterminate(release.apkSize <= 0);
         progressDialog.setMax(100);
         progressDialog.setCancelable(false);
-        progressDialog.setButton(ProgressDialog.BUTTON_NEUTRAL, "切换源", (dialog, which) -> {});
+        progressDialog.setButton(ProgressDialog.BUTTON_NEUTRAL,
+            release.apkSources.size() > 1 ? "切换到 Gitee" : "切换源", (dialog, which) -> {});
         progressDialog.setButton(ProgressDialog.BUTTON_NEGATIVE, "取消", (dialog, which) -> {});
         progressDialog.show();
-        progressDialog.getButton(ProgressDialog.BUTTON_NEUTRAL).setOnClickListener(view -> sourceSwitchRequested.set(true));
+        progressDialog.getButton(ProgressDialog.BUTTON_NEUTRAL).setOnClickListener(view -> requestSourceSwitch());
         progressDialog.getButton(ProgressDialog.BUTTON_NEGATIVE).setOnClickListener(view -> {
             downloadCancelled.set(true);
             progressDialog.dismiss();
@@ -415,9 +554,26 @@ final class AppUpdateManager {
             if (progressDialog == null || !progressDialog.isShowing()) return;
             progressDialog.setIndeterminate(true);
             progressDialog.setProgress(0);
-            progressDialog.setMessage("正在连接下载源 " + source + "/" + sourceCount + "…");
-            progressDialog.getButton(ProgressDialog.BUTTON_NEUTRAL).setEnabled(source < sourceCount);
+            int currentIndex = Math.max(0, source - 1);
+            String current = sourceLabel(currentIndex);
+            String target = sourceLabel((currentIndex + 1) % Math.max(1, sourceCount));
+            progressDialog.setMessage("正在连接 " + current + "（" + source + "/" + sourceCount + "）…");
+            progressDialog.getButton(ProgressDialog.BUTTON_NEUTRAL).setText(
+                sourceCount > 1 ? "切换到 " + target : "切换源"
+            );
+            progressDialog.getButton(ProgressDialog.BUTTON_NEUTRAL).setEnabled(sourceCount > 1);
         });
+    }
+
+    private void requestSourceSwitch() {
+        int current = currentSourceIndex.get();
+        int sourceCount = Math.max(1, availableSourceCount.get());
+        requestedSourceIndex.set(current < 0 ? 1 % sourceCount : (current + 1) % sourceCount);
+        connectionGate.invalidate();
+    }
+
+    private static String sourceLabel(int index) {
+        return index == 1 ? "Gitee" : "GitHub";
     }
 
     private void showRetry(String message, Runnable retry) {
@@ -447,30 +603,44 @@ final class AppUpdateManager {
     }
 
     private HttpURLConnection openConnectionFollowingRedirects(String value) throws IOException {
+        return openConnectionFollowingRedirects(value, -1L);
+    }
+
+    private HttpURLConnection openConnectionFollowingRedirects(String value, long generation) throws IOException {
         URL current = new URL(value);
         for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
             if (!isAllowedNetworkUrl(current.toString())) {
                 throw new IOException("不安全的下载地址");
             }
+            connectionGate.check(generation);
             HttpURLConnection connection = (HttpURLConnection) current.openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            connection.setReadTimeout(READ_TIMEOUT_MS);
-            connection.setRequestProperty("Accept", "application/vnd.github+json, application/octet-stream");
-            connection.setRequestProperty("User-Agent", "RP-Hub-Android-Updater");
-            int status = connection.getResponseCode();
-            if (status >= 300 && status < 400) {
-                String location = connection.getHeaderField("Location");
-                connection.disconnect();
-                if (location == null) throw new IOException("下载重定向缺少地址");
-                current = new URL(current, location);
-                continue;
+            boolean returned = false;
+            try {
+                connectionGate.install(connection, generation);
+                connection.setInstanceFollowRedirects(false);
+                connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                connection.setReadTimeout(READ_TIMEOUT_MS);
+                connection.setRequestProperty("Accept", "application/vnd.github+json, application/octet-stream");
+                connection.setRequestProperty("User-Agent", "RP-Hub-Android-Updater");
+                int status = connection.getResponseCode();
+                connectionGate.check(generation);
+                if (status >= 300 && status < 400) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null) throw new IOException("下载重定向缺少地址");
+                    current = new URL(current, location);
+                    continue;
+                }
+                if (status < 200 || status >= 300) {
+                    throw new IOException("GitHub 请求失败（HTTP " + status + "）");
+                }
+                returned = true;
+                return connection;
+            } finally {
+                if (!returned) {
+                    connectionGate.clear(connection);
+                    connection.disconnect();
+                }
             }
-            if (status < 200 || status >= 300) {
-                connection.disconnect();
-                throw new IOException("GitHub 请求失败（HTTP " + status + "）");
-            }
-            return connection;
         }
         throw new IOException("下载重定向次数过多");
     }

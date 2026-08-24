@@ -16,6 +16,53 @@ function patchBackupSafeArea(source) {
   return source;
 }
 
+export function patchBackupUpdateCheck(source) {
+  const marker = 'data-action="check-update"';
+  if (!source.includes(marker)) {
+    source = replaceOnce(
+      source,
+      '                <section class="rphub-control-section"><h3 class="rphub-control-section__title">整体备份</h3>',
+      '                <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">检查更新</span><span class="rphub-control-row__hint" data-role="update-value">手动检查软件更新</span></div><button type="button" class="rphub-backup-panel__btn" data-action="check-update">检查更新</button></div></section>\n                <section class="rphub-control-section"><h3 class="rphub-control-section__title">整体备份</h3>',
+      'control center update check button'
+    );
+  }
+  if (!source.includes("querySelector('[data-action=\"check-update\"]')")) {
+    source = ensureAfter(
+      source,
+      "        anchorEl.querySelector('.rphub-control-close').addEventListener('click', closePanel);",
+      `
+        anchorEl.querySelector('[data-action="check-update"]').addEventListener('click', async () => {
+            if (busy) return;
+            const button = anchorEl.querySelector('[data-action="check-update"]');
+            const value = anchorEl.querySelector('[data-role="update-value"]');
+            const adapter = window.platformAdapter;
+            busy = true;
+            button.disabled = true;
+            if (value) value.textContent = '正在检查更新...';
+            try {
+                const response = await adapter?.invokeNative?.('AppUpdate', 'checkNow');
+                if (!response?.supported) throw new Error('当前平台不支持检查更新');
+                const result = response.result || {};
+                if (value) value.textContent = result.message || '检查完成';
+            } catch (error) {
+                if (value) value.textContent = error?.message || '检查更新失败';
+            } finally {
+                button.disabled = false;
+                busy = false;
+            }
+        });`,
+      'control center update check handler'
+    );
+  }
+  source = source.replace(
+    "        anchorEl.querySelector('.rphub-control-close').addEventListener('click', closePanel);        anchorEl.querySelector('[data-action=\"check-update\"]')",
+    "        anchorEl.querySelector('.rphub-control-close').addEventListener('click', closePanel);\n        anchorEl.querySelector('[data-action=\"check-update\"]')"
+  );
+  requireContains(source, marker, 'control center update check button');
+  requireContains(source, "'AppUpdate', 'checkNow'", 'control center update check bridge');
+  return source;
+}
+
 export function patchBackupTheme(source) {
   const marker = "'NativeTheme',";
   const nativeThemeCall = `        try {
@@ -143,7 +190,7 @@ export async function applyBackupHooks() {
   const changes = [];
 
   changes.push(await editText('assets/js/rphub-backup.js', category, source => (
-    patchBackupTheme(patchBackupSafeArea(source))
+    patchBackupUpdateCheck(patchBackupTheme(patchBackupSafeArea(source)))
   )));
 
   // --- index.html: load rphub-backup.js before app.js -----------------------

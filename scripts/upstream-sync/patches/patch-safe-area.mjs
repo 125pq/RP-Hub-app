@@ -43,6 +43,27 @@ function patchInsetFallback(source, file) {
   return source.replace(target, replacement);
 }
 
+const expandedSidebarHeaderPadding = `    .safe-sidebar-header.px-6 {
+        padding-right: calc(1.5rem + var(--safe-right));
+        padding-left: calc(1.5rem + var(--safe-left));
+    }
+`;
+
+// Preserve the upstream px-6/px-0 state distinction while adding the system
+// inset to the expanded mobile sidebar header's original horizontal padding.
+export function patchSidebarHeaderPadding(source) {
+  if (source.includes('.safe-sidebar-header.px-6 {')) return source;
+  const mobileMediaStart = source.indexOf('@media (max-width: 768px) {');
+  if (mobileMediaStart < 0) {
+    throw new Error('Missing mobile media anchor for expanded sidebar header safe-area padding');
+  }
+  const footerAnchor = source.indexOf('    .safe-sidebar-footer {', mobileMediaStart);
+  if (footerAnchor < 0) {
+    throw new Error('Missing mobile sidebar footer anchor for expanded sidebar header safe-area padding');
+  }
+  return source.slice(0, footerAnchor) + expandedSidebarHeaderPadding + source.slice(footerAnchor);
+}
+
 function patchIndexToast(source) {
   const target = `        <div\n            class="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none items-center">`;
   const replacement = `        <div data-safe-area="toast"\n            class="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none items-center">`;
@@ -120,7 +141,9 @@ export async function applySafeAreaHooks() {
     return source;
   }));
   for (const file of ['assets/css/safe-area.css', 'assets/js/safe-area.js']) {
-    changes.push(await editText(file, category, source => source));
+    changes.push(await editText(file, category, source => (
+      file === 'assets/css/safe-area.css' ? patchSidebarHeaderPadding(source) : source
+    )));
   }
   return changes.filter(Boolean);
 }

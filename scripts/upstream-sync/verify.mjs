@@ -52,6 +52,10 @@ assert.match(android, /invokeNative\('NativeClipboard', 'readText'\)/, 'Android 
 assert.match(android, /input\[type="password"\]/, 'Android secure paste must preserve password inputs');
 assert.match(android, /rphub-native-paste-menu/, 'Android secure paste needs a contextual action');
 assert.match(await read('android/app/src/main/java/io/github/pq125/rphub/MainActivity.java'), /registerPlugin\(NativeClipboardPlugin\.class\)/);
+assert.match(await read('android/app/src/main/java/io/github/pq125/rphub/MainActivity.java'), /registerPlugin\(AppUpdatePlugin\.class\)/);
+assert.match(await read('android/app/src/main/java/io/github/pq125/rphub/AppUpdatePlugin.java'), /@CapacitorPlugin\(name = "AppUpdate"\)/);
+assert.match(await read('android/app/src/main/java/io/github/pq125/rphub/AppUpdatePlugin.java'), /checkNow\(PluginCall call\)/);
+assert.match(await read('assets/js/rphub-backup.js'), /data-action="check-update"/);
 
 const scanRoots = ['assets/js', 'character', 'novel'];
 const candidates = [];

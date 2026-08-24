@@ -66,6 +66,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeFilePlugin.class);
         registerPlugin(NativeClipboardPlugin.class);
         registerPlugin(NativeThemePlugin.class);
+        registerPlugin(AppUpdatePlugin.class);
         bridgeBuilder.addWebViewListener(downloadBridgePageListener);
         super.onCreate(savedInstanceState);
         configureDarkMode();
@@ -79,6 +80,10 @@ public class MainActivity extends BridgeActivity {
             this,
             savedInstanceState == null ? appUpdateManager::checkOnColdStart : null
         );
+    }
+
+    AppUpdateManager getAppUpdateManager() {
+        return appUpdateManager;
     }
 
     private void configureDarkMode() {

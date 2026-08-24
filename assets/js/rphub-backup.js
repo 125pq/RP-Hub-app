@@ -996,6 +996,7 @@
                 <div class="rphub-control-head"><div><p class="rphub-control-kicker">RP-HUB LOCAL</p><h2 class="rphub-control-title">本地控制中心</h2></div><button type="button" class="rphub-control-close" aria-label="关闭">×</button></div>
                 <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">跟随系统</span><span class="rphub-control-row__hint" data-role="theme-value"></span></div><button type="button" class="rphub-control-switch" data-action="toggle-system-theme" role="switch" aria-checked="true" aria-label="切换跟随系统"></button></div></section>
                 <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">万相广场镜像</span><span class="rphub-control-row__hint" data-role="mirror-value"></span></div><button type="button" class="rphub-control-switch" data-action="toggle-mirror" role="switch" aria-checked="true" aria-label="切换万相广场镜像"></button></div></section>
+                <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">检查更新</span><span class="rphub-control-row__hint" data-role="update-value">手动检查软件更新</span></div><button type="button" class="rphub-backup-panel__btn" data-action="check-update">检查更新</button></div></section>
                 <section class="rphub-control-section"><h3 class="rphub-control-section__title">整体备份</h3><p class="rphub-control-section__hint">导入前会先导出当前数据的恢复备份。</p><div class="rphub-backup-panel__actions">
                     <button type="button" class="rphub-backup-panel__btn rphub-backup-panel__btn--primary" data-action="export">导出整体备份</button><button type="button" class="rphub-backup-panel__btn" data-action="import">导入整体备份</button>
                 </div>
@@ -1014,6 +1015,26 @@
 
         anchorEl.querySelector('.rphub-backup-button').addEventListener('click', openPanel);
         anchorEl.querySelector('.rphub-control-close').addEventListener('click', closePanel);
+        anchorEl.querySelector('[data-action="check-update"]').addEventListener('click', async () => {
+            if (busy) return;
+            const button = anchorEl.querySelector('[data-action="check-update"]');
+            const value = anchorEl.querySelector('[data-role="update-value"]');
+            const adapter = window.platformAdapter;
+            busy = true;
+            button.disabled = true;
+            if (value) value.textContent = '正在检查更新...';
+            try {
+                const response = await adapter?.invokeNative?.('AppUpdate', 'checkNow');
+                if (!response?.supported) throw new Error('当前平台不支持检查更新');
+                const result = response.result || {};
+                if (value) value.textContent = result.message || '检查完成';
+            } catch (error) {
+                if (value) value.textContent = error?.message || '检查更新失败';
+            } finally {
+                button.disabled = false;
+                busy = false;
+            }
+        });
         anchorEl.querySelector('[data-action="toggle-system-theme"]').addEventListener('click', () => {
             const prefs = getControlPrefs();
             prefs.themeMode = prefs.themeMode === 'system' ? 'off' : 'system';
