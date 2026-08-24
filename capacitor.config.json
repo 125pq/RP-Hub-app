@@ -1,5 +1,13 @@
 {
   "appId": "io.github.pq125.rphub",
   "appName": "RP Hub",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DEFAULT",
+      "hidden": false,
+      "animation": "NONE"
+    }
+  }
 }

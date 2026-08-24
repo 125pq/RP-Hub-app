@@ -8,7 +8,7 @@
     "build:web": "npm run prepare:vendor && npm run build:css && node scripts/web/build-web.mjs",
     "verify:dist": "node scripts/web/verify-dist.mjs",
     "test:syntax": "node --check assets/js/platform-services.js && node --check assets/js/rphub-android-adapter.js && node --check assets/js/rphub-backup.js && node --check assets/js/core-utils.js && node --check assets/js/app.js",
-    "test:platform": "npm run test:syntax && node scripts/tests/test-platform-services.mjs && node scripts/tests/test-safe-area-layout.mjs",
+    "test:platform": "npm run test:syntax && node scripts/tests/test-platform-services.mjs && node scripts/tests/test-safe-area-layout.mjs && node scripts/tests/test-safe-area-insets.mjs && node scripts/tests/test-android-build-scripts.mjs",
     "test:upstream-sync": "node scripts/upstream-sync/tests/release-source.mjs && node scripts/upstream-sync/tests/prepare-android-release.mjs && node scripts/upstream-sync/tests/android-release-workflow.mjs && node scripts/upstream-sync/tests/auto-resolver.mjs && node scripts/upstream-sync/verify.mjs && node scripts/upstream-sync/tests/merge-regressions.mjs && node scripts/upstream-sync/tests/chat-layout-patch.mjs && node scripts/upstream-sync/tests/mirror-square.mjs && node scripts/upstream-sync/tests/eol-preservation.mjs && node scripts/upstream-sync/tests/eol-churn-guard.mjs && node scripts/upstream-sync/tests/eol-baseline-guard.mjs && node scripts/upstream-sync/tests/reapply-idempotence.mjs && npm run test:backup",
     "test:performance": "node scripts/tests/test-performance-benchmark.mjs && node scripts/tests/test-offscreen-iframe-lifecycle.mjs && node scripts/tests/test-streaming-flush.mjs",
     "sync:upstream": "node scripts/upstream-sync/sync-upstream.mjs",
@@ -20,11 +20,11 @@
     "test:backup": "node scripts/upstream-sync/tests/backup-roundtrip.mjs && node scripts/upstream-sync/tests/backup-v5-compat.mjs && node scripts/upstream-sync/tests/backup-patch.mjs && node scripts/upstream-sync/tests/eol-preservation.mjs && node scripts/upstream-sync/tests/reapply-idempotence.mjs"
   },
   "dependencies": {
-    "@capacitor/android": "7.6.8",
-    "@capacitor/app": "7.1.2",
-    "@capacitor/browser": "7.0.5",
-    "@capacitor/core": "7.6.8",
-    "@capacitor/share": "7.0.4",
+    "@capacitor/android": "8.5.0",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/browser": "8.0.4",
+    "@capacitor/core": "8.5.0",
+    "@capacitor/share": "8.0.1",
     "@fontsource-variable/lora": "5.2.8",
     "@fontsource/ma-shan-zheng": "5.2.8",
     "@fontsource/noto-serif-sc": "5.2.8",
@@ -39,6 +39,6 @@
     "vue": "3.5.18"
   },
   "devDependencies": {
-    "@capacitor/cli": "7.6.8"
+    "@capacitor/cli": "8.5.0"
   }
 }

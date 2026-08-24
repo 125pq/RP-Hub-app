@@ -1,7 +1,20 @@
-import { editText, ensureAfter, ensureBefore, requireContains } from '../lib.mjs';
+import { editText, ensureAfter, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
 import { patchIndexScriptOverlay } from './index-script-overlay.mjs';
 
 const category = 'backup-hooks';
+
+function patchBackupSafeArea(source) {
+  const replacement = 'var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))';
+  if (source.includes(replacement)) return source;
+  source = replaceOnce(
+    source,
+    'bottom:calc(env(safe-area-inset-bottom,0px) + 12px)',
+    `bottom:calc(${replacement} + 12px)`,
+    'backup panel safe-area fallback'
+  );
+  requireContains(source, replacement, 'backup panel safe-area fallback');
+  return source;
+}
 
 export function patchBackupNovel(source) {
   if (!source.includes("flushData.type !== 'RPHUB_BACKUP_FLUSH'")) {
@@ -91,6 +104,8 @@ export function patchSquareMirrorApp(source) {
 
 export async function applyBackupHooks() {
   const changes = [];
+
+  changes.push(await editText('assets/js/rphub-backup.js', category, patchBackupSafeArea));
 
   // --- index.html: load rphub-backup.js before app.js -----------------------
   changes.push(await editText('index.html', category, patchIndexScriptOverlay));

@@ -9,8 +9,10 @@
             probe = document.createElement('div');
             probe.setAttribute('aria-hidden', 'true');
             probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;'
-                + 'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) '
-                + 'env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+                + 'padding:var(--safe-area-inset-top,env(safe-area-inset-top,0px)) '
+                + 'var(--safe-area-inset-right,env(safe-area-inset-right,0px)) '
+                + 'var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px)) '
+                + 'var(--safe-area-inset-left,env(safe-area-inset-left,0px))';
             document.body.appendChild(probe);
         }
         const style = getComputedStyle(probe);
@@ -31,10 +33,14 @@
     };
 
     const applyToRoot = (root, insets, keyboardOpen) => {
-        root.style.setProperty('--safe-top', `${insets.top}px`);
-        root.style.setProperty('--safe-right', `${insets.right}px`);
-        root.style.setProperty('--safe-bottom', `${insets.bottom}px`);
-        root.style.setProperty('--safe-left', `${insets.left}px`);
+        // Capacitor 8 owns --safe-area-inset-* on the top-level document. Only
+        // same-origin iframe documents need resolved values copied into them.
+        if (root !== document.documentElement) {
+            root.style.setProperty('--safe-top', `${insets.top}px`);
+            root.style.setProperty('--safe-right', `${insets.right}px`);
+            root.style.setProperty('--safe-bottom', `${insets.bottom}px`);
+            root.style.setProperty('--safe-left', `${insets.left}px`);
+        }
         root.style.setProperty('--safe-bottom-effective', keyboardOpen ? '0px' : `${insets.bottom}px`);
     };
 

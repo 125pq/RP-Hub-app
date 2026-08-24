@@ -934,7 +934,7 @@
             .rphub-backup-panel__btn--primary { background:#4f46e5; border-color:#4f46e5; color:#fff; }
             .rphub-backup-status { font-size:11px; color:#475569; margin:10px 0 0; min-height:16px; line-height:1.45; }
             .rphub-backup-status--error { color: #dc2626; }
-            @media (max-width:480px) { .rphub-backup-panel { position:fixed; left:12px; right:12px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); width:auto; max-height:calc(100vh - 24px); } .rphub-backup-panel__actions { grid-template-columns:1fr; } }
+            @media (max-width:480px) { .rphub-backup-panel { position:fixed; left:12px; right:12px; bottom:calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 12px); width:auto; max-height:calc(100vh - 24px); } .rphub-backup-panel__actions { grid-template-columns:1fr; } }
         `;
         document.head.appendChild(style);
     }

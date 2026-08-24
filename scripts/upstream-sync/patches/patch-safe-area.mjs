@@ -31,6 +31,18 @@ function patchStylesheet(source, href, file) {
   return ensureBefore(source, '</head>', `    <link href="${href}" rel="stylesheet">\n`, `${file} safe-area stylesheet`);
 }
 
+function patchInsetFallback(source, file) {
+  // The anchor is allowed once per upstream page. Once wrapped, return as-is;
+  // otherwise a nested env() inside var() would be mistaken for a new anchor.
+  const replacement = 'var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))';
+  if (source.includes('var(--safe-area-inset-bottom')) return source;
+  const target = /env\(safe-area-inset-bottom(?:,\s*0px)?\)/g;
+  const matches = source.match(target) || [];
+  if (matches.length > 1) throw new Error(`Duplicate direct bottom inset anchors in ${file}`);
+  if (matches.length === 0) return source;
+  return source.replace(target, replacement);
+}
+
 function patchIndexToast(source) {
   const target = `        <div\n            class="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none items-center">`;
   const replacement = `        <div data-safe-area="toast"\n            class="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none items-center">`;
@@ -76,12 +88,14 @@ export function patchSafeAreaNovel(source) {
   ]) {
     source = patchNovelClass(source, oldClass, newClass, label);
   }
+  source = patchInsetFallback(source, 'novel/index.html');
   return source;
 }
 
 export function patchSafeAreaCharacter(source) {
   source = patchViewportMeta(source, 'character/index.html', false);
-  return patchStylesheet(source, '../assets/css/safe-area.css', 'character/index.html');
+  source = patchStylesheet(source, '../assets/css/safe-area.css', 'character/index.html');
+  return patchInsetFallback(source, 'character/index.html');
 }
 
 export async function applySafeAreaHooks() {

@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $androidRoot = Join-Path $projectRoot 'android'
 $toolchainRoot = Join-Path (Split-Path -Parent $projectRoot) '.android-toolchain'
+. (Join-Path $PSScriptRoot 'build-utils.ps1')
 
 function Test-JdkHome([string]$Path) {
     return $Path -and (Test-Path -LiteralPath (Join-Path $Path 'bin\java.exe')) -and (Test-Path -LiteralPath (Join-Path $Path 'bin\javac.exe'))
@@ -19,7 +20,7 @@ function Find-JdkHome {
 }
 
 function Test-AndroidSdk([string]$Path) {
-    return $Path -and (Test-Path -LiteralPath (Join-Path $Path 'platforms\android-35\android.jar')) -and (Test-Path -LiteralPath (Join-Path $Path 'build-tools\35.0.0\apksigner.bat'))
+    return $Path -and (Test-Path -LiteralPath (Join-Path $Path 'platforms\android-36\android.jar')) -and (Test-Path -LiteralPath (Join-Path $Path 'build-tools\35.0.0\apksigner.bat'))
 }
 
 function Find-AndroidSdk {
@@ -27,7 +28,7 @@ function Find-AndroidSdk {
     foreach ($candidate in $candidates) {
         if (Test-AndroidSdk $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
     }
-    throw 'Android SDK Platform 35 and Build Tools 35.0.0 were not found. Set ANDROID_HOME.'
+    throw 'Android SDK Platform 36 and Build Tools 35.0.0 were not found. Set ANDROID_HOME.'
 }
 
 $jdkHome = Find-JdkHome
@@ -48,6 +49,8 @@ $env:Path = (Join-Path $jdkHome 'bin') + ';' + (Join-Path $androidSdk 'platform-
 if ($env:JAVA_TOOL_OPTIONS -notmatch 'javax\.net\.ssl\.trustStoreType=') {
     $env:JAVA_TOOL_OPTIONS = (($env:JAVA_TOOL_OPTIONS, '-Djavax.net.ssl.trustStoreType=Windows-ROOT') | Where-Object { $_ }) -join ' '
 }
+$versionName = Get-RPHubBuildVersion (Join-Path $projectRoot 'package.json') $env:RPHUB_VERSION_NAME
+$env:RPHUB_VERSION_NAME = $versionName
 
 Write-Output "BUILD_TARGET=production"
 Write-Output "JAVA_HOME=$jdkHome"
@@ -66,7 +69,6 @@ try {
 
     $outputDirectory = Join-Path $projectRoot 'release_apk'
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $versionName = if ($env:RPHUB_VERSION_NAME) { $env:RPHUB_VERSION_NAME } else { '1.8.7.1' }
     $outputApk = Join-Path $outputDirectory "RP-Hub-$versionName-release.apk"
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
 
@@ -75,10 +77,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
 
     $apk = Get-Item -LiteralPath $outputApk
-    $hash = Get-FileHash -LiteralPath $outputApk -Algorithm SHA256
+    $hash = Get-RPHubSha256Hex $outputApk
     Write-Output "APK=$($apk.FullName)"
     Write-Output "APK_BYTES=$($apk.Length)"
-    Write-Output "APK_SHA256=$($hash.Hash.ToLowerInvariant())"
+    Write-Output "APK_SHA256=$hash"
 } finally {
     Pop-Location
 }

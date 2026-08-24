@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $androidRoot = Join-Path $projectRoot 'android'
 $toolchainRoot = Join-Path (Split-Path -Parent $projectRoot) '.android-toolchain'
+. (Join-Path $PSScriptRoot 'build-utils.ps1')
 
 function Test-JdkHome([string]$Path) {
     return $Path -and (Test-Path -LiteralPath (Join-Path $Path 'bin\java.exe')) -and (Test-Path -LiteralPath (Join-Path $Path 'bin\javac.exe'))
@@ -27,7 +28,7 @@ function Find-JdkHome {
 }
 
 function Test-AndroidSdk([string]$Path) {
-    return $Path -and (Test-Path -LiteralPath (Join-Path $Path 'platforms\android-35\android.jar')) -and (Test-Path -LiteralPath (Join-Path $Path 'build-tools\35.0.0\aapt2.exe'))
+    return $Path -and (Test-Path -LiteralPath (Join-Path $Path 'platforms\android-36\android.jar')) -and (Test-Path -LiteralPath (Join-Path $Path 'build-tools\35.0.0\aapt2.exe'))
 }
 
 function Find-AndroidSdk {
@@ -44,19 +45,7 @@ function Find-AndroidSdk {
         }
     }
 
-    throw 'Android SDK Platform 35 and Build Tools 35.0.0 were not found. Set ANDROID_HOME.'
-}
-
-function Get-Sha256Hex([string]$Path) {
-    $stream = [System.IO.File]::OpenRead($Path)
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $hashBytes = $sha256.ComputeHash($stream)
-        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
-    } finally {
-        $sha256.Dispose()
-        $stream.Dispose()
-    }
+    throw 'Android SDK Platform 36 and Build Tools 35.0.0 were not found. Set ANDROID_HOME.'
 }
 
 $jdkHome = Find-JdkHome
@@ -77,6 +66,8 @@ $env:Path = (Join-Path $jdkHome 'bin') + ';' + (Join-Path $androidSdk 'platform-
 if ($env:JAVA_TOOL_OPTIONS -notmatch 'javax\.net\.ssl\.trustStoreType=') {
     $env:JAVA_TOOL_OPTIONS = (($env:JAVA_TOOL_OPTIONS, '-Djavax.net.ssl.trustStoreType=Windows-ROOT') | Where-Object { $_ }) -join ' '
 }
+$versionName = Get-RPHubBuildVersion (Join-Path $projectRoot 'package.json') $env:RPHUB_VERSION_NAME
+$env:RPHUB_VERSION_NAME = $versionName
 
 Write-Output "JAVA_HOME=$jdkHome"
 Write-Output "ANDROID_HOME=$androidSdk"
@@ -94,12 +85,11 @@ try {
 
     $outputDirectory = Join-Path $projectRoot 'debug_apk'
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $versionName = if ($env:RPHUB_VERSION_NAME) { $env:RPHUB_VERSION_NAME } else { '1.8.3.6' }
     $outputApk = Join-Path $outputDirectory "RP-Hub-$versionName-debug.apk"
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
 
     $apk = Get-Item -LiteralPath $outputApk
-    $hash = Get-Sha256Hex $outputApk
+    $hash = Get-RPHubSha256Hex $outputApk
     Write-Output "APK=$($apk.FullName)"
     Write-Output "APK_BYTES=$($apk.Length)"
     Write-Output "APK_SHA256=$hash"
