@@ -48,7 +48,7 @@ multi_agent_v2 = true
 
 **两个角色文件都不写死模型名。** 主 Agent 在派发时指定当前 API 实际可用的模型：
 Worker 用最便宜够用的，Reviewer 用最强推理的。换 API、换主模型都不需要改配置。
-默认子代理luna max
+默认子代理worker和reviewer用自定义模型的luna max和sol high
 
 ### 主 Agent 的职责边界
 
