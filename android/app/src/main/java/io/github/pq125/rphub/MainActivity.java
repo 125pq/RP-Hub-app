@@ -16,8 +16,13 @@ public class MainActivity extends BridgeActivity {
     private AppUpdateManager appUpdateManager;
 
     @Override
+    protected void attachBaseContext(Context newBase) {
+        NativeThemePlugin.restoreNightMode(newBase);
+        super.attachBaseContext(newBase);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
-        NativeThemePlugin.restoreNightMode(this);
         registerPlugin(NativeFilePlugin.class);
         registerPlugin(NativeClipboardPlugin.class);
         registerPlugin(NativeThemePlugin.class);

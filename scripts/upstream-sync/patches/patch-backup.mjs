@@ -16,8 +16,16 @@ function patchBackupSafeArea(source) {
   return source;
 }
 
-function patchBackupTheme(source) {
+export function patchBackupTheme(source) {
   const marker = "'NativeTheme',";
+  const nativeThemeCall = `        try {
+            const nativeThemeCall = window.platformAdapter?.invokeNative?.(
+                'NativeTheme',
+                'setMode',
+                { mode: prefs.themeMode === 'system' ? 'system' : 'light' }
+            );
+            Promise.resolve(nativeThemeCall).catch(() => {});
+        } catch (_) { /* unsupported browser/native bridge */ }`;
   if (!source.includes(marker)) {
     source = replaceOnce(
       source,
@@ -26,20 +34,22 @@ function patchBackupTheme(source) {
         // pass; the inverse hint therefore maps the local preference to the
         // desired final appearance.
         root.style.colorScheme = dark ? 'light' : 'dark';`,
-      `        root.style.colorScheme = dark ? 'dark' : 'light';
-        try {
-            const nativeThemeCall = window.platformAdapter?.invokeNative?.(
-                'NativeTheme',
-                'setMode',
-                { mode: prefs.themeMode === 'system' ? 'system' : 'light' }
-            );
-            Promise.resolve(nativeThemeCall).catch(() => {});
-        } catch (_) { /* unsupported browser/native bridge */ }`,
+      nativeThemeCall,
       'backup native theme synchronization'
     );
   }
+  const staleColorScheme = "        root.style.colorScheme = dark ? 'dark' : 'light';\n";
+  const staleColorSchemeCount = source.split(staleColorScheme).length - 1;
+  if (staleColorSchemeCount > 1) {
+    throw new Error(`Duplicate stale backup color-scheme hints: ${staleColorSchemeCount}`);
+  }
+  if (staleColorSchemeCount === 1) {
+    source = source.replace(staleColorScheme, '');
+  }
   requireContains(source, marker, 'backup native theme synchronization');
-  requireContains(source, "root.style.colorScheme = dark ? 'dark' : 'light';", 'backup color-scheme hint');
+  if (source.includes('root.style.colorScheme')) {
+    throw new Error('Stale backup color-scheme hint remained after native theme patch');
+  }
   return source;
 }
 

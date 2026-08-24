@@ -880,7 +880,6 @@
         root.dataset.rphubThemeMode = prefs.themeMode;
         root.dataset.rphubTheme = dark ? 'dark' : 'light';
         root.classList.toggle('rphub-night-mode', dark);
-        root.style.colorScheme = dark ? 'dark' : 'light';
         try {
             const nativeThemeCall = window.platformAdapter?.invokeNative?.(
                 'NativeTheme',

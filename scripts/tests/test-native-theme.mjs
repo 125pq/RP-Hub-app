@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { patchBackupTheme } from '../upstream-sync/patches/patch-backup.mjs';
 
-const [backupSource, mainActivity, nativeTheme] = await Promise.all([
+const [backupSource, mainActivity, nativeTheme, androidManifest] = await Promise.all([
   readFile(new URL('../../assets/js/rphub-backup.js', import.meta.url), 'utf8'),
   readFile(new URL('../../android/app/src/main/java/io/github/pq125/rphub/MainActivity.java', import.meta.url), 'utf8'),
-  readFile(new URL('../../android/app/src/main/java/io/github/pq125/rphub/NativeThemePlugin.java', import.meta.url), 'utf8')
+  readFile(new URL('../../android/app/src/main/java/io/github/pq125/rphub/NativeThemePlugin.java', import.meta.url), 'utf8'),
+  readFile(new URL('../../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
 ]);
 
 assert.match(nativeTheme, /@CapacitorPlugin\(name = "NativeTheme"\)/);
@@ -14,13 +16,36 @@ assert.match(nativeTheme, /MODE_NIGHT_NO/);
 assert.match(nativeTheme, /MODE_NIGHT_YES/);
 assert.match(nativeTheme, /getSharedPreferences\(PREFERENCES_NAME, Context\.MODE_PRIVATE\)[\s\S]*putString\(MODE_KEY, mode\)[\s\S]*\.commit\(\)/);
 assert.match(nativeTheme, /activity\.runOnUiThread\(\(\) ->/);
+const attachIndex = mainActivity.indexOf('protected void attachBaseContext(Context newBase)');
 const restoreIndex = mainActivity.indexOf('NativeThemePlugin.restoreNightMode(this);');
 const registerIndex = mainActivity.indexOf('registerPlugin(NativeThemePlugin.class);');
 const superIndex = mainActivity.indexOf('super.onCreate(savedInstanceState);');
-assert.ok(restoreIndex >= 0 && restoreIndex < superIndex, 'native night mode must be restored before Activity creation');
+const attachRestoreIndex = mainActivity.indexOf('NativeThemePlugin.restoreNightMode(newBase);');
+const attachSuperIndex = mainActivity.indexOf('super.attachBaseContext(newBase);');
+assert.ok(attachIndex >= 0, 'MainActivity must override attachBaseContext');
+assert.ok(attachIndex < attachRestoreIndex && attachRestoreIndex < attachSuperIndex, 'native night mode must be restored before base context attachment');
+assert.equal(restoreIndex, -1, 'onCreate restoration is too late to affect the Activity base context');
 assert.ok(registerIndex >= 0 && registerIndex < superIndex, 'NativeTheme plugin must be registered before Activity creation');
 assert.match(mainActivity, /setAlgorithmicDarkeningAllowed\(webView\.getSettings\(\), true\)/);
-assert.doesNotMatch(backupSource, /colorScheme = dark \? 'light' : 'dark'/);
+assert.doesNotMatch(androidManifest, /android:configChanges="[^"]*\buiMode\b[^"]*"/);
+assert.doesNotMatch(backupSource, /root\.style\.colorScheme/);
+
+const legacyThemeBlock = `        // MainActivity enables algorithmic darkening. A dark color-scheme hint
+        // tells WebView the page already owns dark colors and suppresses that
+        // pass; the inverse hint therefore maps the local preference to the
+        // desired final appearance.
+        root.style.colorScheme = dark ? 'light' : 'dark';`;
+const legacyPatched = patchBackupTheme(legacyThemeBlock);
+assert.match(legacyPatched, /'NativeTheme',[\s\S]*'setMode'/);
+assert.doesNotMatch(legacyPatched, /root\.style\.colorScheme/);
+assert.equal(patchBackupTheme(legacyPatched), legacyPatched, 'theme patch must be idempotent');
+const previouslyPatched = legacyPatched.replace('        try {', "        root.style.colorScheme = dark ? 'dark' : 'light';\n        try {");
+assert.equal(patchBackupTheme(previouslyPatched), legacyPatched, 'theme patch must remove the stale same-direction hint');
+assert.throws(
+  () => patchBackupTheme("        root.style.colorScheme = dark ? 'light' : 'dark';"),
+  /Expected one replacement anchor/,
+  'theme patch must fail closed when the upstream anchor drifts'
+);
 
 function loadTheme({ savedThemeMode, systemDark, invokeNative }) {
   const calls = [];
@@ -94,7 +119,7 @@ function loadTheme({ savedThemeMode, systemDark, invokeNative }) {
 
 let result = loadTheme({ savedThemeMode: 'system', systemDark: true });
 assert.equal(result.root.dataset.rphubTheme, 'dark');
-assert.equal(result.root.style.colorScheme, 'dark');
+assert.equal(result.root.style.colorScheme, undefined);
 assert.equal(result.classes.get('rphub-night-mode'), true);
 assert.deepEqual(JSON.parse(JSON.stringify(result.calls)), [
   { plugin: 'NativeTheme', method: 'setMode', options: { mode: 'system' } }
@@ -106,7 +131,7 @@ result = loadTheme({
   invokeNative: () => Promise.reject(new Error('unsupported'))
 });
 assert.equal(result.root.dataset.rphubTheme, 'light');
-assert.equal(result.root.style.colorScheme, 'light');
+assert.equal(result.root.style.colorScheme, undefined);
 assert.equal(result.classes.get('rphub-night-mode'), false);
 assert.deepEqual(JSON.parse(JSON.stringify(result.calls)), [
   { plugin: 'NativeTheme', method: 'setMode', options: { mode: 'light' } }

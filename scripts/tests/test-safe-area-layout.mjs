@@ -22,8 +22,10 @@ assert.match(squareFrame, /top:\s*var\(--safe-top\)/);
 assert.match(squareFrame, /right:\s*var\(--safe-right\)/);
 assert.match(squareFrame, /left:\s*var\(--safe-left\)/);
 assert.match(squareFrame, /bottom:\s*calc\(var\(--safe-area-keyboard-inset, var\(--keyboard-inset, 0px\)\) \+ var\(--safe-bottom-effective\)\)/);
-assert.match(squareFrame, /width:\s*auto/);
-assert.match(squareFrame, /height:\s*auto/);
+assert.doesNotMatch(squareFrame, /width:\s*auto/);
+assert.doesNotMatch(squareFrame, /height:\s*auto/);
+assert.match(squareFrame, /width:\s*calc\(100% - var\(--safe-left\) - var\(--safe-right\)\)/);
+assert.match(squareFrame, /height:\s*calc\(100% - var\(--safe-top\) - var\(--safe-area-keyboard-inset, var\(--keyboard-inset, 0px\)\) - var\(--safe-bottom-effective\)\)/);
 
 assert.match(gradle, /debug\s*\{[\s\S]*applicationIdSuffix\s+'\.debug'/);
 assert.doesNotMatch(gradle, /releaseCandidate|applicationIdSuffix\s+'\.rc'/);

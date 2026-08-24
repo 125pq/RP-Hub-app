@@ -24,8 +24,8 @@
     right: var(--safe-right);
     bottom: calc(var(--safe-area-keyboard-inset, var(--keyboard-inset, 0px)) + var(--safe-bottom-effective));
     left: var(--safe-left);
-    width: auto;
-    height: auto;
+    width: calc(100% - var(--safe-left) - var(--safe-right));
+    height: calc(100% - var(--safe-top) - var(--safe-area-keyboard-inset, var(--keyboard-inset, 0px)) - var(--safe-bottom-effective));
 }
 
 .safe-modal-overlay,
