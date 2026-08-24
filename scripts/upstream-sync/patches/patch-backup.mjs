@@ -22,7 +22,8 @@ const squareStatePattern = /        \/\/ Square State\n        const isSquareLoa
 // control-center preference and react to changes while the iframe is visible.
 export function patchSquareMirrorApp(source) {
   const marker = '// Wanxiang Square mirror preference hook.';
-  if (!source.includes(marker)) {
+  const alreadyPatched = source.includes(marker);
+  if (!alreadyPatched) {
     const matches = source.match(squareStatePattern) || [];
     if (matches.length !== 1) {
       throw new Error(`Expected one square state anchor for mirror preference, found ${matches.length}`);
@@ -51,11 +52,15 @@ export function patchSquareMirrorApp(source) {
 
   const squareWatchPattern = /                squareUrl\.value = `https:\/\/(?:rphforum\.zeabur\.app|rp\.zhaoyangxx\.ccwu\.cc)\/\?t=\$\{Date\.now\(\)\}`;/;
   const squareWatchMatches = source.match(squareWatchPattern) || [];
-  if (squareWatchMatches.length > 1) {
-    throw new Error(`Expected at most one square watch URL anchor for mirror preference, found ${squareWatchMatches.length}`);
+  if (!alreadyPatched && squareWatchMatches.length !== 1) {
+    throw new Error(`Expected one square watch URL anchor for mirror preference, found ${squareWatchMatches.length}`);
   }
   if (squareWatchMatches.length === 1) {
     source = source.replace(squareWatchPattern, '                squareUrl.value = getSquareUrl(true);');
+  }
+
+  if (alreadyPatched && source.includes('squareUrl.value = `https://')) {
+    throw new Error('Stale square watch URL remained after mirror preference patch');
   }
 
   if (!source.includes('stopSquareMirrorChange();')) {
