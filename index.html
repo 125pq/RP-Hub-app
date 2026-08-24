@@ -1965,6 +1965,7 @@
 
                 <div id="presets-list" class="space-y-4">
                     <div v-for="(preset, index) in presets" :key="preset.name + index"
+                        v-show="preset.name !== '第二人称' && preset.name !== '第三人称'"
                         class="bg-white p-4 rounded-xl border border-gray-200 flex items-center justify-between group shadow-sm hover:shadow-md transition-all">
                         <div class="flex items-center flex-1 min-w-0 mr-4">
                             <div class="cursor-move text-gray-400 mr-3 hover:text-gray-600 flex-shrink-0" title="拖动排序">

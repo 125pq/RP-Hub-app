@@ -961,6 +961,7 @@ const app = createApp({
         };
         const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
+        const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
         const blockedStyleWordPattern = /极其/g;
         const quotedDialoguePattern = /(“[\s\S]*?”|『[\s\S]*?』|"[\s\S]*?")/g;
         const standaloneRenderedContentPattern = /^(?:\s|<!--[\s\S]*?-->)*(?:```|<!doctype\b|<\?xml\b|<html\b|<(?:head|body|style|script|template|svg|canvas|iframe|div|section|article|aside|header|footer|main|nav|form|table|ul|ol|pre|p|img)\b)/i;
@@ -977,6 +978,7 @@ const app = createApp({
                 .map((fragment, index) => index % 2 ? fragment : fragment
                     .replace(blockedStyleSentencePattern, match => { removedFragments.push(match.trim()); return ''; })
                     .replace(paleFingerClausePattern, match => { removedFragments.push(match.trim()); return ''; })
+                    .replace(blockedStyleClausePattern, match => { removedFragments.push(match.trim()); return ''; })
                     .replace(blockedStyleWordPattern, match => { removedFragments.push(match); return ''; })
                     .replace(/^[ \t]*[，,；;]+/gm, '')
                     .replace(/[，,；;]{2,}/g, marks => marks.at(-1))
@@ -5020,7 +5022,7 @@ const app = createApp({
                     chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: error.message });
                 }
             } finally {
-                if (assistantMessage?.content) filterBlockedStyleText(assistantMessage.content, { log: true });
+                if (assistantMessage?.content) assistantMessage.content = filterBlockedStyleText(assistantMessage.content, { log: true });
                 if (continuationToolCall && continuationToolCall.status === 'continuing') {
                     continuationToolCall.status = 'done';
                 }
