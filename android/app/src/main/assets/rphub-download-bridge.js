@@ -21,6 +21,20 @@
             return false;
         }
     };
+    const isCardFileDownload = href => {
+        try {
+            const url = new URL(String(href || ''), window.location.href);
+            return (url.protocol === 'http:' || url.protocol === 'https:')
+                && squareOrigins.has(url.origin)
+                && url.origin === window.location.origin
+                && !url.search
+                && !url.hash
+                && /^\/api\/cards\/[^/]+\/download\/file\/?$/.test(url.pathname);
+        } catch {
+            return false;
+        }
+    };
+    const shouldInterceptDownload = href => isBlobOrData(href) || isCardFileDownload(href);
     const filenameFor = anchor => String(anchor?.getAttribute?.('download') || '').trim() || 'download';
     const normalizeFilename = value => {
         if (typeof value !== 'string') return null;
@@ -42,12 +56,13 @@
         && Number.isFinite(value.size)
         && value.size >= 0
         && value.size <= maxBlobBytes;
+    const directDownloadFallbacks = new WeakSet();
     const postToParent = message => {
         if (window.parent && window.parent !== window) window.parent.postMessage(message, rootOrigin);
     };
-    const saveBlobDownload = async (anchor, href) => {
+    const saveBlobDownload = async (anchor, href, originalAnchorClick) => {
         try {
-            const response = await fetch(href);
+            const response = await fetch(href, { credentials: 'include' });
             if (!response.ok) throw new Error('HTTP ' + response.status);
             const blob = await response.blob();
             if (!isSafeBlobLike(blob)) throw new Error('Blob payload is invalid or too large');
@@ -67,6 +82,12 @@
                 filename: filenameFor(anchor),
                 error: String(error?.message || error)
             });
+            if (isCardFileDownload(href) && typeof originalAnchorClick === 'function') {
+                directDownloadFallbacks.add(anchor);
+                void Promise.resolve().then(() => originalAnchorClick.call(anchor)).finally(() => {
+                    setTimeout(() => directDownloadFallbacks.delete(anchor), 0);
+                });
+            }
         }
     };
 
@@ -74,17 +95,24 @@
         const interceptBlobClick = event => {
             const anchor = event.target?.closest?.('a[download]');
             const href = anchor?.href || anchor?.getAttribute?.('href');
-            if (!anchor || !isBlobOrData(href)) return;
+            if (anchor && directDownloadFallbacks.has(anchor)) {
+                directDownloadFallbacks.delete(anchor);
+                return;
+            }
+            if (!anchor || !shouldInterceptDownload(href)) return;
             event.preventDefault();
             event.stopImmediatePropagation();
-            void saveBlobDownload(anchor, href);
+            void saveBlobDownload(anchor, href, originalAnchorClick);
         };
         document.addEventListener('click', interceptBlobClick, true);
         const originalAnchorClick = HTMLAnchorElement.prototype.click;
         HTMLAnchorElement.prototype.click = function() {
             const href = this.href || this.getAttribute('href');
-            if (this.hasAttribute('download') && isBlobOrData(href)) {
-                void saveBlobDownload(this, href);
+            if (directDownloadFallbacks.has(this)) {
+                return originalAnchorClick.apply(this, arguments);
+            }
+            if (this.hasAttribute('download') && shouldInterceptDownload(href)) {
+                void saveBlobDownload(this, href, originalAnchorClick);
                 return;
             }
             return originalAnchorClick.apply(this, arguments);
