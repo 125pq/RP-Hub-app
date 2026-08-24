@@ -18,6 +18,16 @@
     max-width: calc(100vw - var(--safe-left) - var(--safe-right));
 }
 
+/* Cross-origin square pages cannot receive resolved insets through contentDocument. */
+[data-safe-area="square-frame"] iframe {
+    top: var(--safe-top);
+    right: var(--safe-right);
+    bottom: calc(var(--safe-area-keyboard-inset, var(--keyboard-inset, 0px)) + var(--safe-bottom-effective));
+    left: var(--safe-left);
+    width: auto;
+    height: auto;
+}
+
 .safe-modal-overlay,
 .modal,
 #app > [class~="fixed"][class~="inset-0"][class~="items-center"][class~="justify-center"] {

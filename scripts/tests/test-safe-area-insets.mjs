@@ -59,10 +59,11 @@ assert.equal(result.root.style.getPropertyValue('--safe-area-inset-top'), '0px')
 assert.equal(result.root.style.getPropertyValue('--safe-top'), '');
 
 result = run({ insets: { top: 0, right: 12, bottom: 34, left: 16 }, keyboardOpen: true });
+assert.equal(result.root.style.getPropertyValue('--safe-area-keyboard-inset'), '300px');
 assert.equal(result.iframeRoot.style.getPropertyValue('--safe-bottom-effective'), '0px');
-  assert.equal(result.iframeRoot.style.getPropertyValue('--safe-bottom-effective'), '0px');
 
 result = run({ insets: { top: 0, right: 18, bottom: 0, left: 22 }, crossOrigin: true });
 assert.equal(result.root.style.getPropertyValue('--safe-left'), '');
+assert.equal(result.root.style.getPropertyValue('--safe-area-keyboard-inset'), '0px');
 
 console.log('Capacitor 8 safe-area fallback, iframe, keyboard, and landscape contracts: PASS');

@@ -90,3 +90,4 @@ try {
 }
 
 console.log('Android debug APK version selection and naming contract: PASS');
+await import('./test-native-theme.mjs');

@@ -16,6 +16,33 @@ function patchBackupSafeArea(source) {
   return source;
 }
 
+function patchBackupTheme(source) {
+  const marker = "'NativeTheme',";
+  if (!source.includes(marker)) {
+    source = replaceOnce(
+      source,
+      `        // MainActivity enables algorithmic darkening. A dark color-scheme hint
+        // tells WebView the page already owns dark colors and suppresses that
+        // pass; the inverse hint therefore maps the local preference to the
+        // desired final appearance.
+        root.style.colorScheme = dark ? 'light' : 'dark';`,
+      `        root.style.colorScheme = dark ? 'dark' : 'light';
+        try {
+            const nativeThemeCall = window.platformAdapter?.invokeNative?.(
+                'NativeTheme',
+                'setMode',
+                { mode: prefs.themeMode === 'system' ? 'system' : 'light' }
+            );
+            Promise.resolve(nativeThemeCall).catch(() => {});
+        } catch (_) { /* unsupported browser/native bridge */ }`,
+      'backup native theme synchronization'
+    );
+  }
+  requireContains(source, marker, 'backup native theme synchronization');
+  requireContains(source, "root.style.colorScheme = dark ? 'dark' : 'light';", 'backup color-scheme hint');
+  return source;
+}
+
 export function patchBackupNovel(source) {
   if (!source.includes("flushData.type !== 'RPHUB_BACKUP_FLUSH'")) {
     source = ensureBefore(
@@ -105,7 +132,9 @@ export function patchSquareMirrorApp(source) {
 export async function applyBackupHooks() {
   const changes = [];
 
-  changes.push(await editText('assets/js/rphub-backup.js', category, patchBackupSafeArea));
+  changes.push(await editText('assets/js/rphub-backup.js', category, source => (
+    patchBackupTheme(patchBackupSafeArea(source))
+  )));
 
   // --- index.html: load rphub-backup.js before app.js -----------------------
   changes.push(await editText('index.html', category, patchIndexScriptOverlay));

@@ -92,6 +92,18 @@ export function patchSafeAreaNovel(source) {
   return source;
 }
 
+function patchSquareHostSafeArea(source) {
+  source = replaceOnce(
+    source,
+    `<div v-if="currentView === 'square'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`,
+    `<div v-if="currentView === 'square'" data-safe-area="square-frame"
+                class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`,
+    'main square host safe area'
+  );
+  requireContains(source, 'data-safe-area="square-frame"', 'main square host safe area');
+  return source;
+}
+
 export function patchSafeAreaCharacter(source) {
   source = patchViewportMeta(source, 'character/index.html', false);
   source = patchStylesheet(source, '../assets/css/safe-area.css', 'character/index.html');
@@ -100,7 +112,7 @@ export function patchSafeAreaCharacter(source) {
 
 export async function applySafeAreaHooks() {
   const changes = [];
-  changes.push(await editText('index.html', category, patchSafeAreaIndex));
+  changes.push(await editText('index.html', category, source => patchSquareHostSafeArea(patchSafeAreaIndex(source))));
   changes.push(await editText('character/index.html', category, patchSafeAreaCharacter));
   changes.push(await editText('novel/index.html', category, patchSafeAreaNovel));
   changes.push(await editText('assets/js/ui-components.js', category, source => {

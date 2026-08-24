@@ -17,8 +17,10 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        NativeThemePlugin.restoreNightMode(this);
         registerPlugin(NativeFilePlugin.class);
         registerPlugin(NativeClipboardPlugin.class);
+        registerPlugin(NativeThemePlugin.class);
         super.onCreate(savedInstanceState);
         configureDarkMode();
         installWebViewDownloadListener();

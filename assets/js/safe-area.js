@@ -25,12 +25,14 @@
         };
     };
 
-    const isKeyboardOpen = () => {
+    const readKeyboardInset = () => {
         const viewport = window.visualViewport;
-        if (!viewport) return false;
+        if (!viewport) return 0;
         const layoutHeight = window.innerHeight || document.documentElement.clientHeight;
-        return viewport.height < layoutHeight - 80;
+        return Math.max(0, layoutHeight - viewport.height - (viewport.offsetTop || 0));
     };
+
+    const isKeyboardOpen = () => readKeyboardInset() > 80;
 
     const applyToRoot = (root, insets, keyboardOpen) => {
         // Capacitor 8 owns --safe-area-inset-* on the top-level document. Only
@@ -56,7 +58,12 @@
     const sync = () => {
         frame = 0;
         const insets = readInsets();
-        const keyboardOpen = isKeyboardOpen();
+        const keyboardInset = readKeyboardInset();
+        const keyboardOpen = keyboardInset > 80;
+        document.documentElement.style.setProperty(
+            '--safe-area-keyboard-inset',
+            keyboardOpen ? `${keyboardInset}px` : '0px'
+        );
         document.documentElement.classList.toggle('safe-area-keyboard-open', keyboardOpen);
         document.querySelectorAll('iframe').forEach(iframe => {
             try {
