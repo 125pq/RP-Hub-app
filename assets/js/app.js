@@ -110,7 +110,7 @@ const {
     inferInitialUiTemplateState,
     normalizeUiTemplate,
     normalizeUiTemplateUpdateList,
-    parseUiTemplateUpdateJson,
+    parseUiTemplateUpdates,
     renderUiTemplateHtml,
     sanitizeUiTemplateImportEntry,
     setUiTemplateValue,
@@ -2473,14 +2473,14 @@ const app = createApp({
 
             let updates = [];
             try {
-                const updateJson = match[1] || match[2];
-                const parsed = parseUiTemplateUpdateJson(updateJson);
+                const updateContent = match[1];
+                const parsed = parseUiTemplateUpdates(updateContent);
                 updates = normalizeUiTemplateUpdateList(parsed, templates);
             } catch (e) {
                 const reason = e instanceof SyntaxError
-                    ? `JSON格式错误：${e.message}`
+                    ? `变量块格式错误：${e.message}`
                     : e.message;
-                return recordFailure(e?.jsonSource || match[1] || match[2], reason);
+                return recordFailure(e?.jsonSource || match[1], reason);
             }
 
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));
@@ -2489,9 +2489,7 @@ const app = createApp({
             updates.forEach(update => {
                 const targets = update?.id
                     ? activeUiTemplates.value.filter(template => template.id === update.id)
-                    : (update?.name
-                        ? activeUiTemplates.value.filter(template => template.name === update.name)
-                        : (activeUiTemplates.value.length === 1 ? [activeUiTemplates.value[0]] : []));
+                    : (activeUiTemplates.value.length === 1 ? [activeUiTemplates.value[0]] : []);
                 targets.forEach(template => {
                     const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn, source: 'main_model' });
                     if (result.changed) {
@@ -3980,22 +3978,12 @@ const app = createApp({
                 const pendingTemplateUpdates = [];
 
                 const normalizeUiTemplateUpdates = (parsed, template) => {
-                    if (Array.isArray(parsed?.updates)) {
-                        return normalizeUiTemplateUpdateList(parsed, [template]);
-                    }
-                    if (Array.isArray(parsed)) {
-                        return [{ variables: parsed, reason: '' }];
-                    }
-                    if (!parsed || typeof parsed !== 'object') return [];
-                    if (Object.prototype.hasOwnProperty.call(parsed, 'variables')) {
-                        return [{ variables: parsed.variables, reason: String(parsed.reason || '').trim() }];
-                    }
-                    return [{ variables: parsed, reason: '' }];
+                    return normalizeUiTemplateUpdateList(parsed, [template]);
                 };
 
                 const applyTemplateUpdates = (template, updates, model) => {
                     updates.forEach(update => {
-                        const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn, matchName: false });
+                        const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn });
                         if (result.changed) {
                             changedFieldCount += result.fieldCount;
                             hasChanges = true;
@@ -4045,7 +4033,7 @@ const app = createApp({
                         const data = await response.json();
                         if (!isCurrentRun()) return;
                         let content = data.choices?.[0]?.message?.content || '';
-                        const parsed = parseUiTemplateUpdateJson(content);
+                        const parsed = parseUiTemplateUpdates(content);
                         const updates = normalizeUiTemplateUpdates(parsed, template);
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
