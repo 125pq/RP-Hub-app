@@ -619,6 +619,7 @@ const app = createApp({
             useCharacterBackground: true,
             immersiveMode: false,
             showLatestUsageBar: false,
+            styleFilterEnabled: true,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
             uiTemplateAnalysisDepth: 4,
@@ -958,7 +959,7 @@ const app = createApp({
             if (role === 'assistant') return 'bg-purple-100 text-purple-700 border-purple-200';
             return 'bg-red-100 text-red-700 border-red-200';
         };
-        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:指尖|指节|指关节)[^。！？!?\n]*(?:发白|泛白)|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
+        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:指尖|指节|指关节)[^。！？!?\n]*(?:发白|泛白)|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|就是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
         const standaloneWordCountSentencePattern = /(^|[。！？!?\n]+[”’」』】）)]*)[ \t]*(?:\*\*|__)?(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/gm;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
         const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
@@ -982,7 +983,7 @@ const app = createApp({
             .replace(/^(?:\*\*|__)/, '')
             .replace(/(?:\*\*|__)$/, '')
             .trim();
-        const styleFilterHighlightPattern = /(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字|指尖|指节|指关节|发白|泛白|不是|而是|又像(?:是)?|(?:更|倒|反倒)?像是|极其)/g;
+        const styleFilterHighlightPattern = /(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字|指尖|指节|指关节|发白|泛白|不是|而是|就是|又像(?:是)?|(?:更|倒|反倒)?像是|极其)/g;
         const getStyleFilterHitSegments = fragment => {
             const text = String(fragment || '');
             const segments = [];
@@ -997,6 +998,7 @@ const app = createApp({
         };
         const filterBlockedStyleText = (text, { log = false, collect = null } = {}) => {
             const source = String(text || '');
+            if (!settings.styleFilterEnabled) return source;
             if (isStandaloneRenderedContent(source)) return source;
             const removedFragments = [];
             const updateBlock = findUiTemplateUpdateBlock(source);
@@ -3298,7 +3300,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
