@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from '../lib.mjs';
+import { determineSyncMode } from '../sync-decision.mjs';
 
 const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
 const [workflow, gradle, updater] = await Promise.all([
@@ -17,6 +18,27 @@ const fetchMergeIndex = workflow.indexOf('name: Fetch, merge, and reapply catego
 assert.ok(configGitIdentityIndex !== -1 && configGitIdentityIndex < fetchMergeIndex);
 assert.match(workflow, /git config user\.name "github-actions\[bot\]"/);
 assert.match(workflow, /git config user\.email "41898282\+github-actions\[bot\]@users\.noreply\.github\.com"/);
+assert.match(workflow, /repository_dispatch:[\s\S]*types:[\s\S]*- upstream-release/);
+assert.match(workflow, /Report no new upstream release/);
+assert.match(workflow, /has_updates != 'true'/);
+assert.match(workflow, /has_updates == 'true'/);
+assert.match(workflow, /actions\/setup-java@v4[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
+assert.match(workflow, /Install dependencies[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
+assert.match(workflow, /Sync Capacitor and build Android release[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
+const syncSource = await read('scripts/upstream-sync/sync-upstream.mjs');
+assert.match(syncSource, /merge-base', '--is-ancestor/);
+assert.match(syncSource, /has_updates=\$\{upstreamUpdated\}/);
+assert.match(syncSource, /UPSTREAM_HAS_UPDATES=false \(release/);
+const integrationCheckIndex = syncSource.indexOf('const alreadyIntegrated = await upstreamReleaseAlreadyIntegrated');
+const mergeIndex = syncSource.indexOf('await mergeWithAutoResolver');
+assert.ok(integrationCheckIndex !== -1 && integrationCheckIndex < mergeIndex);
+assert.match(syncSource, /if \(mode === 'noop'\) \{[\s\S]*UPSTREAM_HAS_UPDATES=false \(release[\s\S]*\} else if \(mode === 'merge'\)/);
+assert.match(syncSource, /publicationComplete/);
+assert.match(syncSource, /sync_mode=\$\{mode\}/);
+assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: false }), 'merge');
+assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: true }), 'merge');
+assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: true }), 'noop');
+assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: false }), 'recover');
 assert.match(workflow, /npm audit --omit=dev/);
 assert.match(workflow, /apksigner[\s\S]*verify --verbose --print-certs/);
 assert.match(workflow, /manifest application-id[\s\S]*io\.github\.pq125\.rphub/);

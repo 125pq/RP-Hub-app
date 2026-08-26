@@ -15,6 +15,9 @@ on:
         default: ''
   schedule:
     - cron: '17 2 * * *'
+  repository_dispatch:
+    types:
+      - upstream-release
 
 permissions:
   contents: write
@@ -42,20 +45,37 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Fetch, merge, and reapply categorized hooks
+        id: upstream_sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RPHUB_CHECK_PUBLICATION: 'true'
+          RPHUB_ANDROID_REVISION: ${{ inputs.revision }}
+        run: node scripts/upstream-sync/sync-upstream.mjs --prepare-only
+
+      - name: Report no new upstream release
+        if: steps.upstream_sync.outputs.has_updates != 'true'
+        run: echo "No new upstream release; sync completed successfully without building or publishing."
+
       - uses: actions/setup-java@v4
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         with:
           distribution: temurin
           java-version: 21
           cache: gradle
 
       - uses: android-actions/setup-android@v3
+        if: steps.upstream_sync.outputs.has_updates == 'true'
 
       - name: Install dependencies
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         run: |
           npm ci
           npm audit --omit=dev
 
       - name: Configure permanent release signing key
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         shell: bash
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RPHUB_RELEASE_KEYSTORE_BASE64 }}
@@ -75,18 +95,17 @@ jobs:
             echo "RPHUB_RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
-      - name: Fetch, merge, and reapply categorized hooks
-        id: upstream_sync
-        run: node scripts/upstream-sync/sync-upstream.mjs --prepare-only
-
       - name: Prepare Android release metadata
         id: android_release
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         run: node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ inputs.revision }}"
 
       - name: Verify adapter and upstream hooks
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         run: npm run test:upstream-sync
 
       - name: Run JavaScript and Web tests
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         run: |
           npm run test:platform
           npm run test:performance
@@ -94,6 +113,7 @@ jobs:
           npm run verify:dist
 
       - name: Sync Capacitor and build Android release
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         env:
           RPHUB_VERSION_NAME: ${{ steps.android_release.outputs.version_name }}
           RPHUB_VERSION_CODE: ${{ steps.android_release.outputs.version_code }}
@@ -103,6 +123,7 @@ jobs:
 
       - name: Verify and package signed APK
         id: apk
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,6 +164,7 @@ jobs:
 
       - name: Prepare mirrored release notes
         id: release_notes
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -184,11 +206,13 @@ jobs:
           echo "notes_path=$notes_file" >> "$GITHUB_OUTPUT"
 
       - name: Check final diff
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         run: |
           git diff --check
           git diff --cached --check
 
       - name: Commit and push successful sync
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         shell: bash
         env:
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
@@ -203,6 +227,7 @@ jobs:
           git push origin HEAD:main
 
       - name: Publish Android GitHub Release
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -227,6 +252,7 @@ jobs:
             --latest
 
       - name: Publish APK branch and trigger Gitee mirror pull
+        if: steps.upstream_sync.outputs.has_updates == 'true'
         timeout-minutes: 10
         shell: bash
         env:

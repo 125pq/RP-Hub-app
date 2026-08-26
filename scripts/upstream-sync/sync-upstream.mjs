@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { projectRoot } from './lib.mjs';
 import { reapplyHooks } from './reapply-hooks.mjs';
 import { resolveLatestStableRelease } from './release-source.mjs';
 import { mergeWithAutoResolver } from './sync-orchestration.mjs';
+import { androidReleaseMetadata, deriveRevision } from './prepare-android-release.mjs';
+import { determineSyncMode } from './sync-decision.mjs';
 
 const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
 const RELEASE_REF = 'refs/remotes/upstream/releases/latest';
@@ -82,13 +84,40 @@ async function fetchUpstreamRelease(release) {
   console.warn(`FETCH_FALLBACK=PASS (GitHub API confirms cached release ${release.tagName} at ${release.commitSha})`);
 }
 
-function publishWorkflowOutputs(release) {
+function publishWorkflowOutputs(release, upstreamUpdated, mode) {
   if (!process.env.GITHUB_OUTPUT) return;
-  appendFileSync(process.env.GITHUB_OUTPUT, `release_tag=${release.tagName}\nupstream_sha=${release.commitSha}\n`, 'utf8');
+  appendFileSync(
+    process.env.GITHUB_OUTPUT,
+    `release_tag=${release.tagName}\nupstream_sha=${release.commitSha}\nhas_updates=${upstreamUpdated}\nsync_mode=${mode}\n`,
+    'utf8'
+  );
+}
+
+async function publicationComplete(release) {
+  if (process.env.RPHUB_CHECK_PUBLICATION !== 'true') return true;
+  const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+  const rawRevision = String(process.env.RPHUB_ANDROID_REVISION || '').trim();
+  const revision = rawRevision === '' ? deriveRevision(release.tagName, packageJson.version) : Number(rawRevision);
+  const metadata = androidReleaseMetadata(release.tagName, revision);
+  const repository = process.env.GITHUB_REPOSITORY;
+  if (!repository || !process.env.GH_TOKEN) return false;
+  const releaseCheck = await run('gh', ['release', 'view', metadata.androidTag, '--repo', repository], { allowFailure: true });
+  if (releaseCheck.code !== 0) return false;
+  const mirrorCheck = await run('curl', ['--silent', '--show-error', '--fail', '--location', '--max-time', '30', 'https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/android-update.json'], { capture: true, allowFailure: true });
+  if (mirrorCheck.code !== 0) return false;
+  try { return JSON.parse(mirrorCheck.stdout).tag === metadata.androidTag; } catch { return false; }
 }
 
 async function mergeInProgress() {
   return (await git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { capture: true, allowFailure: true })).code === 0;
+}
+
+async function upstreamReleaseAlreadyIntegrated(upstreamHead) {
+  const result = await git(['merge-base', '--is-ancestor', upstreamHead, 'HEAD'], { allowFailure: true });
+  if (result.code !== 0 && result.code !== 1) {
+    throw new Error(`Unable to determine whether upstream release ${upstreamHead} is already integrated`);
+  }
+  return result.code === 0;
 }
 
 async function ensureCleanStart() {
@@ -159,7 +188,6 @@ try {
   console.log(`SYNC_BEFORE_HEAD=${beforeHead}`);
   await ensureUpstreamRemote();
   const release = await resolveLatestStableRelease();
-  publishWorkflowOutputs(release);
   console.log(`UPSTREAM_RELEASE=${release.tagName}`);
   console.log(`UPSTREAM_RELEASE_URL=${release.url}`);
   console.log(`UPSTREAM_RELEASE_PUBLISHED_AT=${release.publishedAt}`);
@@ -169,34 +197,47 @@ try {
   const incoming = await gitText(['log', '--oneline', `HEAD..${upstreamHead}`]);
   console.log(`UPSTREAM_HEAD=${upstreamHead}`);
   console.log(incoming ? `INCOMING_COMMITS=\n${incoming}` : 'INCOMING_COMMITS=none');
+  const alreadyIntegrated = await upstreamReleaseAlreadyIntegrated(upstreamHead);
+  const complete = alreadyIntegrated ? await publicationComplete(release) : false;
+  const mode = determineSyncMode({ alreadyIntegrated, publicationComplete: complete });
+  publishWorkflowOutputs(release, mode !== 'noop', mode);
 
-  // Keep merge output/classification and the resolver/reapply/abort path in
-  // one injectable helper so offline fixtures exercise the Action behavior.
-  await mergeWithAutoResolver({
-    cwd: projectRoot,
-    upstreamRef: upstreamHead,
-    git,
-    reapply: async () => reapplyHooks()
-  });
-  if (!prepareOnly) await runValidation();
+  if (mode === 'noop') {
+    console.log(`UPSTREAM_HAS_UPDATES=false (release ${release.tagName} is already integrated)`);
+    completed = true;
+  } else if (mode === 'merge') {
 
-  if (dryRun) {
-    if (await mergeInProgress()) await git(['merge', '--abort']);
-    const restored = await gitText(['rev-parse', 'HEAD']);
-    const status = await gitText(['status', '--porcelain']);
-    if (restored !== beforeHead || status) throw new Error('Dry-run rollback did not restore the original clean state');
-    console.log('DRY_RUN_ROLLBACK=PASS');
-  } else if (!noCommit) {
-    const status = await gitText(['status', '--porcelain']);
-    if (!status) {
-      console.log('SYNC_COMMIT=none (no changes)');
-    } else {
-      await stageTrackedChangesPrecisely();
-      await git(['commit', '-m', `chore(sync): merge upstream RP-Hub release ${release.tagName} (${upstreamShort}) and reapply local patches`]);
-      console.log(`SYNC_COMMIT=${await gitText(['rev-parse', 'HEAD'])}`);
+    // Keep merge output/classification and the resolver/reapply/abort path in
+    // one injectable helper so offline fixtures exercise the Action behavior.
+    await mergeWithAutoResolver({
+      cwd: projectRoot,
+      upstreamRef: upstreamHead,
+      git,
+      reapply: async () => reapplyHooks()
+    });
+    if (!prepareOnly) await runValidation();
+
+    if (dryRun) {
+      if (await mergeInProgress()) await git(['merge', '--abort']);
+      const restored = await gitText(['rev-parse', 'HEAD']);
+      const status = await gitText(['status', '--porcelain']);
+      if (restored !== beforeHead || status) throw new Error('Dry-run rollback did not restore the original clean state');
+      console.log('DRY_RUN_ROLLBACK=PASS');
+    } else if (!noCommit) {
+      const status = await gitText(['status', '--porcelain']);
+      if (!status) {
+        console.log('SYNC_COMMIT=none (no changes)');
+      } else {
+        await stageTrackedChangesPrecisely();
+        await git(['commit', '-m', `chore(sync): merge upstream RP-Hub release ${release.tagName} (${upstreamShort}) and reapply local patches`]);
+        console.log(`SYNC_COMMIT=${await gitText(['rev-parse', 'HEAD'])}`);
+      }
     }
+    completed = true;
+  } else {
+    console.log(`UPSTREAM_HAS_UPDATES=true (release ${release.tagName} is integrated but publication is incomplete)`);
+    completed = true;
   }
-  completed = true;
 } finally {
   if (!completed && await mergeInProgress()) {
     await git(['merge', '--abort'], { allowFailure: true });
