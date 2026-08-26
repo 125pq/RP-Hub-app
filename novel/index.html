@@ -10,6 +10,7 @@
     <link href="../assets/generated/novel.css" rel="stylesheet">
     <!-- Marked for Markdown rendering -->
     <script src="../assets/vendor/marked/marked.min.js"></script>
+    <script src="../assets/js/api-utils.js"></script>
     <!-- Local web fonts -->
     <link href="../assets/vendor/fonts/fonts.css" rel="stylesheet">
     
@@ -1141,6 +1142,7 @@
 
    <script>
         const { createApp, ref, computed, onMounted, nextTick, watch, onUnmounted } = Vue;
+        const { buildApiEndpoint } = window.RPHubApiUtils;
 
         createApp({
             setup() {
@@ -1545,7 +1547,7 @@
                     // 并发调用函数
                     const callAI = async (persona) => {
                         try {
-                            const response = await fetch(getApiEndpoint('chat/completions'), {
+                            const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'chat/completions'), {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.value.apiKey}` },
                                 body: JSON.stringify({
@@ -2271,11 +2273,6 @@
                         transaction.onabort = () => reject(transaction.error);
                     });
                 };
-                const getApiEndpoint = (path) => {
-                    const baseUrl = String(settings.value.apiUrl || '').replace(/\/+$/, '');
-                    return `${baseUrl}${baseUrl.toLowerCase().endsWith('/v1') ? '' : '/v1'}/${path}`;
-                };
-
                 const readRPHubSettings = () => new Promise((resolve, reject) => {
                     let request;
                     try {
@@ -2397,7 +2394,7 @@
                     }
                     isLoadingModels.value = true;
                     try {
-                        const response = await fetch(getApiEndpoint('models'), {
+                        const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'models'), {
                             headers: { 'Authorization': `Bearer ${settings.value.apiKey}` }
                         });
                         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2642,7 +2639,7 @@
 5. 严禁输出任何 Markdown 代码块标记（如 \`\`\`json），直接输出纯 JSON 字符串。`;
 
                     try {
-                        const response = await fetch(getApiEndpoint('chat/completions'), {
+                        const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'chat/completions'), {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.value.apiKey}` },
                             body: JSON.stringify({
@@ -2811,7 +2808,7 @@ ${charPrompt}
                         // 打印发送给 AI 的完整内容
 
                         try {
-                            const response = await fetch(getApiEndpoint('chat/completions'), {
+                            const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'chat/completions'), {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.value.apiKey}` },
                                 body: JSON.stringify({

@@ -17,20 +17,18 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 // still need cleanup; this guard pins today's exact amount and fails as soon as
 // any file moves away from it or any unlisted file appears.
 const EOL_NOISE_ALLOWANCE = {
+  // P0-1 follow-up: built-in content retains legacy EOL churn from upstream baseline.
+  'assets/js/built-in-content.js': 482,
   // P0-1 follow-up: local data-services.js still carries legacy EOL churn.
   'assets/js/data-services.js': 512,
   // P0-1 follow-up: local core-utils.js still carries legacy EOL churn.
   'assets/js/core-utils.js': 80,
   // P0-1 follow-up: README.md still carries legacy EOL churn.
   'README.md': 58,
-  // P0-1 follow-up: novel/index.html still carries legacy EOL churn.
-  'novel/index.html': 24,
   // P0-1 follow-up: character/index.html still carries legacy EOL churn.
   'character/index.html': 14,
   // P0-1 follow-up: runtime-services.js still carries legacy EOL churn.
   'assets/js/runtime-services.js': 10,
-  // P0-1 follow-up: index.html still carries legacy EOL churn.
-  'index.html': 4,
   // P0-1 follow-up: ui-components.js still carries legacy EOL churn.
   'assets/js/ui-components.js': 4
 };

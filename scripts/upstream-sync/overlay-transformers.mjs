@@ -3,12 +3,13 @@ import { patchIndexScriptOverlay } from './patches/index-script-overlay.mjs';
 import { patchAndroidNovel } from './patches/patch-android-hooks.mjs';
 import { patchBackupNovel } from './patches/patch-backup.mjs';
 import { patchOfflineIndex, patchOfflineNovel } from './patches/patch-offline-assets.mjs';
-import { patchSafeAreaIndex, patchSafeAreaNovel } from './patches/patch-safe-area.mjs';
+import { patchSafeAreaIndex, patchSafeAreaNovel, patchSquareHostSafeArea } from './patches/patch-safe-area.mjs';
 
 const transforms = new Map([
   ['index.html', source => {
     source = patchOfflineIndex(source);
     source = patchSafeAreaIndex(source);
+    source = patchSquareHostSafeArea(source);
     return patchIndexScriptOverlay(source);
   }],
   ['novel/index.html', source => {

@@ -113,7 +113,7 @@ export function patchSafeAreaNovel(source) {
   return source;
 }
 
-function patchSquareHostSafeArea(source) {
+export function patchSquareHostSafeArea(source) {
   source = replaceOnce(
     source,
     `<div v-if="currentView === 'square'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`,

@@ -8,6 +8,7 @@ import { resolveAutoConflicts } from '../auto-resolver.mjs';
 import { mergeWithAutoResolver } from '../sync-orchestration.mjs';
 import { transformOverlayBlob, transformOverlayText } from '../overlay-transformers.mjs';
 import { patchOfflineCharacter } from '../patches/patch-offline-assets.mjs';
+import { patchSquareHostSafeArea } from '../patches/patch-safe-area.mjs';
 
 const git = (cwd, args) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
 const gitText = (cwd, args) => git(cwd, args).toString('utf8').trim();
@@ -40,14 +41,25 @@ function fixtureLogger() {
 const repoBlob = (commit, relativePath) => git(projectRoot, ['cat-file', 'blob', `${commit}:${relativePath}`]);
 const sourceText = (commit, relativePath) => repoBlob(commit, relativePath).toString('utf8');
 const normalize = value => value.replace(/\r\n/g, '\n');
+const squareFrameAnchor = `<div v-if="currentView === 'square'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
+const squareFrameExpected = `<div v-if="currentView === 'square'" data-safe-area="square-frame"
+                class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
+
+function addExpectedSquareFrame(source, label) {
+  assert.equal((source.match(/data-safe-area="square-frame"/g) || []).length, 0, `${label} fixture already contains square safe-area marker`);
+  assert.equal(source.split(squareFrameAnchor).length - 1, 1, `${label} square safe-area anchor count`);
+  return source.replace(squareFrameAnchor, squareFrameExpected);
+}
 
 function assertBlobProof(relativePath) {
   const stage1 = sourceText('5739165', relativePath);
   const stage2 = sourceText('ddc8f75', relativePath);
   const stage3 = sourceText('bc2d201', relativePath);
   const expected = sourceText('b8c42ce', relativePath);
-  assert.equal(normalize(transformOverlayBlob(relativePath, stage1)), normalize(stage2), `${relativePath} stage1 replay proof`);
-  assert.equal(normalize(transformOverlayBlob(relativePath, stage3)), normalize(expected), `${relativePath} stage3 replay proof`);
+  const expectedStage2 = relativePath === 'index.html' ? addExpectedSquareFrame(stage2, `${relativePath} stage2`) : stage2;
+  const expectedStage3 = relativePath === 'index.html' ? addExpectedSquareFrame(expected, `${relativePath} stage3`) : expected;
+  assert.equal(normalize(transformOverlayBlob(relativePath, stage1)), normalize(expectedStage2), `${relativePath} stage1 replay proof`);
+  assert.equal(normalize(transformOverlayBlob(relativePath, stage3)), normalize(expectedStage3), `${relativePath} stage3 replay proof`);
   const once = transformOverlayText(relativePath, normalize(stage3));
   assert.equal(transformOverlayText(relativePath, once), once, `${relativePath} transformer must be idempotent`);
 
@@ -125,6 +137,19 @@ async function createRenameConflictFixture({ startMerge = true } = {}) {
 
 for (const relativePath of ['index.html', 'novel/index.html']) assertBlobProof(relativePath);
 
+const squareFrameSource = sourceText('bc2d201', 'index.html');
+const squareFramePatched = patchSquareHostSafeArea(squareFrameSource);
+assert.equal((squareFramePatched.match(/data-safe-area="square-frame"/g) || []).length, 1, 'square safe-area marker must be inserted exactly once');
+assert.equal(patchSquareHostSafeArea(squareFramePatched), squareFramePatched, 'square safe-area patch must be idempotent');
+assert.throws(
+  () => patchSquareHostSafeArea(squareFrameSource.replace(
+    squareFrameAnchor,
+    squareFrameAnchor.replace('class="h-full overflow-hidden flex flex-col bg-gray-50 relative"', 'class="drifted-square-host"')
+  )),
+  /main square host safe area/,
+  'square safe-area anchor drift must fail closed'
+);
+
 assert.throws(
   () => transformOverlayText('index.html', `${normalize(sourceText('bc2d201', 'index.html'))}\n<script src="https://unknown.example/runtime.js"></script>\n`),
   /Remote runtime dependency returned/,
@@ -165,7 +190,7 @@ const successfulFixture = await createConflictFixture({
     'novel/index.html': repoBlob('5739165', 'novel/index.html')
   },
   localFiles: {
-    'index.html': repoBlob('ddc8f75', 'index.html'),
+    'index.html': addExpectedSquareFrame(sourceText('ddc8f75', 'index.html'), 'successful fixture local'),
     'novel/index.html': repoBlob('ddc8f75', 'novel/index.html')
   },
   upstreamFiles: {
