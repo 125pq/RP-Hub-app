@@ -25,3 +25,10 @@ benchmark-results/traces/
 *.keystore
 *.jks
 keystore.properties
+
+# Local agent/editor tooling (machine-specific)
+.codegraph/
+.omo/
+.codex/
+.opencode/
+opencode.jsonc
