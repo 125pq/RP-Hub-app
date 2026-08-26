@@ -26,6 +26,10 @@ npm run test:backup        # 备份导入导出往返测试
 
 改了补丁或上游文件，**必须**跑 `npm run test:upstream-sync`。
 
+任何上游合并因冲突、proof、锚点或 EOL guard 失败并经过人工处理后，必须在
+`docs/UPSTREAM-MERGE-FAILURES.md` 顶部追加记录，写清旧/新 SHA、首个有效错误、
+根因、人工取舍、回归测试、版本/发布影响和剩余风险。不能只保存最终解决结果。
+
 ## 3. 多模型委派工作流
 
 ### 前置条件

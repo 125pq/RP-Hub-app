@@ -104,6 +104,8 @@ RP-Hub-app/
 │   ├── tools/                     # 一次性迁移/修复工具
 │   └── upstream-sync/             # 上游同步、Hook 重放、版本推导与验证
 ├── .github/workflows/             # 每日同步 / 测试 / 发布 / Gitee 镜像流水线
+├── docs/
+│   └── UPSTREAM-MERGE-FAILURES.md # 上游合并失败原因、处理与发布影响记录
 ├── package.json                   # 固定依赖及可重复构建命令
 └── README.md                      # 项目说明
 ```
