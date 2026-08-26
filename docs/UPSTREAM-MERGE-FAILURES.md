@@ -48,15 +48,86 @@ Git 冲突来自上游和本地补丁同时修改页面入口附近的内容。�
 
 ### 版本与发布影响
 
-如果这次同标签改指向由定时工作流直接合并成功，默认修订号仍会推导为 `0`：当上游标签和当前 `package.json` 都是 `1.8.8` 时，`deriveRevision()` 返回 `0`，生成的仍是 `1.8.8`、`v1.8.8-android`。它不会自动变成 `1.8.8.1`。
+同标签改指向由定时工作流合并时，`merge` 模式现在会在同一基础版本上自动递增修订号：当前 `package.json` 为 `1.8.8` 时选择 `1`，为 `1.8.8.1` 时选择 `2`；新基础版本（例如上游 `1.8.9`）仍从 `0` 开始。`recover`/`noop` 保持当前修订号，workflow_dispatch 的显式 revision 始终优先，超过 `99` 直接 fail closed。
 
-由于 `v1.8.8-android` 已存在，工作流还会复用旧 Release 的 canonical APK 并跳过重复发布。这意味着“同标签改代码”不能依赖默认版本推导产生新 APK。此次实际发布显式传入了 `revision=1`，因此生成 `1.8.8.1`、`versionCode 1080801` 和 `v1.8.8.1-android`。
+修复前，同标签 merge 仍可能命中已有 Android tag、复用旧 Release 的 canonical APK 并跳过重复发布。现在 merge 会先自动选择下一 revision；如果目标 tag 仍已存在或在发布时被并发创建，工作流会 fail closed。只有 recover 可以复用已有 APK，而且 Release 的 `targetCommitish` 必须与当前 `HEAD` 完全一致。此次实际发布显式传入了 `revision=1`，因此生成 `1.8.8.1`、`versionCode 1080801` 和 `v1.8.8.1-android`。
 
 ### 后续风险
 
 - 当前是否已集成仍按提交 SHA 的 ancestry 判断；上游再次改写同一标签时，仍会被当成待合并代码。
 - 上游若重构 Square 容器或其他补丁锚点，解析器会再次 fail closed，需要人工确认新结构。
 - 若产品规则是“只有新 Release 标签才同步”，应另行把同步状态改为以已记录的 Release 标签为主；同标签 SHA 变化只告警、不合并。
+
+## 2026-08-23：上游 `1.8.7` 标签目标刷新与缓存内容处理冲突
+
+### 现场
+
+- 上游 `1.8.7` 先以 `b029b2509abd2791d08b2884a9d66c2506f4087f` 进入提交 `a7f4807`，随后本地 `1.8.7` 标签指向 `4b68ac119d48c1ebce1294655a53f4755a0ed0ff`，再次由提交 `1c13c9a` 合入。
+- 两次合并都是保留本地父提交和上游父提交的 merge commit；`4b68ac1` 实际包含 `assets/js/data-services.js`，但缺少本地 `processMainContentImpl`、`processMainContentCache` 及其本地处理逻辑，合并结果明确保留了这些缓存路径。
+- 历史仓库未保留第一次失败运行的完整 stdout/stderr，因此不能还原一个未经证明的“首个错误”；可由 merge parent、文件差异和后续修复提交确认的是：同一 `1.8.7` 发布线被两个不同 SHA 先后处理，并需要人工确认缓存内容处理不能被上游快照删除。
+
+### 根因
+
+- 上游标签目标在两个快照间变化，且后一个快照重写了 `data-services.js` 的内容；如果只按上游文件整体取代，会把本地 `processMainContentImpl`、`processMainContentCache` 误判为可删除内容。
+- 同期 `assets/js/runtime-services.js`、`assets/js/app.js`、`assets/js/built-in-content.js` 等文件也发生大范围变更，不能只依据文件存在与否自动取一侧结果。
+
+### 处理
+
+- 保留 `1c13c9a` 中本地缓存实现，并合入其余 `4b68ac1` 上游内容；随后 `cae4b0f` 仍为 `1.8.7`，真正升为 `1.8.7.1` 并发布对应 Android Release 的是 `38aa0e9`。
+- 早先的 `a7f4807` 已生成 `v1.8.7-android`；后续同标签目标变化没有覆盖该旧构建，而是单独生成修订版，避免 Android 版本与更新元数据复用错误。
+- `scripts/upstream-sync/tests/merge-regressions.mjs` 现在锁定 `processMainContentImpl`、`processMainContentCache`、未闭合 `image###` 处理及 app 对共享实现的引用；相关测试和性能测试均作为同步门禁运行。
+
+### 验证
+
+- Git 证据：`a7f4807`（`b029b25`）、`1c13c9a`（`4b68ac1`）、`cae4b0f` 和 `38aa0e9` 的父提交、文件差异及版本字段可复核上述处理顺序。
+- `scripts/upstream-sync/tests/merge-regressions.mjs`：PASS。
+- `npm run test:performance`：PASS，包含流式刷新场景。
+- 当前同步门禁中与本条相关的 `merge-regressions` 和 resolver proof：PASS；EOL guard 修正为优先选择最近上游 Release 基线后，完整 `npm run test:upstream-sync` 也已通过。
+
+### 版本与发布影响
+
+- `a7f4807` 的 `package.json` 为 `1.8.7`，对应 `v1.8.7-android`；`cae4b0f` 的 `package.json` 仍为 `1.8.7`，随后 `38aa0e9` 才升为 `1.8.7.1` 并对应 `v1.8.7.1-android`。
+- 这次目标刷新没有证据表明应发布全新的上游语义版本；实际影响通过 Android 修订号 `1` 表达，避免同标签构建覆盖或复用旧 APK。
+
+### 后续风险
+
+- 上游 Release 标签仍可能重新指向不完整文件树；同步前应同时记录 release tag、commit SHA、两个 merge parent 和关键缓存文件是否存在。
+- 未保存原始失败日志会降低后续审计能力；工作流应保留首个 Git/解析器错误及冲突文件清单。
+- 任何将缓存处理从 `data-services.js` 移回 `app.js` 的上游改动，都必须先通过回归测试确认，不应只按文本冲突位置取舍。
+
+## 2026-08-22：上游 `1.8.6` runtime-services 流式处理冲突
+
+### 现场
+
+- 上游 `1.8.6` 提交为 `9b4c9674b70461e81e8ab9c601b716f99258a583`；提交 `2565916` 明确是以本地 `bed5042` 和该上游提交为两个父提交的 merge commit。
+- `assets/js/runtime-services.js` 同时包含上游的 SSE choice 提取和本地的流式刷新调度，提交 `c5037dd` 的说明明确写有“Resolve the runtime-services.js streaming conflict while preserving the local paragraph-aware scheduler and adopting the upstream non-streaming choice extraction”。
+- 历史仓库没有保留原始工作流 stderr；可确认的首个有效事实是 `runtime-services.js` 发生冲突并由人工合并提交解决，而不是假设一个未保存的命令输出。
+
+### 根因
+
+- 上游改动了响应解析和流式读取路径，本地同时维护了 `STREAM_RENDER_INTERVAL` 相关逻辑及段落感知刷新调度，两个版本在同一文件的同一运行链路中交叉修改。
+- 若只接受任一侧，会丢失上游的 choice/error 处理或本地的段落边界、最大可见延迟和测试注入能力。
+
+### 处理
+
+- 在 `2565916`/`c5037dd` 中保留本地 `createStreamingBoundaryTracker`、段落边界和最大可见延迟调度，同时采用上游的 choice 提取和非流式响应行为。
+- 后续 `scripts/upstream-sync/tests/test-streaming-flush.mjs` 及性能测试覆盖 LF/CRLF 段落、burst 合并、max latency、think/cot、abort 和错误路径，防止下一次上游合并只保留一侧逻辑。
+
+### 验证
+
+- Git 证据：`2565916` 是 `bed5042` + `9b4c967` 的 merge commit；`c5037dd` 的提交说明和 combined diff 均直接指向 `runtime-services.js` 冲突取舍。
+- `npm run test:performance`：PASS，`Paragraph-aware streaming flush` 场景通过。
+- 当前 `npm run test:upstream-sync` 的 merge regression、流式、reapply 和 EOL baseline guard 均已通过；原始 1.8.6 运行日志未保留。
+
+### 版本与发布影响
+
+- `2565916` 与 `c5037dd` 的 `package.json` 仍为 `1.8.5`，Git 历史中没有 `v1.8.6-android` 标签；因此该次记录是上游代码集成失败/人工冲突处理，不应虚构一个已发布的 1.8.6 Android 包。
+- 流式逻辑修复随后随主线进入后续 1.8.7 Android 构建；发布前必须重新运行流式性能和 Android/Web 构建门禁。
+
+### 后续风险
+
+- 上游继续修改 `runtime-services.js` 时，优先检查 boundary tracker、`onDelta` 调度和非流式 choice 提取是否同时存在。
+- 性能测试通过只证明当前 fixture；真实 WebView 网络、长文本和不同 SSE 分片节奏仍需在发布前抽样验证。
 
 ## 新记录模板
 

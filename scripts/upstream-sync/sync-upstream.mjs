@@ -6,8 +6,8 @@ import { projectRoot } from './lib.mjs';
 import { reapplyHooks } from './reapply-hooks.mjs';
 import { resolveLatestStableRelease } from './release-source.mjs';
 import { mergeWithAutoResolver } from './sync-orchestration.mjs';
-import { androidReleaseMetadata, deriveRevision } from './prepare-android-release.mjs';
-import { determineSyncMode } from './sync-decision.mjs';
+import { androidReleaseMetadata, deriveRevision, selectRevision } from './prepare-android-release.mjs';
+import { assertReleaseTargetsHead, determineSyncMode } from './sync-decision.mjs';
 
 const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
 const RELEASE_REF = 'refs/remotes/upstream/releases/latest';
@@ -84,11 +84,11 @@ async function fetchUpstreamRelease(release) {
   console.warn(`FETCH_FALLBACK=PASS (GitHub API confirms cached release ${release.tagName} at ${release.commitSha})`);
 }
 
-function publishWorkflowOutputs(release, upstreamUpdated, mode) {
+function publishWorkflowOutputs(release, upstreamUpdated, mode, revision) {
   if (!process.env.GITHUB_OUTPUT) return;
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `release_tag=${release.tagName}\nupstream_sha=${release.commitSha}\nhas_updates=${upstreamUpdated}\nsync_mode=${mode}\n`,
+    `release_tag=${release.tagName}\nupstream_sha=${release.commitSha}\nhas_updates=${upstreamUpdated}\nsync_mode=${mode}\nrevision=${revision}\n`,
     'utf8'
   );
 }
@@ -101,8 +101,19 @@ async function publicationComplete(release) {
   const metadata = androidReleaseMetadata(release.tagName, revision);
   const repository = process.env.GITHUB_REPOSITORY;
   if (!repository || !process.env.GH_TOKEN) return false;
-  const releaseCheck = await run('gh', ['release', 'view', metadata.androidTag, '--repo', repository], { allowFailure: true });
+  const releaseCheck = await run('gh', [
+    'release', 'view', metadata.androidTag,
+    '--repo', repository,
+    '--json', 'targetCommitish',
+    '--jq', '.targetCommitish'
+  ], { capture: true, allowFailure: true });
   if (releaseCheck.code !== 0) return false;
+  const currentHead = await gitText(['rev-parse', 'HEAD']);
+  assertReleaseTargetsHead({
+    androidTag: metadata.androidTag,
+    targetCommitish: releaseCheck.stdout,
+    headSha: currentHead
+  });
   const mirrorCheck = await run('curl', ['--silent', '--show-error', '--fail', '--location', '--max-time', '30', 'https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/android-update.json'], { capture: true, allowFailure: true });
   if (mirrorCheck.code !== 0) return false;
   try { return JSON.parse(mirrorCheck.stdout).tag === metadata.androidTag; } catch { return false; }
@@ -200,7 +211,15 @@ try {
   const alreadyIntegrated = await upstreamReleaseAlreadyIntegrated(upstreamHead);
   const complete = alreadyIntegrated ? await publicationComplete(release) : false;
   const mode = determineSyncMode({ alreadyIntegrated, publicationComplete: complete });
-  publishWorkflowOutputs(release, mode !== 'noop', mode);
+  const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+  const rawRevision = String(process.env.RPHUB_ANDROID_REVISION || '').trim();
+  const revision = selectRevision({
+    upstreamTag: release.tagName,
+    currentVersion: packageJson.version,
+    mode,
+    explicitRevision: rawRevision === '' ? null : rawRevision
+  });
+  publishWorkflowOutputs(release, mode !== 'noop', mode, revision);
 
   if (mode === 'noop') {
     console.log(`UPSTREAM_HAS_UPDATES=false (release ${release.tagName} is already integrated)`);

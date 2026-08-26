@@ -13,9 +13,10 @@ import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-// Existing P0-1 follow-up noise, measured from upstream/main..HEAD. These files
-// still need cleanup; this guard pins today's exact amount and fails as soon as
-// any file moves away from it or any unlisted file appears.
+// Existing P0-1 follow-up noise, measured from the nearest available upstream
+// release baseline. These files still need cleanup; this guard pins today's
+// exact amount and fails as soon as any file moves away from it or any unlisted
+// file appears.
 const EOL_NOISE_ALLOWANCE = {
   // P0-1 follow-up: built-in content retains legacy EOL churn from upstream baseline.
   'assets/js/built-in-content.js': 482,
@@ -52,7 +53,7 @@ function resolveBaseline() {
     // Not an in-progress merge; resolve the normal upstream baseline below.
   }
 
-  for (const candidate of ['upstream/main', 'upstream/master', 'upstream/releases/latest']) {
+  for (const candidate of ['upstream/releases/latest', 'upstream/main', 'upstream/master']) {
     try {
       const oid = probeGit(['rev-parse', '--verify', `${candidate}^{commit}`]);
       if (oid) {

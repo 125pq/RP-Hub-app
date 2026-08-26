@@ -98,7 +98,7 @@ jobs:
       - name: Prepare Android release metadata
         id: android_release
         if: steps.upstream_sync.outputs.has_updates == 'true'
-        run: node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ inputs.revision }}"
+        run: node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ steps.upstream_sync.outputs.revision }}"
 
       - name: Verify adapter and upstream hooks
         if: steps.upstream_sync.outputs.has_updates == 'true'
@@ -131,11 +131,22 @@ jobs:
           VERSION_CODE: ${{ steps.android_release.outputs.version_code }}
           ANDROID_TAG: ${{ steps.android_release.outputs.android_tag }}
           APK_NAME: ${{ steps.android_release.outputs.apk_name }}
+          SYNC_MODE: ${{ steps.upstream_sync.outputs.sync_mode }}
         run: |
           source_apk="android/app/build/outputs/apk/release/app-release.apk"
           test -f "$source_apk"
           output_apk="$RUNNER_TEMP/$APK_NAME"
           if gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            if [ "$SYNC_MODE" != "recover" ]; then
+              echo "Android Release $ANDROID_TAG already exists during sync mode $SYNC_MODE; refusing to reuse it" >&2
+              exit 1
+            fi
+            current_head="$(git rev-parse HEAD)"
+            release_target="$(gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" --json targetCommitish --jq '.targetCommitish')"
+            if [ "$release_target" != "$current_head" ]; then
+              echo "Android Release $ANDROID_TAG targets $release_target, expected current HEAD $current_head; refusing recovery" >&2
+              exit 1
+            fi
             gh release download "$ANDROID_TAG" \
               --repo "${{ github.repository }}" \
               --pattern "$APK_NAME" \
@@ -238,10 +249,21 @@ jobs:
           APK_SHA256: ${{ steps.apk.outputs.sha256 }}
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
           RELEASE_NOTES_PATH: ${{ steps.release_notes.outputs.notes_path }}
+          SYNC_MODE: ${{ steps.upstream_sync.outputs.sync_mode }}
         run: |
           if gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Android Release $ANDROID_TAG already exists; skipping duplicate publication"
-            exit 0
+            if [ "$SYNC_MODE" = "recover" ]; then
+              current_head="$(git rev-parse HEAD)"
+              release_target="$(gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" --json targetCommitish --jq '.targetCommitish')"
+              if [ "$release_target" != "$current_head" ]; then
+                echo "Android Release $ANDROID_TAG targets $release_target, expected current HEAD $current_head; refusing recovery" >&2
+                exit 1
+              fi
+              echo "Android Release $ANDROID_TAG already exists; skipping duplicate recovery publication"
+              exit 0
+            fi
+            echo "Android Release $ANDROID_TAG appeared during sync mode $SYNC_MODE; refusing to skip publication" >&2
+            exit 1
           fi
 
           gh release create "$ANDROID_TAG" "$APK_PATH" \

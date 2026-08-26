@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from '../lib.mjs';
-import { determineSyncMode } from '../sync-decision.mjs';
+import { assertReleaseTargetsHead, determineSyncMode } from '../sync-decision.mjs';
 
 const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
 const [workflow, gradle, updater] = await Promise.all([
@@ -25,6 +25,13 @@ assert.match(workflow, /has_updates == 'true'/);
 assert.match(workflow, /actions\/setup-java@v4[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
 assert.match(workflow, /Install dependencies[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
 assert.match(workflow, /Sync Capacitor and build Android release[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
+assert.match(workflow, /prepare-android-release\.mjs .*steps\.upstream_sync\.outputs\.release_tag.*steps\.upstream_sync\.outputs\.revision/);
+assert.match(workflow, /SYNC_MODE: \$\{\{ steps\.upstream_sync\.outputs\.sync_mode \}\}/);
+assert.match(workflow, /if \[ "\$SYNC_MODE" != "recover" \][\s\S]*refusing to reuse it[\s\S]*exit 1/);
+assert.match(workflow, /if \[ "\$SYNC_MODE" = "recover" \][\s\S]*skipping duplicate recovery publication[\s\S]*exit 0/);
+assert.match(workflow, /appeared during sync mode \$SYNC_MODE[\s\S]*refusing to skip publication[\s\S]*exit 1/);
+assert.ok((workflow.match(/--json targetCommitish --jq '\.targetCommitish'/g) || []).length >= 2);
+assert.ok((workflow.match(/if \[ "\$release_target" != "\$current_head" \]/g) || []).length >= 2);
 const syncSource = await read('scripts/upstream-sync/sync-upstream.mjs');
 assert.match(syncSource, /merge-base', '--is-ancestor/);
 assert.match(syncSource, /has_updates=\$\{upstreamUpdated\}/);
@@ -35,17 +42,32 @@ assert.ok(integrationCheckIndex !== -1 && integrationCheckIndex < mergeIndex);
 assert.match(syncSource, /if \(mode === 'noop'\) \{[\s\S]*UPSTREAM_HAS_UPDATES=false \(release[\s\S]*\} else if \(mode === 'merge'\)/);
 assert.match(syncSource, /publicationComplete/);
 assert.match(syncSource, /sync_mode=\$\{mode\}/);
+assert.match(syncSource, /revision=\$\{revision\}/);
+const publicationCheck = syncSource.slice(syncSource.indexOf('async function publicationComplete'), syncSource.indexOf('async function mergeInProgress'));
+assert.match(publicationCheck, /rawRevision === '' \? deriveRevision\(release\.tagName, packageJson\.version\)/);
+assert.doesNotMatch(publicationCheck, /selectRevision/);
 assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: false }), 'merge');
 assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: true }), 'merge');
 assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: true }), 'noop');
 assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: false }), 'recover');
+const matchingHead = '0123456789abcdef0123456789abcdef01234567';
+assert.equal(assertReleaseTargetsHead({ androidTag: 'v1.8.8.1-android', targetCommitish: matchingHead, headSha: matchingHead }), true);
+assert.throws(
+  () => assertReleaseTargetsHead({
+    androidTag: 'v1.8.8.1-android',
+    targetCommitish: 'fedcba9876543210fedcba9876543210fedcba98',
+    headSha: matchingHead
+  }),
+  /refusing to reuse its APK/
+);
+assert.match(publicationCheck, /assertReleaseTargetsHead/);
 assert.match(workflow, /npm audit --omit=dev/);
 assert.match(workflow, /apksigner[\s\S]*verify --verbose --print-certs/);
 assert.match(workflow, /manifest application-id[\s\S]*io\.github\.pq125\.rphub/);
 assert.match(workflow, /manifest debuggable[\s\S]*= "false"/);
 assert.match(workflow, /sha256sum/);
 assert.match(workflow, /gh release download "\$ANDROID_TAG"[\s\S]*Using canonical APK from existing GitHub Release/);
-assert.match(workflow, /gh release view[\s\S]*skipping duplicate publication/);
+assert.match(workflow, /gh release view[\s\S]*skipping duplicate recovery publication/);
 assert.match(workflow, /gh release create[\s\S]*--latest/);
 assert.match(workflow, /APK SHA-256/);
 assert.match(workflow, /repos\/STA1N156\/RP-Hub\/releases\/tags\/\$\{UPSTREAM_RELEASE_TAG\}/);

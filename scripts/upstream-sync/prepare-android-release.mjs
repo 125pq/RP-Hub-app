@@ -12,10 +12,7 @@ export function androidReleaseMetadata(upstreamTag, revision = 0) {
   const minor = Number(minorText);
   const patch = Number(patchText);
   if (minor > 99 || patch > 99) throw new Error(`Android versionCode requires minor and patch below 100: ${upstreamTag}`);
-  const numericRevision = Number(revision);
-  if (!Number.isInteger(numericRevision) || numericRevision < 0 || numericRevision > 99) {
-    throw new Error(`Android release revision must be an integer from 0 through 99: ${revision}`);
-  }
+  const numericRevision = validateRevision(revision);
   const versionCode = (major * 10000 + minor * 100 + patch) * 100 + numericRevision;
   if (!Number.isSafeInteger(versionCode) || versionCode < 1 || versionCode > 2100000000) {
     throw new Error(`Android versionCode is outside the supported range: ${versionCode}`);
@@ -42,6 +39,47 @@ export function deriveRevision(upstreamTag, currentVersion) {
     if (Number.isInteger(revision) && revision >= 1 && revision <= 99) return revision;
   }
   return 0;
+}
+
+function normalizeBaseVersion(value) {
+  const normalized = String(value || '').replace(/^v/, '');
+  const match = normalized.match(/^(\d+\.\d+\.\d+)(?:\.(\d+))?$/);
+  return match ? { base: match[1], revision: Number(match[2] || 0) } : null;
+}
+
+function validateRevision(revision) {
+  const numericRevision = Number(revision);
+  if (!Number.isInteger(numericRevision) || numericRevision < 0 || numericRevision > 99) {
+    throw new Error(`Android release revision must be an integer from 0 through 99: ${revision}`);
+  }
+  return numericRevision;
+}
+
+export function selectRevision({ upstreamTag, currentVersion, mode = 'merge', explicitRevision = null }) {
+  if (!['merge', 'recover', 'noop'].includes(mode)) {
+    throw new Error(`Unsupported sync mode for revision selection: ${mode}`);
+  }
+  const upstream = normalizeBaseVersion(upstreamTag);
+  const current = normalizeBaseVersion(currentVersion);
+  if (!upstream) throw new Error(`Upstream release tag is not a supported semantic version: ${upstreamTag || '(empty)'}`);
+  if (!current) throw new Error(`Current package version is not a supported semantic version: ${currentVersion || '(empty)'}`);
+  validateRevision(current.revision);
+  const hasExplicitRevision = explicitRevision !== null
+    && explicitRevision !== undefined
+    && String(explicitRevision).trim() !== '';
+  if (hasExplicitRevision) return validateRevision(explicitRevision);
+
+  if (mode !== 'merge') {
+    const revision = upstream && current && upstream.base === current.base
+      ? current.revision
+      : deriveRevision(upstreamTag, currentVersion);
+    return validateRevision(revision);
+  }
+
+  const revision = upstream && current && upstream.base === current.base
+    ? validateRevision(current.revision) + 1
+    : 0;
+  return validateRevision(revision);
 }
 
 function currentPackageVersion() {
@@ -104,7 +142,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const upstreamTag = process.argv[2];
   const rawRevision = process.argv.length > 3 ? String(process.argv[3]).trim() : '';
   const explicitRevision = rawRevision === '' ? null : Number(rawRevision);
-  const revision = Number.isInteger(explicitRevision) ? explicitRevision : deriveRevision(upstreamTag, currentPackageVersion());
+  const revision = explicitRevision === null
+    ? deriveRevision(upstreamTag, currentPackageVersion())
+    : validateRevision(explicitRevision);
   const metadata = androidReleaseMetadata(upstreamTag, revision);
   publishOutputs(metadata);
   for (const [key, value] of Object.entries(metadata)) console.log(`${key}=${value}`);
