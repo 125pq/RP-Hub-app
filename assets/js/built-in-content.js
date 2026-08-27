@@ -613,7 +613,7 @@ image###英文Tag###
 
         if (prefillPhase) {
             const prefillMemorySection = memoryEnabled
-                ? '[记忆整理]\n这两条预注入消息本身没有提供可核对的剧情记忆，本轮没有新增记忆事实。'
+                ? '[记忆整理]\n上条消息本身没有提供可核对的剧情记忆，本轮没有新增记忆事实。'
                 : '';
             const prefillVariableSection = uiTemplateAnalysisEnabled
                 ? '[变量更新分析]\n这两条预注入消息只是在确认输出流程，没有发生剧情变化，因此没有变量需要更新。'
