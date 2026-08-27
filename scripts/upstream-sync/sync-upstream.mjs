@@ -7,7 +7,7 @@ import { reapplyHooks } from './reapply-hooks.mjs';
 import { resolveLatestStableRelease } from './release-source.mjs';
 import { mergeWithAutoResolver } from './sync-orchestration.mjs';
 import { androidReleaseMetadata, deriveRevision, selectRevision } from './prepare-android-release.mjs';
-import { assertReleaseTargetsHead, determineSyncMode } from './sync-decision.mjs';
+import { assertReleaseTargetAncestry, determineSyncMode } from './sync-decision.mjs';
 
 const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
 const RELEASE_REF = 'refs/remotes/upstream/releases/latest';
@@ -109,10 +109,19 @@ async function publicationComplete(release) {
   ], { capture: true, allowFailure: true });
   if (releaseCheck.code !== 0) return false;
   const currentHead = await gitText(['rev-parse', 'HEAD']);
-  assertReleaseTargetsHead({
+  const isAncestor = async (ancestor, descendant) => {
+    const result = await git(['merge-base', '--is-ancestor', ancestor, descendant], { allowFailure: true });
+    if (result.code !== 0 && result.code !== 1) {
+      throw new Error(`Unable to verify release ancestry for ${metadata.androidTag}`);
+    }
+    return result.code === 0;
+  };
+  await assertReleaseTargetAncestry({
     androidTag: metadata.androidTag,
+    upstreamSha: release.commitSha,
     targetCommitish: releaseCheck.stdout,
-    headSha: currentHead
+    headSha: currentHead,
+    isAncestor
   });
   const mirrorCheck = await run('curl', ['--silent', '--show-error', '--fail', '--location', '--max-time', '30', 'https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/android-update.json'], { capture: true, allowFailure: true });
   if (mirrorCheck.code !== 0) return false;

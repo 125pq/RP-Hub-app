@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from '../lib.mjs';
-import { assertReleaseTargetsHead, determineSyncMode } from '../sync-decision.mjs';
+import { assertReleaseTargetAncestry, determineSyncMode } from '../sync-decision.mjs';
 
 const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
 const [workflow, gradle, updater] = await Promise.all([
@@ -31,7 +31,9 @@ assert.match(workflow, /if \[ "\$SYNC_MODE" != "recover" \][\s\S]*refusing to re
 assert.match(workflow, /if \[ "\$SYNC_MODE" = "recover" \][\s\S]*skipping duplicate recovery publication[\s\S]*exit 0/);
 assert.match(workflow, /appeared during sync mode \$SYNC_MODE[\s\S]*refusing to skip publication[\s\S]*exit 1/);
 assert.ok((workflow.match(/--json targetCommitish --jq '\.targetCommitish'/g) || []).length >= 2);
-assert.ok((workflow.match(/if \[ "\$release_target" != "\$current_head" \]/g) || []).length >= 2);
+assert.ok((workflow.match(/git merge-base --is-ancestor "\$UPSTREAM_SHA" "\$release_target"/g) || []).length >= 2);
+assert.ok((workflow.match(/git merge-base --is-ancestor "\$release_target" "\$current_head"/g) || []).length >= 2);
+assert.doesNotMatch(workflow, /if \[ "\$release_target" != "\$current_head" \]/);
 const syncSource = await read('scripts/upstream-sync/sync-upstream.mjs');
 assert.match(syncSource, /merge-base', '--is-ancestor/);
 assert.match(syncSource, /has_updates=\$\{upstreamUpdated\}/);
@@ -50,17 +52,43 @@ assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: 
 assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: true }), 'merge');
 assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: true }), 'noop');
 assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: false }), 'recover');
-const matchingHead = '0123456789abcdef0123456789abcdef01234567';
-assert.equal(assertReleaseTargetsHead({ androidTag: 'v1.8.8.1-android', targetCommitish: matchingHead, headSha: matchingHead }), true);
-assert.throws(
-  () => assertReleaseTargetsHead({
+const upstreamSha = '0562644622384ae645b2be959aeec0968a11d436';
+const intermediateTarget = '93c950a';
+const currentHead = '9482f302217f4dd5d69753741f26f5c9611ce4c7';
+const ancestryCalls = [];
+assert.equal(await assertReleaseTargetAncestry({
+  androidTag: 'v1.8.8.1-android',
+  upstreamSha,
+  targetCommitish: intermediateTarget,
+  headSha: currentHead,
+  isAncestor: async (ancestor, descendant) => {
+    ancestryCalls.push([ancestor, descendant]);
+    return true;
+  }
+}), true);
+assert.deepEqual(ancestryCalls, [[upstreamSha, intermediateTarget], [intermediateTarget, currentHead]]);
+await assert.rejects(
+  () => assertReleaseTargetAncestry({
     androidTag: 'v1.8.8.1-android',
-    targetCommitish: 'fedcba9876543210fedcba9876543210fedcba98',
-    headSha: matchingHead
+    upstreamSha,
+    targetCommitish: intermediateTarget,
+    headSha: currentHead,
+    isAncestor: async () => false
   }),
-  /refusing to reuse its APK/
+  /Upstream release .* not an ancestor.*refusing to reuse its APK/
 );
-assert.match(publicationCheck, /assertReleaseTargetsHead/);
+await assert.rejects(
+  () => assertReleaseTargetAncestry({
+    androidTag: 'v1.8.8.1-android',
+    upstreamSha,
+    targetCommitish: intermediateTarget,
+    headSha: currentHead,
+    isAncestor: async (ancestor) => ancestor === upstreamSha
+  }),
+  /targets .* not an ancestor of current HEAD.*refusing to reuse its APK/
+);
+assert.match(publicationCheck, /assertReleaseTargetAncestry/);
+assert.match(publicationCheck, /merge-base', '--is-ancestor/);
 assert.match(workflow, /npm audit --omit=dev/);
 assert.match(workflow, /apksigner[\s\S]*verify --verbose --print-certs/);
 assert.match(workflow, /manifest application-id[\s\S]*io\.github\.pq125\.rphub/);

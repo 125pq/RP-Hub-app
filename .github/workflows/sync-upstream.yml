@@ -132,6 +132,7 @@ jobs:
           ANDROID_TAG: ${{ steps.android_release.outputs.android_tag }}
           APK_NAME: ${{ steps.android_release.outputs.apk_name }}
           SYNC_MODE: ${{ steps.upstream_sync.outputs.sync_mode }}
+          UPSTREAM_SHA: ${{ steps.upstream_sync.outputs.upstream_sha }}
         run: |
           source_apk="android/app/build/outputs/apk/release/app-release.apk"
           test -f "$source_apk"
@@ -143,8 +144,16 @@ jobs:
             fi
             current_head="$(git rev-parse HEAD)"
             release_target="$(gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" --json targetCommitish --jq '.targetCommitish')"
-            if [ "$release_target" != "$current_head" ]; then
-              echo "Android Release $ANDROID_TAG targets $release_target, expected current HEAD $current_head; refusing recovery" >&2
+            if [[ ! "$release_target" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+              echo "Android Release $ANDROID_TAG has invalid target $release_target; refusing recovery" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$UPSTREAM_SHA" "$release_target"; then
+              echo "Upstream release $UPSTREAM_SHA is not an ancestor of Android Release $ANDROID_TAG target $release_target; refusing recovery" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$release_target" "$current_head"; then
+              echo "Android Release $ANDROID_TAG targets $release_target, which is not an ancestor of current HEAD $current_head; refusing recovery" >&2
               exit 1
             fi
             gh release download "$ANDROID_TAG" \
@@ -250,13 +259,22 @@ jobs:
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
           RELEASE_NOTES_PATH: ${{ steps.release_notes.outputs.notes_path }}
           SYNC_MODE: ${{ steps.upstream_sync.outputs.sync_mode }}
+          UPSTREAM_SHA: ${{ steps.upstream_sync.outputs.upstream_sha }}
         run: |
           if gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             if [ "$SYNC_MODE" = "recover" ]; then
               current_head="$(git rev-parse HEAD)"
               release_target="$(gh release view "$ANDROID_TAG" --repo "${{ github.repository }}" --json targetCommitish --jq '.targetCommitish')"
-              if [ "$release_target" != "$current_head" ]; then
-                echo "Android Release $ANDROID_TAG targets $release_target, expected current HEAD $current_head; refusing recovery" >&2
+              if [[ ! "$release_target" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+                echo "Android Release $ANDROID_TAG has invalid target $release_target; refusing recovery" >&2
+                exit 1
+              fi
+              if ! git merge-base --is-ancestor "$UPSTREAM_SHA" "$release_target"; then
+                echo "Upstream release $UPSTREAM_SHA is not an ancestor of Android Release $ANDROID_TAG target $release_target; refusing recovery" >&2
+                exit 1
+              fi
+              if ! git merge-base --is-ancestor "$release_target" "$current_head"; then
+                echo "Android Release $ANDROID_TAG targets $release_target, which is not an ancestor of current HEAD $current_head; refusing recovery" >&2
                 exit 1
               fi
               echo "Android Release $ANDROID_TAG already exists; skipping duplicate recovery publication"
