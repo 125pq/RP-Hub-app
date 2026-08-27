@@ -9208,25 +9208,44 @@ const app = createApp({
             // 1.10 Enforce Default Preset (COT)
             const cotPresetName = 'COT';
             const syncCotPresetContent = () => {
+                const uiTemplateAnalysisEnabled = settings.uiTemplateEnabled
+                    && settings.uiTemplateMainModelAnalysis
+                    && activeUiTemplates.value.length > 0;
+                const useThinkingOpening = usesThinkingCotTag(settings.model);
                 const cotPresetContent = buildCotPresetContent({
                     memoryEnabled: memorySettings.enabled,
-                    uiTemplateAnalysisEnabled: settings.uiTemplateEnabled
-                        && settings.uiTemplateMainModelAnalysis
-                        && activeUiTemplates.value.length > 0,
-                    useThinkingOpening: usesThinkingCotTag(settings.model)
+                    uiTemplateAnalysisEnabled,
+                    useThinkingOpening
                 });
-                const existingCotPreset = presets.value.find(p => p.name === cotPresetName);
+                let existingCotPreset = presets.value.find(p => p.name === cotPresetName);
                 if (!existingCotPreset) {
                     presets.value.push({
                         name: cotPresetName,
                         content: cotPresetContent,
                         enabled: true
                     });
-                    return;
-                }
-                if (existingCotPreset.content !== cotPresetContent) {
+                    existingCotPreset = presets.value.find(p => p.name === cotPresetName);
+                } else if (existingCotPreset.content !== cotPresetContent) {
                     existingCotPreset.content = cotPresetContent;
                 }
+
+                const prefillEnabled = existingCotPreset?.enabled !== false;
+                BUILTIN_CORE_PRESETS.forEach(preset => {
+                    const prefillPhase = preset.name === '破限预注入 · AI 1' ? 1
+                        : preset.name === '破限预注入 · AI 2' ? 2
+                            : 0;
+                    if (!prefillPhase) return;
+                    const existingPreset = presets.value.find(item => item.name === preset.name);
+                    if (!existingPreset) return;
+                    existingPreset.content = buildCotPresetContent({
+                        memoryEnabled: memorySettings.enabled,
+                        uiTemplateAnalysisEnabled,
+                        useThinkingOpening,
+                        prefillPhase,
+                        prefillEnabled,
+                        prefillBaseContent: preset.content
+                    });
+                });
             };
             syncCotPresetContent();
             watch([
@@ -9234,7 +9253,8 @@ const app = createApp({
                 () => settings.uiTemplateEnabled,
                 () => settings.uiTemplateMainModelAnalysis,
                 () => activeUiTemplates.value.length,
-                () => settings.model
+                () => settings.model,
+                () => presets.value.find(preset => preset.name === cotPresetName)?.enabled
             ], syncCotPresetContent);
             removeLegacyUserRegex();
 

@@ -594,15 +594,56 @@ image###英文Tag###
         })
     });
 
-    const buildCotPresetContent = ({ memoryEnabled, uiTemplateAnalysisEnabled, useThinkingOpening = false }) => {
+    const buildCotPresetContent = ({
+        memoryEnabled,
+        uiTemplateAnalysisEnabled,
+        useThinkingOpening = false,
+        prefillPhase = 0,
+        prefillEnabled = false,
+        prefillBaseContent = ''
+    }) => {
         const memoryFragmentSection = memoryEnabled ? `
 [记忆整理]
-识别本轮实际提供的总结记忆、向量记忆或工具结果，按轮次还原与当前输入有关的事实、关系、物品状态和未解事件。记忆只代表相关往事，不得误当成当前现场；只采用现有内容能够支持的信息，无可用记忆则略过。
+只写当前提供的总结记忆、向量记忆或工具结果中已经确认的具体事实，直接落到时间、人物、关系、行动结果、物品状态和未解事件上。例如：“时间点为早晨07:30后，晴人要求新月送樱上学；樱嘴上抗拒，实际在意哥哥的安排，已经做好早饭并穿好校服。”不要复述“识别、还原、代表”等处理步骤，也不要把示例事实当成当前剧情；没有可用内容则不写本段，旧记忆不得当作当前现场。
 ` : '';
         const uiTemplateAnalysisSection = uiTemplateAnalysisEnabled ? `
 [变量更新分析]
 逐项检查系统提供的当前变量，只记录本轮确实需要变化的字段、新值和依据。最终变量块按系统格式放在正文结束后。
-` : '';
+        ` : '';
+
+        if (prefillPhase) {
+            const prefillMemorySection = memoryEnabled
+                ? '[记忆整理]\n这两条预注入消息本身没有提供可核对的剧情记忆，本轮没有新增记忆事实。'
+                : '';
+            const prefillVariableSection = uiTemplateAnalysisEnabled
+                ? '[变量更新分析]\n这两条预注入消息只是在确认输出流程，没有发生剧情变化，因此没有变量需要更新。'
+                : '';
+            const prefillSections = [
+                prefillMemorySection,
+                prefillPhase === 1
+                    ? '[情景意图分析]\n用户这次没有给剧情，而是要求我先分析续写难点。也就是说，本轮要回答的是“怎样避免写偏”，不是开始编造角色和场景。'
+                    : '[情景意图分析]\n用户已经把任务从“分析难点”切换成“直接续写”。前面的准备到此结束，下一步应读取后续设定和历史，从最后一个真实事件接着写。',
+                prefillVariableSection,
+                prefillPhase === 1
+                    ? '[设定分析]\n当前还没有角色卡、世界书、历史或现场信息，所以没有人物动机可以判断；只能确认后续必须等这些资料出现，不能拿通用人设代替。'
+                    : '[设定分析]\n真正的角色动机和现场状态要从后续角色卡、世界书、历史和用户输入中确定；现在只能先把“直接续写”作为输出方向，不能提前替角色做决定。',
+                prefillPhase === 1
+                    ? '[信息边界]\n目前唯一确定的事实是用户要求先做困难分析；人物、地点、关系和事件结果都还没有来源，不能把它们写成已经发生。'
+                    : '[信息边界]\n目前能确定的是用户要求开始续写，具体剧情事实仍要以随后提供的上下文为准；用户没有写出的台词、决定和内心不能被我补出来。',
+                prefillPhase === 1
+                    ? '[行动规划]\n本轮只需确认几个会直接影响续写的难点：从长上下文找出关键事实、保持角色连续、分清谁知道什么，以及把格式要求放在正文之后处理。确认完就停，不提前写剧情。'
+                    : '[行动规划]\n收到后续上下文后，先找出最近一个有效事件，再用对白或行动让局面产生变化；如果下一步必须由 {{user}} 决定，就停在决定点。',
+                prefillPhase === 1
+                    ? '[最终检查]\n这次回复应当是对困难的实际判断，不是把规则再抄一遍；不生成虚构正文，保留后续续写需要的上下文。'
+                    : '[最终检查]\n确认后续正文有明确承接点，没有替用户行动，也没有把准备说明混进剧情；按<writing_style>完成检查后直接续写。'
+            ].filter(Boolean);
+            const baseContent = String(prefillBaseContent || '')
+                .replace(/<thinking>[\s\S]*?<\/thinking>\s*/gi, '')
+                .trimStart();
+            return prefillEnabled && useThinkingOpening
+                ? `<thinking>\n${prefillSections.join('\n\n')}\n</thinking>\n${baseContent}`
+                : baseContent;
+        }
 
         const openingInstruction = useThinkingOpening
             ? '在<thinking>标签中输出完整的本轮分析。只完成必要判断，不在其中试写或复述正文，并严格按以下顺序进行：'
