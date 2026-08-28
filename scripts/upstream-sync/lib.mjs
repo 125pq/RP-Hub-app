@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+// Files maintained locally (not synced from upstream). The EOL churn guards
+// skip these entirely: their line endings are ours to manage and never conflict
+// with an upstream merge, so whole-file EOL/whitespace churn here is not a
+// merge risk. Keep this list in sync with the upstream/local boundary.
+export const LOCAL_FILES = new Set(['README.md']);
+
 export function countOccurrences(source, needle) {
   if (!needle) return 0;
   return source.split(needle).length - 1;
