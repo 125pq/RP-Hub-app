@@ -2404,6 +2404,9 @@ const app = createApp({
             .sort((a, b) => (Number(b.template.order) || 0) - (Number(a.template.order) || 0) || a.index - b.index)
             .map(item => item.template));
         const activeUiTemplates = computed(() => currentUiTemplates.value.filter(t => t.enabled !== false));
+        const isUiTemplateAnalysisEnabled = () => settings.uiTemplateEnabled
+            && settings.uiTemplateMainModelAnalysis
+            && activeUiTemplates.value.length > 0;
 
         const handleUiTemplateClick = (event) => {
             const trigger = event.target?.closest?.('[data-slash]');
@@ -3269,8 +3272,7 @@ const app = createApp({
                     // 如果正则本身就在匹配代码块（如用户提供的 ```json ...```），则不应进行保护
                     // 增强保护：防止普通正则（通常带g）破坏 iframe 渲染内容（HTML文档、Script/Style块）
                     if (!/[<>]/.test(regexPattern) && !regexPattern.includes('```')) {
-                        // 匹配 完整的 HTML 文档, Script/Style 块, Markdown 代码块, 行内代码, HTML 标签, 或 <cot> 块
-                        // Updated to support <think> and erroneous <cot>...<cot> closing
+                        // 匹配完整的 HTML、脚本、代码块、标签以及 thinking/COT 块
                         result = cardUtils.transformUnprotectedText(
                             result,
                             part => part.replace(re, replacement)
@@ -3609,6 +3611,7 @@ const app = createApp({
                 recordApiUsage(result.usage, {
                     type: 'image_recognition',
                     model: settings.visionModel,
+                    isStream: false,
                     durationMs: Date.now() - requestStartedAt,
                     outputCharacters: description.length
                 });
@@ -3804,7 +3807,7 @@ const app = createApp({
                 const messageEl = chatContainer.value?.querySelector(`[data-chat-index="${index}"] .message-content-wrapper`);
                 const messageHeight = messageEl?.getBoundingClientRect?.().height || 0;
                 msg.isEditing_Message = true;
-                const cotMatch = msg.content.match(/<(think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
+                const cotMatch = msg.content.match(/<(thinking|think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
                 const uiTemplateUpdateMatch = findUiTemplateUpdateBlock(msg.content);
                 msg.originalCot = cotMatch ? cotMatch[0] : '';
                 msg.originalSys = parseCot(msg.content).sys;
@@ -4038,6 +4041,7 @@ const app = createApp({
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
                             model,
+                            isStream: false,
                             durationMs: Date.now() - requestStartedAt,
                             outputCharacters: content.length
                         });
@@ -4398,7 +4402,17 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
-        const usesThinkingCotTag = (model) => /(?:deepseek|glm)/i.test(String(model || ''));
+        const usesThinkingCotTag = (model) => /(?:deepseek|glm|kimi)/i.test(String(model || ''));
+        const getMessageThinkingText = (message, includeNativeReasoning = true) => {
+            const parts = includeNativeReasoning ? [String(message?.reasoning || '').trim()] : [];
+            const content = String(message?.content || '');
+            const thinkingPattern = /<(thinking|think|cot)>([\s\S]*?)(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/gi;
+            for (const match of content.matchAll(thinkingPattern)) parts.push(String(match[2] || '').trim());
+            return [...new Set(parts)].filter(Boolean).join('\n\n');
+        };
+        const wrapAnalysis = (tag, text) => text
+            ? `<${tag}>\n${text}\n</${tag}>\n`
+            : '';
         const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
                 message?.role === 'user'
@@ -4411,11 +4425,10 @@ const app = createApp({
                 autoImageGenEnabled: isAutoImageGenEnabled.value,
                 cotEnabled,
                 imageGenCount: settings.imageGenCount,
+                memoryEnabled: memorySettings.enabled,
                 useThinkingTag,
                 writingStylePrompt,
-                uiTemplateEnabled: settings.uiTemplateEnabled
-                    && settings.uiTemplateMainModelAnalysis
-                    && activeUiTemplates.value.length > 0
+                uiTemplateEnabled: isUiTemplateAnalysisEnabled()
             });
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
         };
@@ -4590,16 +4603,40 @@ const app = createApp({
                 chatHistory.value[0].role === 'assistant' &&
                 chatHistory.value[0].content === currentCharacter.value.first_mes;
 
+            const useThinkingTag = usesThinkingCotTag(requestModel);
+            const retainedThinkingTag = useThinkingTag ? 'thinking' : 'cot';
+            const openingText = String(currentCharacter.value.first_mes || '').trim();
+            const openingSourceMessage = openingText
+                ? chatHistory.value.find(source => source?.role === 'assistant'
+                    && parseCot(source.content || '').main.trim() === openingText)
+                : null;
+            const openingThinking = cotPresets.length > 0
+                ? wrapAnalysis(retainedThinkingTag, BUILTIN_PROMPTS.buildOpeningAnalysisContent({
+                    memoryEnabled: memorySettings.enabled,
+                    uiTemplateEnabled: isUiTemplateAnalysisEnabled(),
+                    characterName: currentCharacter.value.name
+                }))
+                : '';
+
             // 如果当前历史记录的第一条是“总结”消息，则认为开场白已被总结包含，不再强制补录开场白
             if (!hasFirstMesInHistory && currentCharacter.value.first_mes) {
                 messages.push({
                     role: 'assistant',
                     name: currentCharacter.value.name,
-                    content: currentCharacter.value.first_mes
+                    content: `${openingThinking}${currentCharacter.value.first_mes}`
                 });
             }
 
             // 记忆压缩：一次总结替换旧 AI 消息；二次总结把对应五轮合成一条。
+            const recentThinkingByMessage = new Map();
+            if (cotPresets.length > 0) {
+                for (let index = chatHistory.value.length - 1; index >= 0 && recentThinkingByMessage.size < 2; index--) {
+                    const source = chatHistory.value[index];
+                    if (source?.role !== 'assistant' || source === openingSourceMessage) continue;
+                    const thinking = getMessageThinkingText(source, useThinkingTag);
+                    if (thinking) recentThinkingByMessage.set(source, thinking);
+                }
+            }
             let chatHistoryForContext = postprocessedChatHistory.map((message, index) => ({
                 ...message,
                 _contextFloor: index + 1
@@ -4733,9 +4770,12 @@ const app = createApp({
                         ? sourceIndexes.map(sourceIndex => chatHistory.value[sourceIndex]).filter(source => source && source.role === m.role)
                         : [m];
                     const cleanSourceContent = (source) => {
-                        // Remove CoT content from history messages before sending to AI.
+                        // Remove internal thinking/COT from history before sending, then restore only the retained recent blocks.
                         const parsedData = parseCot(source.content || '');
                         let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateContextInjection(parsedData.main)));
+                        const recentThinking = source.role === 'assistant' ? recentThinkingByMessage.get(source) : '';
+                        if (recentThinking) content = `${wrapAnalysis(retainedThinkingTag, recentThinking)}${content}`;
+                        if (source === openingSourceMessage && openingThinking) content = `${openingThinking}${content}`;
                         if (source.role === 'user') content = appendMessageImageDescriptions(source, content);
                         if (settings.uiTemplateEnabled
                             && settings.uiTemplateMainModelAnalysis
@@ -4896,13 +4936,37 @@ const app = createApp({
                 if (isContinuation) activeToolContinuationHasResponse.value = true;
             };
 
+            const nativeReasoningClosedMessages = new WeakSet();
+            const normalizeNativeReasoningBoundary = (message) => {
+                if (!message) return;
+                if (nativeReasoningClosedMessages.has(message)) return;
+                const reasoning = String(message.reasoning || '');
+                const closeMatch = reasoning.match(/<\/\s*(thinking|think|cot)\s*>/i);
+                if (!closeMatch) return;
+
+                const before = reasoning.slice(0, closeMatch.index)
+                    .replace(/<\s*(thinking|think|cot)\s*>/gi, '')
+                    .trim();
+                const after = reasoning.slice(closeMatch.index + closeMatch[0].length).trim();
+                message.reasoning = before;
+                if (after) {
+                    message.content = [String(message.content || '').trimEnd(), after]
+                        .filter(Boolean)
+                        .join('\n\n');
+                }
+                nativeReasoningClosedMessages.add(message);
+                isThinking.value = false;
+                collapseNativeReasoning(message);
+            };
+
             const appendAssistantReasoning = (message, text) => {
                 if (!message || !text) return;
-                if (continuationToolCall && continuingAssistantMessage && message.id === continuingAssistantMessage.id) {
-                    appendAssistantText(message, 'reasoning', text);
+                if (nativeReasoningClosedMessages.has(message)) {
+                    appendAssistantText(message, 'content', text);
                     return;
                 }
                 appendAssistantText(message, 'reasoning', text);
+                normalizeNativeReasoningBoundary(message);
             };
 
             const createAssistantMessage = (content = '', reasoning = '') => reactive({
@@ -4922,6 +4986,7 @@ const app = createApp({
                 if (assistantMessage) return assistantMessage;
                 if (continuingAssistantMessage) {
                     assistantMessage = prepareAssistantMessageForAppend(continuingAssistantMessage);
+                    normalizeNativeReasoningBoundary(assistantMessage);
                     if (reasoning) appendAssistantReasoning(assistantMessage, reasoning);
                     if (content) appendAssistantText(assistantMessage, 'content', content);
                     isReceiving.value = true;
@@ -4929,6 +4994,7 @@ const app = createApp({
                 }
 
                 assistantMessage = createAssistantMessage(content, reasoning);
+                normalizeNativeReasoningBoundary(assistantMessage);
                 promoteActiveToolCallsFromAssistant(assistantMessage);
                 chatHistory.value.push(assistantMessage);
                 isReceiving.value = true;
@@ -4952,10 +5018,12 @@ const app = createApp({
                         let seededContent = false;
                         let seededReasoning = false;
                         if (!assistantMessage) {
-                            if (reasoning) isThinking.value = true;
                             assistantMessage = ensureAssistantMessage(content, reasoning);
                             seededContent = !!content;
                             seededReasoning = !!reasoning;
+                            if (seededReasoning) {
+                                isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
+                            }
                             if (seededContent && !reasoning) {
                                 isThinking.value = false;
                                 collapseNativeReasoning(assistantMessage);
@@ -4964,7 +5032,7 @@ const app = createApp({
                         }
                         if (reasoning && !seededReasoning) {
                             appendAssistantReasoning(assistantMessage, reasoning);
-                            isThinking.value = true;
+                            isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
                         }
                         if (content && !seededContent) {
                             appendAssistantText(assistantMessage, 'content', content);
@@ -4980,10 +5048,14 @@ const app = createApp({
                     isThinking.value = !!(reasoning && !content);
                     if (content || reasoning) {
                         assistantMessage = ensureAssistantMessage(content, reasoning);
+                        const hasReasoning = !!String(assistantMessage.reasoning || '').trim();
+                        const hasContent = !!String(assistantMessage.content || '').trim();
+                        isThinking.value = hasReasoning && !hasContent;
+                        const hasReasoningAndContent = hasReasoning && hasContent;
                         if (!continuingAssistantMessage) {
-                            assistantMessage.isReasoningOpen = !(reasoning && content);
-                            assistantMessage.isReasoningAutoCollapsed = !!(reasoning && content);
-                        } else if (reasoning && content) {
+                            assistantMessage.isReasoningOpen = !hasReasoningAndContent;
+                            assistantMessage.isReasoningAutoCollapsed = hasReasoningAndContent;
+                        } else if (hasReasoningAndContent) {
                             collapseNativeReasoning(assistantMessage);
                         }
                     }
@@ -4997,6 +5069,7 @@ const app = createApp({
                 recordApiUsage(responseUsage, {
                     type: activeToolDepth > 0 ? 'tool_continuation' : 'chat',
                     model: requestModel,
+                    isStream: responseResult.isStream,
                     durationMs: duration,
                     outputCharacters
                 });
@@ -5330,6 +5403,7 @@ const app = createApp({
             recordApiUsage(extractApiUsageFromText(rawText), {
                 type: 'summary',
                 model,
+                isStream: false,
                 durationMs: Date.now() - requestStartedAt,
                 outputCharacters: summary.length
             });
@@ -5753,6 +5827,7 @@ const app = createApp({
             recordApiUsage(getApiUsagePayload(data), {
                 type: 'embedding',
                 model,
+                isStream: false,
                 durationMs: Date.now() - requestStartedAt,
                 outputCharacters: 0
             });
@@ -9179,6 +9254,9 @@ const app = createApp({
             // 1.7.2 Enforce Default Preset (人格内核)
             syncBuiltinPreset(BUILTIN_PRESETS.personalityCore);
 
+            // 1.7.3 Enforce Default Preset (去User中心化)
+            syncBuiltinPreset(BUILTIN_PRESETS.deUserCentric);
+
             // 1.7.5 Enforce Default Preset (文风（抗八股）)
             syncBuiltinPreset(BUILTIN_PRESETS.writingStyle);
 
@@ -9208,10 +9286,8 @@ const app = createApp({
             // 1.10 Enforce Default Preset (COT)
             const cotPresetName = 'COT';
             const syncCotPresetContent = () => {
-                const uiTemplateAnalysisEnabled = settings.uiTemplateEnabled
-                    && settings.uiTemplateMainModelAnalysis
-                    && activeUiTemplates.value.length > 0;
                 const useThinkingOpening = usesThinkingCotTag(settings.model);
+                const uiTemplateAnalysisEnabled = isUiTemplateAnalysisEnabled();
                 const cotPresetContent = buildCotPresetContent({
                     memoryEnabled: memorySettings.enabled,
                     uiTemplateAnalysisEnabled,

@@ -11,8 +11,8 @@
     let legacyDb = null;
     let initPromise = null;
 
-    const openAppDB = (name) => new Promise((resolve, reject) => {
-        const request = indexedDB.open(name, DB_VERSION);
+    const openAppDB = (name, version = DB_VERSION) => new Promise((resolve, reject) => {
+        const request = indexedDB.open(name, version);
         request.onerror = (event) => reject(`DB Error: ${event.target.error}`);
         request.onsuccess = (event) => resolve(event.target.result);
         request.onupgradeneeded = (event) => {
@@ -28,8 +28,12 @@
             mainDb = await openAppDB(DB_NAME);
             try {
                 const dbList = typeof indexedDB.databases === 'function' ? await indexedDB.databases() : null;
-                const shouldOpenLegacy = !dbList || dbList.some(item => item?.name === LEGACY_DB_NAME);
-                if (shouldOpenLegacy) legacyDb = await openAppDB(LEGACY_DB_NAME);
+                const legacyInfo = dbList?.find(item => item?.name === LEGACY_DB_NAME);
+                const shouldOpenLegacy = !dbList || !!legacyInfo;
+                if (shouldOpenLegacy) {
+                    const legacyVersion = Math.max(DB_VERSION, Number(legacyInfo?.version) || DB_VERSION);
+                    legacyDb = await openAppDB(LEGACY_DB_NAME, legacyVersion);
+                }
             } catch (error) {
                 console.warn('Legacy DB check failed:', error);
             }

@@ -20,10 +20,8 @@ const parseCot = (text) => {
     if (!text) return { cot: '', main: '', sys: '', isFinished: false };
     if (parseCotCache.has(text)) return parseCotCache.get(text);
 
-    // 匹配 <think> 或 <cot> 标签，支持未闭合的情况
-    // 优化正则：允许闭合标签中存在空格，防止因闭合标签格式不规范（如 </think >）导致正文被吞
-    // 同时支持闭合标签缺失斜杠的情况（如 <cot>...<cot>），这是某些模型常见的错误输出
-    const cotPattern = /<(think|cot)>([\s\S]*?)(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/gi;
+    // 匹配 thinking/think/cot 标签，兼容未闭合、带空格闭合和缺少斜杠的错误闭合
+    const cotPattern = /<(thinking|think|cot)>([\s\S]*?)(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/gi;
     let cotContent = '';
     let mainContent = text;
     let isFinished = false;
@@ -283,8 +281,8 @@ window.RPHubUtils = {
         return { pattern: normalizedPattern, flags: normalizedFlags };
     };
 
-    const protectedContentPattern = /(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<!DOCTYPE html>[\s\S]*$|<html\b[^>]*>[\s\S]*$|<script\b[^>]*>[\s\S]*$|<style\b[^>]*>[\s\S]*$|<(?:cot|think)>[\s\S]*?(?:<\/(?:cot|think)>|<(?:cot|think)>|$)|```[\s\S]*?```|```[\s\S]*$|`[^`]+`|<\/?(?!ui_template_updates\b)[a-zA-Z][\w:-]*[^>]*>)/gi;
-    const exactProtectedContentPattern = /^(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<!DOCTYPE html>[\s\S]*$|<html\b[^>]*>[\s\S]*$|<script\b[^>]*>[\s\S]*$|<style\b[^>]*>[\s\S]*$|<(?:cot|think)>[\s\S]*?(?:<\/(?:cot|think)>|<(?:cot|think)>|$)|```[\s\S]*?```|```[\s\S]*$|`[^`]+`|<\/?(?!ui_template_updates\b)[a-zA-Z][\w:-]*[^>]*>)$/i;
+    const protectedContentPattern = /(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<!DOCTYPE html>[\s\S]*$|<html\b[^>]*>[\s\S]*$|<script\b[^>]*>[\s\S]*$|<style\b[^>]*>[\s\S]*$|<(?:thinking|cot|think)>[\s\S]*?(?:<\/(?:thinking|cot|think)>|<(?:thinking|cot|think)>|$)|```[\s\S]*?```|```[\s\S]*$|`[^`]+`|<\/?(?!ui_template_updates\b)[a-zA-Z][\w:-]*[^>]*>)/gi;
+    const exactProtectedContentPattern = /^(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<!DOCTYPE html>[\s\S]*$|<html\b[^>]*>[\s\S]*$|<script\b[^>]*>[\s\S]*$|<style\b[^>]*>[\s\S]*$|<(?:thinking|cot|think)>[\s\S]*?(?:<\/(?:thinking|cot|think)>|<(?:thinking|cot|think)>|$)|```[\s\S]*?```|```[\s\S]*$|`[^`]+`|<\/?(?!ui_template_updates\b)[a-zA-Z][\w:-]*[^>]*>)$/i;
     const transformUnprotectedText = (text, transform) => String(text || '')
         .split(protectedContentPattern)
         .map(part => !part || exactProtectedContentPattern.test(part) ? part : transform(part))
