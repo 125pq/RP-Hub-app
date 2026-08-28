@@ -13,6 +13,7 @@
     "test:performance": "node scripts/tests/test-performance-benchmark.mjs && node scripts/tests/test-offscreen-iframe-lifecycle.mjs && node scripts/tests/test-streaming-flush.mjs",
     "sync:upstream": "node scripts/upstream-sync/sync-upstream.mjs",
     "sync:upstream:dry-run": "node scripts/upstream-sync/sync-upstream.mjs --dry-run",
+    "preview:merge": "node scripts/upstream-sync/preview-merge.mjs",
     "android:sync": "npm run build:web && npx cap sync android",
     "android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android/build-android-debug.ps1",
     "android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android/build-android-release.ps1",

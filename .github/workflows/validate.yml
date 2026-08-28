@@ -42,6 +42,10 @@ jobs:
       - name: Upstream sync tests
         run: npm run test:upstream-sync
 
+      - name: Preview upstream merge (read-only, non-blocking)
+        continue-on-error: true
+        run: npm run preview:merge
+
       - name: Build web
         run: npm run build:web
 
