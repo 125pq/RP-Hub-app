@@ -9,9 +9,6 @@
   改动必须走 `scripts/upstream-sync/patches/` 里的补丁钩子。
 - **绝不**对整个文件做换行符归一化或空白重排。这会把 2 行逻辑改动放大成上千行 diff，
   并让上游合并变成冲突。`scripts/upstream-sync/tests/eol-churn-guard.mjs` 会拦这类改动。
-- 上游文件与本地文件的边界见 `docs/UPSTREAM-VS-LOCAL.md`。
-- 待办改进项见 `docs/IMPROVEMENT-BACKLOG.md`。
-
 ## 2. 常用命令
 
 ```bash
