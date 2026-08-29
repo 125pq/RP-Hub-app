@@ -23,12 +23,14 @@
 - 本地合并父提交为 `60035299239d168b5c8d2bbff9c22562145e7c8d`，共同上游基线为 `0562644622384ae645b2be959aeec0968a11d436`，新的上游目标为 `b409ca6a62857849a3003e072dc2979e00695728`（上游 `1.8.9`）。
 - Git 内容冲突为 `assets/js/core-utils.js` 和 `assets/js/data-services.js`；补丁接线前 resolver 的首个有效错误为 `Path is not in the auto-resolver manifest: assets/js/core-utils.js`。
 - 首轮修复后的工作流 `33233300924` 已通过真实双冲突 resolver，但在发布前门禁停于 `data-services.js contract: missing ["createDetailedJsonSyntaxError"]`；构建、提交、Release 和镜像步骤均未执行。
+- 修正 parser 契约后的干净后合并演练继续发现 EOL 基线仍固定要求 `core-utils.js: 80`、`data-services.js: 512` 行历史噪声，而 1.8.9 resolver 的实际结果均为 `0`；该演练未提交或发布任何内容。
 
 ### 根因
 
 - 本地核心工具的 parse-COT 性能包装、缓存清理导出和 Android 文件保存桥接，以及数据服务的 iframe 性能埋点、离线 jQuery 和流式 `processMainContent`，原本由重应用钩子直接写入，但没有作为纯 overlay 注册到 resolver manifest。
 - 因而 resolver 无法证明 `transform(stage1) === stage2`，此前若采用整文件取一侧会丢失本地功能或上游 `thinking`/变量解析更新；这类冲突必须继续 fail closed。
 - 上游 `1.8.9` 有意用 `parseUiTemplateUpdates` 的简化 `路径=值` 格式替换旧 JSON 解析器；旧的 `merge-regressions.mjs` 仍硬性要求已被上游移除的 `createDetailedJsonSyntaxError`，导致 resolver 正确完成后出现测试误报。
+- EOL 基线表原本不区分待合并上游 SHA；两个新 overlay 在 1.8.9 后消除了历史换行噪声，固定旧 allowance 因此把改善误报成回归。
 
 ### 处理
 
@@ -36,6 +38,7 @@
 - 两个变换均要求关键插入 marker 恰好一次、旧实现 marker 不再存在，并保留 resolver 原有的三阶段、100644、UTF-8/二进制和 EOL proof；未直接手改上游文件。
 - 使用真实 `0562644 → 6003529 → b409ca6` blob 建立两个冲突 stage，确认 resolver 输出为变换后的上游内容，并确认再次重应用为幂等；同时保留上游 `thinking` 支持和 `parseUiTemplateUpdates`。
 - 将数据服务回归契约改为兼容同步前的完整旧 JSON 解析器和同步后的完整简化解析器；真实 1.8.9 resolver fixture 额外断言不会把已移除的旧 helper 重新注入上游结果。
+- EOL guard 通过 ancestry 区分基线：1.8.9 之前继续锁定既有 `80/512` allowance，`b409ca6` 及其后继基线对这两个文件严格要求 `0`，不放宽其他文件。
 
 ### 验证
 

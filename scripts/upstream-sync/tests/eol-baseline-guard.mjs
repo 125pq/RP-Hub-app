@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url';
 // conflict for no reason.
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const UPSTREAM_189_SHA = 'b409ca6a62857849a3003e072dc2979e00695728';
+const ZERO_NOISE_FROM_189 = new Set([
+  'assets/js/core-utils.js',
+  'assets/js/data-services.js'
+]);
 
 // Existing P0-1 follow-up noise, measured from the nearest available upstream
 // release baseline. These files still need cleanup; this guard pins today's
@@ -40,6 +45,19 @@ function probeGit(args) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore']
   }).trim();
+}
+
+function isAncestor(ancestor, descendant) {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+      cwd: projectRoot,
+      stdio: 'ignore'
+    });
+    return true;
+  } catch (error) {
+    if (error?.status === 1) return false;
+    throw error;
+  }
 }
 
 function resolveBaseline() {
@@ -106,12 +124,19 @@ if (!baseline) {
 
 const plain = numstatByFile([baseline.oid]);
 const ignored = numstatByFile(['--ignore-space-at-eol', baseline.oid]);
+const baselineIncludes189 = isAncestor(UPSTREAM_189_SHA, baseline.oid);
 
 const violations = [];
 for (const [file, p] of plain) {
   const i = ignored.get(file) ?? { added: 0, deleted: 0 };
   const noise = p.added + p.deleted - i.added - i.deleted;
-  const allowed = EOL_NOISE_ALLOWANCE[file] ?? 0;
+  // The 1.8.9 overlay resolver rebuilds these two conflicted files while
+  // preserving the upstream blob's EOL policy, eliminating their legacy
+  // allowances. Keep the older allowance only while testing the pre-1.8.9
+  // branch so the same gate is valid on both sides of the sync commit.
+  const allowed = baselineIncludes189 && ZERO_NOISE_FROM_189.has(file)
+    ? 0
+    : (EOL_NOISE_ALLOWANCE[file] ?? 0);
   if (noise !== allowed) {
     violations.push(`${file}: ${noise} EOL/whitespace noise lines, expected ${allowed}`);
   }
