@@ -3,13 +3,14 @@
 // Exit code semantics:
 //   0  — no conflicts: upstream main merges cleanly into local HEAD.
 //   2  — conflicts detected: at least one file conflicts between the two sides.
-//   1  — operational error: git fetch / merge-base / merge-tree failed, or the
+//   1  — operational error: git fetch / rev-parse / merge-tree failed, or the
 //        upstream ref could not be resolved. (Distinct from "conflicts exist".)
 //
 // This script NEVER merges, commits, or pushes. It only:
 //   1. fetches the upstream default branch (refs/heads/main) into a local ref,
-//   2. computes the merge base between local HEAD and upstream main,
-//   3. runs `git merge-tree --write-tree` to dry-run the merge in memory,
+//   2. resolves local HEAD and upstream main,
+//   3. runs `git merge-tree --write-tree` with those two commits to dry-run the
+//      merge in memory,
 //   4. prints the conflicted file list, and — when a conflict hits an upstream
 //      file (index.html, assets/**, character/**, novel/**) — prints a patch
 //      skeleton suggestion modeled on scripts/upstream-sync/patches/*.mjs.
@@ -18,9 +19,10 @@
 
 import { spawn } from 'node:child_process';
 import process from 'node:process';
-import { projectRoot } from './lib.mjs';
+import { projectRoot as defaultProjectRoot } from './lib.mjs';
 
-const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
+const projectRoot = process.env.RPHUB_PREVIEW_MERGE_PROJECT_ROOT || defaultProjectRoot;
+const UPSTREAM_URL = process.env.RPHUB_PREVIEW_MERGE_UPSTREAM_URL || 'https://github.com/STA1N156/RP-Hub.git';
 const UPSTREAM_MAIN_REF = 'refs/remotes/upstream/main';
 const UPSTREAM_FETCH_SPEC = 'refs/heads/main:refs/remotes/upstream/main';
 
@@ -138,12 +140,8 @@ async function main() {
   console.log(`LOCAL_HEAD=${localHead}`);
   console.log(`UPSTREAM_MAIN=${upstreamHead}`);
 
-  // 2. Compute the merge base between local HEAD and upstream main.
-  const mergeBase = await gitText(['merge-base', 'HEAD', UPSTREAM_MAIN_REF]);
-  console.log(`MERGE_BASE=${mergeBase}`);
-
-  // 3. Dry-run the merge in memory (no working-tree / index changes).
-  const mergeResult = await git(['merge-tree', '--write-tree', mergeBase, UPSTREAM_MAIN_REF], { capture: true, allowFailure: true });
+  // 2. Dry-run the actual merge in memory (no working-tree / index changes).
+  const mergeResult = await git(['merge-tree', '--write-tree', localHead, upstreamHead], { capture: true, allowFailure: true });
   if (mergeResult.code !== 0 && mergeResult.code !== 1) {
     console.error(`git merge-tree failed: ${mergeResult.stderr}`);
     process.exit(1);
@@ -151,10 +149,15 @@ async function main() {
 
   const conflictedFiles = parseConflictedFiles(mergeResult.stdout);
 
-  if (conflictedFiles.length === 0) {
+  if (mergeResult.code === 0 && conflictedFiles.length === 0) {
     console.log('RESULT=clean');
     console.log('No conflicts: upstream main merges cleanly into local HEAD.');
     process.exit(0);
+  }
+
+  if (mergeResult.code !== 1 || conflictedFiles.length === 0) {
+    console.error('git merge-tree returned an inconsistent result; refusing to report a clean merge.');
+    process.exit(1);
   }
 
   console.log(`RESULT=conflicts (${conflictedFiles.length} file(s))`);

@@ -4,7 +4,7 @@
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg?logo=vue.js)](https://vuejs.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![DaisyUI](https://img.shields.io/badge/DaisyUI-5A0EF8?logo=daisyui&logoColor=white)](https://daisyui.com/)
-[![Android Release](https://img.shields.io/badge/Android-1.8.4.3-3DDC84?logo=android&logoColor=white)](https://github.com/125pq/RP-Hub-app/releases/tag/v1.8.4.3-android)
+[![Android Release](https://img.shields.io/badge/Android-1.8.9-3DDC84?logo=android&logoColor=white)](https://github.com/125pq/RP-Hub-app/releases/tag/v1.8.9-android)
 
 > **一款纯前端运行的本地角色扮演（Roleplay）对话和角色卡生成工具。**
 
@@ -31,12 +31,12 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 
 ### Android 正式版
 
-当前正式版本：**RP-Hub Android 1.8.4.3**
+当前正式版本：**RP-Hub Android 1.8.9**
 
 - Package ID：`io.github.pq125.rphub`
-- Version code：`1080403`
-- 下载：[RP-Hub-1.8.4.3-release.apk](https://github.com/125pq/RP-Hub-app/releases/download/v1.8.4.3-android/RP-Hub-1.8.4.3-release.apk)
-- SHA-256：`0241f73f6253ae015c07b0b1a08ce661e3fc44fe5572031a881c09aaf8b76497`
+- Version code：`1080900`
+- 下载：[RP-Hub-1.8.9-release.apk](https://github.com/125pq/RP-Hub-app/releases/download/v1.8.9-android/RP-Hub-1.8.9-release.apk)
+- SHA-256：`77555cdd6adc63a9ee17c61d4eb0d2a9799b0a2905196b21e932ccf72c1da773`
 
 APK 使用项目的长期 release key 签名。安装前可使用 Android SDK `apksigner verify` 校验签名，并核对上方 SHA-256。
 

@@ -142,8 +142,50 @@ function splitLinesKeepEol(source) {
 export function transformReadmeAnchors(source, { versionName, versionCode, sha256 = null, downloadUrl = null } = {}) {
   const entries = splitLinesKeepEol(source);
   const missing = [];
+  const drift = [];
+  const enabledAnchors = [
+    ['badge', true],
+    ['version line', true],
+    ['versionCode', true],
+    ['download URL', downloadUrl !== null],
+    ['SHA-256', sha256 !== null]
+  ];
+  const anchorIndexes = new Map();
+  for (const [key, enabled] of enabledAnchors) {
+    if (!enabled) continue;
+    const indexes = entries
+      .map((entry, index) => anchorLinePredicates[key](entry.content) ? index : -1)
+      .filter((index) => index !== -1);
+    if (indexes.length === 0) {
+      missing.push(key);
+    } else if (indexes.length !== 1) {
+      drift.push(`${anchorLineLabels[key]} (expected 1, found ${indexes.length})`);
+    } else {
+      anchorIndexes.set(key, indexes[0]);
+    }
+  }
+
+  let badgeIndex = anchorIndexes.get('badge') ?? -1;
+  if (badgeIndex !== -1) {
+    const badgeLine = entries[badgeIndex].content;
+    const imageAnchorCount = badgeLine.match(/img\.shields\.io\/badge\/Android-[\d.]+-/g)?.length ?? 0;
+    const hrefAnchorCount = badgeLine.match(/releases\/tag\/v[\d.]+-android\)/g)?.length ?? 0;
+    if (imageAnchorCount !== 1) {
+      drift.push(`badge image version anchor (expected 1, found ${imageAnchorCount})`);
+    }
+    if (hrefAnchorCount !== 1) {
+      drift.push(`badge release href anchor (expected 1, found ${hrefAnchorCount})`);
+    }
+    if (imageAnchorCount !== 1 || hrefAnchorCount !== 1) badgeIndex = -1;
+  }
   const updates = [
-    { key: 'badge', rewrite: (line) => line.replace(/(img\.shields\.io\/badge\/Android-)[\d.]+(-)/, `$1${versionName}$2`) },
+    {
+      key: 'badge',
+      index: badgeIndex,
+      rewrite: (line) => line
+        .replace(/(img\.shields\.io\/badge\/Android-)[\d.]+(-)/, `$1${versionName}$2`)
+        .replace(/(releases\/tag\/v)[\d.]+(-android\))/, `$1${versionName}$2`)
+    },
     { key: 'version line', rewrite: () => `当前正式版本：**RP-Hub Android ${versionName}**` },
     { key: 'versionCode', rewrite: () => `- Version code：\`${versionCode}\`` },
     { key: 'download URL', rewrite: downloadUrl === null ? null : () => `- 下载：[${downloadUrl.split('/').pop()}](${downloadUrl})` },
@@ -151,22 +193,27 @@ export function transformReadmeAnchors(source, { versionName, versionCode, sha25
   ];
   for (const update of updates) {
     if (update.rewrite === null) continue;
-    const index = anchorLineIndexes[update.key](entries);
-    if (index === -1) {
-      missing.push(update.key);
-      continue;
-    }
+    const index = update.index ?? anchorIndexes.get(update.key);
+    if (index === undefined || index === -1) continue;
     entries[index].content = update.rewrite(entries[index].content);
   }
-  return { text: entries.map((entry) => entry.content + entry.eol).join(''), missing };
+  return { text: entries.map((entry) => entry.content + entry.eol).join(''), missing, drift };
 }
 
-const anchorLineIndexes = {
-  badge: (entries) => entries.findIndex((entry) => entry.content.includes('img.shields.io/badge/Android-')),
-  'version line': (entries) => entries.findIndex((entry) => entry.content.startsWith('当前正式版本：**RP-Hub Android ')),
-  versionCode: (entries) => entries.findIndex((entry) => entry.content.startsWith('- Version code：`')),
-  'download URL': (entries) => entries.findIndex((entry) => entry.content.startsWith('- 下载：[')),
-  'SHA-256': (entries) => entries.findIndex((entry) => entry.content.startsWith('- SHA-256：`'))
+const anchorLinePredicates = {
+  badge: (line) => line.includes('[![Android Release]('),
+  'version line': (line) => line.startsWith('当前正式版本：**RP-Hub Android '),
+  versionCode: (line) => line.startsWith('- Version code：`'),
+  'download URL': (line) => line.startsWith('- 下载：['),
+  'SHA-256': (line) => line.startsWith('- SHA-256：`')
+};
+
+const anchorLineLabels = {
+  badge: 'badge line',
+  'version line': 'version line',
+  versionCode: 'versionCode line',
+  'download URL': 'download URL line',
+  'SHA-256': 'SHA-256 line'
 };
 
 export function readmeAnchorDiff(before, after) {
@@ -199,13 +246,19 @@ export function updateReadmeAnchors({ versionName, versionCode, sha256 = null, d
     if (result.missing.length > 0) {
       console.log(`README anchors not found (skipped): ${result.missing.join(', ')}`);
     }
-    return { changed: diff.length > 0, missing: result.missing };
+    if (result.drift.length > 0) {
+      console.log(`README anchors drifted (skipped): ${result.drift.join(', ')}`);
+    }
+    return { changed: diff.length > 0, missing: result.missing, drift: result.drift };
   }
-  if (result.missing.length > 0) {
-    throw new Error(`README anchor lines not found: ${result.missing.join(', ')}`);
+  if (result.missing.length > 0 || result.drift.length > 0) {
+    const problems = [];
+    if (result.missing.length > 0) problems.push(`missing: ${result.missing.join(', ')}`);
+    if (result.drift.length > 0) problems.push(`drift: ${result.drift.join(', ')}`);
+    throw new Error(`README anchor validation failed (${problems.join('; ')})`);
   }
   if (diff.length > 0) writeFileSync(readmePath, result.text, 'utf8');
-  return { changed: diff.length > 0, missing: [] };
+  return { changed: diff.length > 0, missing: [], drift: [] };
 }
 
 function publishOutputs(metadata) {

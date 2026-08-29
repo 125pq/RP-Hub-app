@@ -26,6 +26,14 @@ assert.match(workflow, /actions\/setup-java@v4[\s\S]*if: steps\.upstream_sync\.o
 assert.match(workflow, /Install dependencies[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
 assert.match(workflow, /Sync Capacitor and build Android release[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
 assert.match(workflow, /prepare-android-release\.mjs .*steps\.upstream_sync\.outputs\.release_tag.*steps\.upstream_sync\.outputs\.revision/);
+const verifyApkIndex = workflow.indexOf('name: Verify and package signed APK');
+const finalizeMetadataIndex = workflow.indexOf('name: Finalize Android release metadata');
+const finalDiffIndex = workflow.indexOf('name: Check final diff');
+assert.ok(verifyApkIndex !== -1 && verifyApkIndex < finalizeMetadataIndex, 'README metadata is finalized after APK verification');
+assert.ok(finalizeMetadataIndex < finalDiffIndex, 'README metadata is finalized before the final diff check');
+const finalizeMetadataStep = workflow.slice(finalizeMetadataIndex, workflow.indexOf('\n      - name:', finalizeMetadataIndex + 1));
+assert.match(finalizeMetadataStep, /if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
+assert.match(finalizeMetadataStep, /prepare-android-release\.mjs .*steps\.upstream_sync\.outputs\.release_tag.*steps\.upstream_sync\.outputs\.revision.*--apk-sha256="\$\{\{ steps\.apk\.outputs\.sha256 \}\}"/);
 assert.match(workflow, /SYNC_MODE: \$\{\{ steps\.upstream_sync\.outputs\.sync_mode \}\}/);
 assert.match(workflow, /if \[ "\$SYNC_MODE" != "recover" \][\s\S]*refusing to reuse it[\s\S]*exit 1/);
 assert.match(workflow, /if \[ "\$SYNC_MODE" = "recover" \][\s\S]*skipping duplicate recovery publication[\s\S]*exit 0/);

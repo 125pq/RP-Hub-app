@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { androidReleaseMetadata, deriveRevision, readmeAnchorDiff, selectRevision, transformPackageJson, transformPackageLock, transformBuildGradle, transformBuildScript, transformReadmeAnchors } from '../prepare-android-release.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { androidReleaseMetadata, deriveRevision, readmeAnchorDiff, selectRevision, transformPackageJson, transformPackageLock, transformBuildGradle, transformBuildScript, transformReadmeAnchors, updateReadmeAnchors } from '../prepare-android-release.mjs';
 
 assert.deepEqual(androidReleaseMetadata('1.8.3'), {
   versionName: '1.8.3',
@@ -113,10 +116,11 @@ const readmeUpdated = transformReadmeAnchors(readmeFixtureLf, {
   downloadUrl: 'https://github.com/125pq/RP-Hub-app/releases/download/v1.8.4.4-android/RP-Hub-1.8.4.4-release.apk'
 });
 assert.deepEqual(readmeUpdated.missing, []);
+assert.deepEqual(readmeUpdated.drift, []);
 const readmeUpdatedLines = readmeUpdated.text.split('\n');
 assert.equal(readmeUpdatedLines[0], '# Roleplay Hub APP', 'surrounding lines must stay untouched');
 assert.equal(readmeUpdatedLines[1], '', 'blank line must stay untouched');
-assert.equal(readmeUpdatedLines[2], '[![Android Release](https://img.shields.io/badge/Android-1.8.4.4-3DDC84?logo=android&logoColor=white)](https://github.com/125pq/RP-Hub-app/releases/tag/v1.8.4.3-android)', 'badge version updates in place');
+assert.equal(readmeUpdatedLines[2], '[![Android Release](https://img.shields.io/badge/Android-1.8.4.4-3DDC84?logo=android&logoColor=white)](https://github.com/125pq/RP-Hub-app/releases/tag/v1.8.4.4-android)', 'badge image and release link update together');
 assert.equal(readmeUpdatedLines[3], '');
 assert.equal(readmeUpdatedLines[4], '当前正式版本：**RP-Hub Android 1.8.4.4**', 'version line replaced');
 assert.equal(readmeUpdatedLines[5], '');
@@ -167,10 +171,95 @@ const readmeIdle = transformReadmeAnchors(readmeFixtureLf, {
 });
 assert.equal(readmeAnchorDiff(readmeFixtureLf, readmeIdle.text).length, 0, 'identical inputs produce no diff');
 assert.deepEqual(readmeIdle.missing, []);
+assert.deepEqual(readmeIdle.drift, []);
 
 // Missing anchor lines are reported instead of throwing inside the pure transform.
 const readmeMissing = transformReadmeAnchors('# no anchors\n\nplain text\n', { versionName: '1.9.0', versionCode: '1090000' });
 assert.deepEqual(readmeMissing.missing, ['badge', 'version line', 'versionCode'], 'optional sha/download stay silent, required anchors are reported');
+assert.deepEqual(readmeMissing.drift, []);
 assert.equal(readmeMissing.text, '# no anchors\n\nplain text\n', 'text unchanged when anchors are missing');
+
+const duplicateBadge = transformReadmeAnchors(`${readmeFixtureLf}${readmeFixtureLf.split('\n')[2]}\n`, {
+  versionName: '1.9.0',
+  versionCode: '1090000'
+});
+assert.deepEqual(duplicateBadge.missing, []);
+assert.deepEqual(duplicateBadge.drift, ['badge line (expected 1, found 2)'], 'duplicate badge lines are reported as drift');
+
+const driftedBadgeImageFixture = readmeFixtureLf.replace('img.shields.io/badge/Android-1.8.4.3-', 'img.shields.io/badge/Android-current-');
+const driftedBadgeImage = transformReadmeAnchors(driftedBadgeImageFixture, { versionName: '1.9.0', versionCode: '1090000' });
+assert.deepEqual(driftedBadgeImage.missing, []);
+assert.deepEqual(driftedBadgeImage.drift, ['badge image version anchor (expected 1, found 0)'], 'image-version anchor drift is reported');
+assert.equal(driftedBadgeImage.text.split('\n')[2], driftedBadgeImageFixture.split('\n')[2], 'drifted badge line is not partially rewritten');
+
+const driftedBadgeHrefFixture = readmeFixtureLf.replace('releases/tag/v1.8.4.3-android)', 'releases/latest)');
+const driftedBadgeHref = transformReadmeAnchors(driftedBadgeHrefFixture, { versionName: '1.9.0', versionCode: '1090000' });
+assert.deepEqual(driftedBadgeHref.missing, []);
+assert.deepEqual(driftedBadgeHref.drift, ['badge release href anchor (expected 1, found 0)'], 'release-href anchor drift is reported');
+assert.equal(driftedBadgeHref.text.split('\n')[2], driftedBadgeHrefFixture.split('\n')[2], 'drifted badge href prevents a partial rewrite');
+
+const duplicateImageAnchorFixture = readmeFixtureLf.replace('?logo=android', 'img.shields.io/badge/Android-1.8.4.3-?logo=android');
+const duplicateImageAnchor = transformReadmeAnchors(duplicateImageAnchorFixture, { versionName: '1.9.0', versionCode: '1090000' });
+assert.deepEqual(duplicateImageAnchor.drift, ['badge image version anchor (expected 1, found 2)'], 'duplicate image-version sub-anchors are rejected');
+
+const duplicateHrefAnchorFixture = readmeFixtureLf.replace('-android)', '-android)releases/tag/v1.8.4.3-android)');
+const duplicateHrefAnchor = transformReadmeAnchors(duplicateHrefAnchorFixture, { versionName: '1.9.0', versionCode: '1090000' });
+assert.deepEqual(duplicateHrefAnchor.drift, ['badge release href anchor (expected 1, found 2)'], 'duplicate release-href sub-anchors are rejected');
+
+const tempDir = mkdtempSync(path.join(os.tmpdir(), 'rphub-readme-anchor-'));
+const tempReadmePath = path.join(tempDir, 'README.md');
+try {
+  writeFileSync(tempReadmePath, driftedBadgeHrefFixture, 'utf8');
+  const originalLog = console.log;
+  console.log = () => {};
+  let dryRunResult;
+  try {
+    dryRunResult = updateReadmeAnchors({ versionName: '1.9.0', versionCode: '1090000', dryRun: true, readmePath: tempReadmePath });
+  } finally {
+    console.log = originalLog;
+  }
+  assert.deepEqual(dryRunResult.drift, ['badge release href anchor (expected 1, found 0)'], 'dry-run reports badge drift without failing');
+  const rejectedFixtures = [
+    ['missing anchors', '# no anchors\n', /README anchor validation failed \(missing:/],
+    ['duplicate badge lines', `${readmeFixtureLf}${readmeFixtureLf.split('\n')[2]}\n`, /drift: badge line \(expected 1, found 2\)/],
+    ['image-version drift', driftedBadgeImageFixture, /drift: badge image version anchor \(expected 1, found 0\)/],
+    ['release-href drift', driftedBadgeHrefFixture, /drift: badge release href anchor \(expected 1, found 0\)/]
+  ];
+  for (const [label, fixture, errorPattern] of rejectedFixtures) {
+    writeFileSync(tempReadmePath, fixture, 'utf8');
+    assert.throws(
+      () => updateReadmeAnchors({ versionName: '1.9.0', versionCode: '1090000', readmePath: tempReadmePath }),
+      errorPattern,
+      `non-dry-run fails closed on ${label}`
+    );
+    assert.equal(readFileSync(tempReadmePath, 'utf8'), fixture, `${label} failure does not write a partial README update`);
+  }
+
+  const readmeLines = readmeFixtureLf.split('\n');
+  const fullUpdateOptions = {
+    versionName: '1.9.0',
+    versionCode: '1090000',
+    sha256: 'c'.repeat(64),
+    downloadUrl: 'https://github.com/125pq/RP-Hub-app/releases/download/v1.9.0-android/RP-Hub-1.9.0-release.apk'
+  };
+  const duplicateNonBadgeAnchors = [
+    ['version line', 4, /drift: version line \(expected 1, found 2\)/],
+    ['versionCode', 7, /drift: versionCode line \(expected 1, found 2\)/],
+    ['download URL', 8, /drift: download URL line \(expected 1, found 2\)/],
+    ['SHA-256', 9, /drift: SHA-256 line \(expected 1, found 2\)/]
+  ];
+  for (const [label, lineIndex, errorPattern] of duplicateNonBadgeAnchors) {
+    const fixture = `${readmeFixtureLf}${readmeLines[lineIndex]}\n`;
+    writeFileSync(tempReadmePath, fixture, 'utf8');
+    assert.throws(
+      () => updateReadmeAnchors({ ...fullUpdateOptions, readmePath: tempReadmePath }),
+      errorPattern,
+      `non-dry-run fails closed on duplicate ${label}`
+    );
+    assert.equal(readFileSync(tempReadmePath, 'utf8'), fixture, `duplicate ${label} does not write a partial README update`);
+  }
+} finally {
+  rmSync(tempDir, { recursive: true, force: true });
+}
 
 console.log('README anchor rewriting: PASS');

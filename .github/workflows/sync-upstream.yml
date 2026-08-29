@@ -183,6 +183,10 @@ jobs:
           echo "sha256=$apk_sha256" >> "$GITHUB_OUTPUT"
           echo "APK_SHA256=$apk_sha256"
 
+      - name: Finalize Android release metadata
+        if: steps.upstream_sync.outputs.has_updates == 'true'
+        run: node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ steps.upstream_sync.outputs.revision }}" --apk-sha256="${{ steps.apk.outputs.sha256 }}"
+
       - name: Prepare mirrored release notes
         id: release_notes
         if: steps.upstream_sync.outputs.has_updates == 'true'

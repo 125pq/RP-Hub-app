@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { LOCAL_FILES, projectRoot } from '../lib.mjs';
+import { projectRoot } from '../lib.mjs';
 
 // Guards the committed baseline against EOL/whitespace churn that was already
 // staged and therefore invisible to eol-churn-guard.mjs. It compares the
@@ -19,10 +19,10 @@ const ZERO_NOISE_FROM_189 = new Set([
 // Existing P0-1 follow-up noise, measured from the nearest available upstream
 // release baseline. These files still need cleanup; this guard pins today's
 // exact amount and fails as soon as any file moves away from it or any unlisted
-// file appears. Locally-maintained files (see LOCAL_FILES in lib.mjs) are
-// exempt: README.md was removed from this allowance once it was classified as
-// a local file.
+// file appears.
 const EOL_NOISE_ALLOWANCE = {
+  // P0-1 follow-up: README retains legacy EOL churn from upstream baseline.
+  'README.md': 58,
   // P0-1 follow-up: built-in content retains legacy EOL churn from upstream baseline.
   'assets/js/built-in-content.js': 482,
   // P0-1 follow-up: local data-services.js still carries legacy EOL churn.
@@ -126,8 +126,6 @@ const baselineIncludes189 = isAncestor(UPSTREAM_189_SHA, baseline.oid);
 
 const violations = [];
 for (const [file, p] of plain) {
-  // Locally-maintained files are exempt from the EOL baseline guard.
-  if (LOCAL_FILES.has(file)) continue;
   const i = ignored.get(file) ?? { added: 0, deleted: 0 };
   const noise = p.added + p.deleted - i.added - i.deleted;
   // The 1.8.9 overlay resolver rebuilds these two conflicted files while
