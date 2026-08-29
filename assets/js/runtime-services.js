@@ -642,6 +642,7 @@
                 type: meta.type || 'chat',
                 model: String(meta.model || ''),
                 apiUrl: String(getApiUrl?.() || ''),
+                isStream: meta.isStream === true,
                 durationMs: Number.isFinite(meta.durationMs) ? Math.max(0, meta.durationMs) : null,
                 outputCharacters: Number.isFinite(meta.outputCharacters) ? Math.max(0, meta.outputCharacters) : null,
                 ...normalizeApiUsage(usage)

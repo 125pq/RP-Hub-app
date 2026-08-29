@@ -110,7 +110,7 @@ const {
     inferInitialUiTemplateState,
     normalizeUiTemplate,
     normalizeUiTemplateUpdateList,
-    parseUiTemplateUpdateJson,
+    parseUiTemplateUpdates,
     renderUiTemplateHtml,
     sanitizeUiTemplateImportEntry,
     setUiTemplateValue,
@@ -622,6 +622,7 @@ const app = createApp({
             useCharacterBackground: true,
             immersiveMode: false,
             showLatestUsageBar: false,
+            styleFilterEnabled: true,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
             uiTemplateAnalysisDepth: 4,
@@ -961,7 +962,7 @@ const app = createApp({
             if (role === 'assistant') return 'bg-purple-100 text-purple-700 border-purple-200';
             return 'bg-red-100 text-red-700 border-red-200';
         };
-        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:指尖|指节|指关节)[^。！？!?\n]*(?:发白|泛白)|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
+        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:指尖|指节|指关节)[^。！？!?\n]*(?:发白|泛白)|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|就是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
         const standaloneWordCountSentencePattern = /(^|[。！？!?\n]+[”’」』】）)]*)[ \t]*(?:\*\*|__)?(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/gm;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
         const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
@@ -985,7 +986,7 @@ const app = createApp({
             .replace(/^(?:\*\*|__)/, '')
             .replace(/(?:\*\*|__)$/, '')
             .trim();
-        const styleFilterHighlightPattern = /(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字|指尖|指节|指关节|发白|泛白|不是|而是|又像(?:是)?|(?:更|倒|反倒)?像是|极其)/g;
+        const styleFilterHighlightPattern = /(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字|指尖|指节|指关节|发白|泛白|不是|而是|就是|又像(?:是)?|(?:更|倒|反倒)?像是|极其)/g;
         const getStyleFilterHitSegments = fragment => {
             const text = String(fragment || '');
             const segments = [];
@@ -1007,6 +1008,7 @@ const app = createApp({
         const FILTERED_CONTENT_CACHE_MAX = 2000;
         const filterBlockedStyleText = (text, { log = false, collect = null } = {}) => {
             const source = String(text || '');
+            if (!settings.styleFilterEnabled) return source;
             if (isStandaloneRenderedContent(source)) return source;
             if (!log) {
                 const cached = filteredContentCache.get(source);
@@ -2537,6 +2539,9 @@ const app = createApp({
             .sort((a, b) => (Number(b.template.order) || 0) - (Number(a.template.order) || 0) || a.index - b.index)
             .map(item => item.template));
         const activeUiTemplates = computed(() => currentUiTemplates.value.filter(t => t.enabled !== false));
+        const isUiTemplateAnalysisEnabled = () => settings.uiTemplateEnabled
+            && settings.uiTemplateMainModelAnalysis
+            && activeUiTemplates.value.length > 0;
 
         const handleUiTemplateClick = (event) => {
             const trigger = event.target?.closest?.('[data-slash]');
@@ -2606,14 +2611,14 @@ const app = createApp({
 
             let updates = [];
             try {
-                const updateJson = match[1] || match[2];
-                const parsed = parseUiTemplateUpdateJson(updateJson);
+                const updateContent = match[1];
+                const parsed = parseUiTemplateUpdates(updateContent);
                 updates = normalizeUiTemplateUpdateList(parsed, templates);
             } catch (e) {
                 const reason = e instanceof SyntaxError
-                    ? `JSON格式错误：${e.message}`
+                    ? `变量块格式错误：${e.message}`
                     : e.message;
-                return recordFailure(e?.jsonSource || match[1] || match[2], reason);
+                return recordFailure(e?.jsonSource || match[1], reason);
             }
 
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));
@@ -2622,9 +2627,7 @@ const app = createApp({
             updates.forEach(update => {
                 const targets = update?.id
                     ? activeUiTemplates.value.filter(template => template.id === update.id)
-                    : (update?.name
-                        ? activeUiTemplates.value.filter(template => template.name === update.name)
-                        : (activeUiTemplates.value.length === 1 ? [activeUiTemplates.value[0]] : []));
+                    : (activeUiTemplates.value.length === 1 ? [activeUiTemplates.value[0]] : []);
                 targets.forEach(template => {
                     const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn, source: 'main_model' });
                     if (result.changed) {
@@ -3404,8 +3407,7 @@ const app = createApp({
                     // 如果正则本身就在匹配代码块（如用户提供的 ```json ...```），则不应进行保护
                     // 增强保护：防止普通正则（通常带g）破坏 iframe 渲染内容（HTML文档、Script/Style块）
                     if (!/[<>]/.test(regexPattern) && !regexPattern.includes('```')) {
-                        // 匹配 完整的 HTML 文档, Script/Style 块, Markdown 代码块, 行内代码, HTML 标签, 或 <cot> 块
-                        // Updated to support <think> and erroneous <cot>...<cot> closing
+                        // 匹配完整的 HTML、脚本、代码块、标签以及 thinking/COT 块
                         result = cardUtils.transformUnprotectedText(
                             result,
                             part => part.replace(re, replacement)
@@ -3439,7 +3441,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
@@ -3756,6 +3758,7 @@ const app = createApp({
                 recordApiUsage(result.usage, {
                     type: 'image_recognition',
                     model: settings.visionModel,
+                    isStream: false,
                     durationMs: Date.now() - requestStartedAt,
                     outputCharacters: description.length
                 });
@@ -3951,7 +3954,7 @@ const app = createApp({
                 const messageEl = chatContainer.value?.querySelector(`[data-chat-index="${index}"] .message-content-wrapper`);
                 const messageHeight = messageEl?.getBoundingClientRect?.().height || 0;
                 msg.isEditing_Message = true;
-                const cotMatch = msg.content.match(/<(think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
+                const cotMatch = msg.content.match(/<(thinking|think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
                 const uiTemplateUpdateMatch = findUiTemplateUpdateBlock(msg.content);
                 msg.originalCot = cotMatch ? cotMatch[0] : '';
                 msg.originalSys = parseCot(msg.content).sys;
@@ -4125,22 +4128,12 @@ const app = createApp({
                 const pendingTemplateUpdates = [];
 
                 const normalizeUiTemplateUpdates = (parsed, template) => {
-                    if (Array.isArray(parsed?.updates)) {
-                        return normalizeUiTemplateUpdateList(parsed, [template]);
-                    }
-                    if (Array.isArray(parsed)) {
-                        return [{ variables: parsed, reason: '' }];
-                    }
-                    if (!parsed || typeof parsed !== 'object') return [];
-                    if (Object.prototype.hasOwnProperty.call(parsed, 'variables')) {
-                        return [{ variables: parsed.variables, reason: String(parsed.reason || '').trim() }];
-                    }
-                    return [{ variables: parsed, reason: '' }];
+                    return normalizeUiTemplateUpdateList(parsed, [template]);
                 };
 
                 const applyTemplateUpdates = (template, updates, model) => {
                     updates.forEach(update => {
-                        const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn, matchName: false });
+                        const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn });
                         if (result.changed) {
                             changedFieldCount += result.fieldCount;
                             hasChanges = true;
@@ -4190,11 +4183,12 @@ const app = createApp({
                         const data = await response.json();
                         if (!isCurrentRun()) return;
                         let content = data.choices?.[0]?.message?.content || '';
-                        const parsed = parseUiTemplateUpdateJson(content);
+                        const parsed = parseUiTemplateUpdates(content);
                         const updates = normalizeUiTemplateUpdates(parsed, template);
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
                             model,
+                            isStream: false,
                             durationMs: Date.now() - requestStartedAt,
                             outputCharacters: content.length
                         });
@@ -4556,7 +4550,17 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
-        const usesThinkingCotTag = (model) => /(?:deepseek|glm)/i.test(String(model || ''));
+        const usesThinkingCotTag = (model) => /(?:deepseek|glm|kimi)/i.test(String(model || ''));
+        const getMessageThinkingText = (message, includeNativeReasoning = true) => {
+            const parts = includeNativeReasoning ? [String(message?.reasoning || '').trim()] : [];
+            const content = String(message?.content || '');
+            const thinkingPattern = /<(thinking|think|cot)>([\s\S]*?)(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/gi;
+            for (const match of content.matchAll(thinkingPattern)) parts.push(String(match[2] || '').trim());
+            return [...new Set(parts)].filter(Boolean).join('\n\n');
+        };
+        const wrapAnalysis = (tag, text) => text
+            ? `<${tag}>\n${text}\n</${tag}>\n`
+            : '';
         const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
                 message?.role === 'user'
@@ -4569,11 +4573,10 @@ const app = createApp({
                 autoImageGenEnabled: isAutoImageGenEnabled.value,
                 cotEnabled,
                 imageGenCount: settings.imageGenCount,
+                memoryEnabled: memorySettings.enabled,
                 useThinkingTag,
                 writingStylePrompt,
-                uiTemplateEnabled: settings.uiTemplateEnabled
-                    && settings.uiTemplateMainModelAnalysis
-                    && activeUiTemplates.value.length > 0
+                uiTemplateEnabled: isUiTemplateAnalysisEnabled()
             });
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
         };
@@ -4748,16 +4751,40 @@ const app = createApp({
                 chatHistory.value[0].role === 'assistant' &&
                 chatHistory.value[0].content === currentCharacter.value.first_mes;
 
+            const useThinkingTag = usesThinkingCotTag(requestModel);
+            const retainedThinkingTag = useThinkingTag ? 'thinking' : 'cot';
+            const openingText = String(currentCharacter.value.first_mes || '').trim();
+            const openingSourceMessage = openingText
+                ? chatHistory.value.find(source => source?.role === 'assistant'
+                    && parseCot(source.content || '').main.trim() === openingText)
+                : null;
+            const openingThinking = cotPresets.length > 0
+                ? wrapAnalysis(retainedThinkingTag, BUILTIN_PROMPTS.buildOpeningAnalysisContent({
+                    memoryEnabled: memorySettings.enabled,
+                    uiTemplateEnabled: isUiTemplateAnalysisEnabled(),
+                    characterName: currentCharacter.value.name
+                }))
+                : '';
+
             // 如果当前历史记录的第一条是“总结”消息，则认为开场白已被总结包含，不再强制补录开场白
             if (!hasFirstMesInHistory && currentCharacter.value.first_mes) {
                 messages.push({
                     role: 'assistant',
                     name: currentCharacter.value.name,
-                    content: currentCharacter.value.first_mes
+                    content: `${openingThinking}${currentCharacter.value.first_mes}`
                 });
             }
 
             // 记忆压缩：一次总结替换旧 AI 消息；二次总结把对应五轮合成一条。
+            const recentThinkingByMessage = new Map();
+            if (cotPresets.length > 0) {
+                for (let index = chatHistory.value.length - 1; index >= 0 && recentThinkingByMessage.size < 2; index--) {
+                    const source = chatHistory.value[index];
+                    if (source?.role !== 'assistant' || source === openingSourceMessage) continue;
+                    const thinking = getMessageThinkingText(source, useThinkingTag);
+                    if (thinking) recentThinkingByMessage.set(source, thinking);
+                }
+            }
             let chatHistoryForContext = postprocessedChatHistory.map((message, index) => ({
                 ...message,
                 _contextFloor: index + 1
@@ -4891,9 +4918,12 @@ const app = createApp({
                         ? sourceIndexes.map(sourceIndex => chatHistory.value[sourceIndex]).filter(source => source && source.role === m.role)
                         : [m];
                     const cleanSourceContent = (source) => {
-                        // Remove CoT content from history messages before sending to AI.
+                        // Remove internal thinking/COT from history before sending, then restore only the retained recent blocks.
                         const parsedData = parseCot(source.content || '');
                         let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateContextInjection(parsedData.main)));
+                        const recentThinking = source.role === 'assistant' ? recentThinkingByMessage.get(source) : '';
+                        if (recentThinking) content = `${wrapAnalysis(retainedThinkingTag, recentThinking)}${content}`;
+                        if (source === openingSourceMessage && openingThinking) content = `${openingThinking}${content}`;
                         if (source.role === 'user') content = appendMessageImageDescriptions(source, content);
                         if (settings.uiTemplateEnabled
                             && settings.uiTemplateMainModelAnalysis
@@ -5061,13 +5091,37 @@ const app = createApp({
                 }
             };
 
+            const nativeReasoningClosedMessages = new WeakSet();
+            const normalizeNativeReasoningBoundary = (message) => {
+                if (!message) return;
+                if (nativeReasoningClosedMessages.has(message)) return;
+                const reasoning = String(message.reasoning || '');
+                const closeMatch = reasoning.match(/<\/\s*(thinking|think|cot)\s*>/i);
+                if (!closeMatch) return;
+
+                const before = reasoning.slice(0, closeMatch.index)
+                    .replace(/<\s*(thinking|think|cot)\s*>/gi, '')
+                    .trim();
+                const after = reasoning.slice(closeMatch.index + closeMatch[0].length).trim();
+                message.reasoning = before;
+                if (after) {
+                    message.content = [String(message.content || '').trimEnd(), after]
+                        .filter(Boolean)
+                        .join('\n\n');
+                }
+                nativeReasoningClosedMessages.add(message);
+                isThinking.value = false;
+                collapseNativeReasoning(message);
+            };
+
             const appendAssistantReasoning = (message, text) => {
                 if (!message || !text) return;
-                if (continuationToolCall && continuingAssistantMessage && message.id === continuingAssistantMessage.id) {
-                    appendAssistantText(message, 'reasoning', text);
+                if (nativeReasoningClosedMessages.has(message)) {
+                    appendAssistantText(message, 'content', text);
                     return;
                 }
                 appendAssistantText(message, 'reasoning', text);
+                normalizeNativeReasoningBoundary(message);
             };
 
             const createAssistantMessage = (content = '', reasoning = '') => reactive({
@@ -5087,6 +5141,7 @@ const app = createApp({
                 if (assistantMessage) return assistantMessage;
                 if (continuingAssistantMessage) {
                     assistantMessage = prepareAssistantMessageForAppend(continuingAssistantMessage);
+                    normalizeNativeReasoningBoundary(assistantMessage);
                     if (reasoning) appendAssistantReasoning(assistantMessage, reasoning);
                     if (content) appendAssistantText(assistantMessage, 'content', content);
                     isReceiving.value = true;
@@ -5094,6 +5149,7 @@ const app = createApp({
                 }
 
                 assistantMessage = createAssistantMessage(content, reasoning);
+                normalizeNativeReasoningBoundary(assistantMessage);
                 promoteActiveToolCallsFromAssistant(assistantMessage);
                 chatHistory.value.push(assistantMessage);
                 isReceiving.value = true;
@@ -5117,10 +5173,12 @@ const app = createApp({
                         let seededContent = false;
                         let seededReasoning = false;
                         if (!assistantMessage) {
-                            if (reasoning) isThinking.value = true;
                             assistantMessage = ensureAssistantMessage(content, reasoning);
                             seededContent = !!content;
                             seededReasoning = !!reasoning;
+                            if (seededReasoning) {
+                                isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
+                            }
                             if (seededContent && !reasoning) {
                                 isThinking.value = false;
                                 collapseNativeReasoning(assistantMessage);
@@ -5129,7 +5187,7 @@ const app = createApp({
                         }
                         if (reasoning && !seededReasoning) {
                             appendAssistantReasoning(assistantMessage, reasoning);
-                            isThinking.value = true;
+                            isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
                         }
                         if (content && !seededContent) {
                             appendAssistantText(assistantMessage, 'content', content);
@@ -5150,10 +5208,14 @@ const app = createApp({
                     isThinking.value = !!(reasoning && !content);
                     if (content || reasoning) {
                         assistantMessage = ensureAssistantMessage(content, reasoning);
+                        const hasReasoning = !!String(assistantMessage.reasoning || '').trim();
+                        const hasContent = !!String(assistantMessage.content || '').trim();
+                        isThinking.value = hasReasoning && !hasContent;
+                        const hasReasoningAndContent = hasReasoning && hasContent;
                         if (!continuingAssistantMessage) {
-                            assistantMessage.isReasoningOpen = !(reasoning && content);
-                            assistantMessage.isReasoningAutoCollapsed = !!(reasoning && content);
-                        } else if (reasoning && content) {
+                            assistantMessage.isReasoningOpen = !hasReasoningAndContent;
+                            assistantMessage.isReasoningAutoCollapsed = hasReasoningAndContent;
+                        } else if (hasReasoningAndContent) {
                             collapseNativeReasoning(assistantMessage);
                         }
                     }
@@ -5167,6 +5229,7 @@ const app = createApp({
                 recordApiUsage(responseUsage, {
                     type: activeToolDepth > 0 ? 'tool_continuation' : 'chat',
                     model: requestModel,
+                    isStream: responseResult.isStream,
                     durationMs: duration,
                     outputCharacters
                 });
@@ -5501,6 +5564,7 @@ const app = createApp({
             recordApiUsage(extractApiUsageFromText(rawText), {
                 type: 'summary',
                 model,
+                isStream: false,
                 durationMs: Date.now() - requestStartedAt,
                 outputCharacters: summary.length
             });
@@ -5925,6 +5989,7 @@ const app = createApp({
             recordApiUsage(getApiUsagePayload(data), {
                 type: 'embedding',
                 model,
+                isStream: false,
                 durationMs: Date.now() - requestStartedAt,
                 outputCharacters: 0
             });
@@ -9332,6 +9397,9 @@ const app = createApp({
             // 1.7.2 Enforce Default Preset (人格内核)
             syncBuiltinPreset(BUILTIN_PRESETS.personalityCore);
 
+            // 1.7.3 Enforce Default Preset (去User中心化)
+            syncBuiltinPreset(BUILTIN_PRESETS.deUserCentric);
+
             // 1.7.5 Enforce Default Preset (文风（抗八股）)
             syncBuiltinPreset(BUILTIN_PRESETS.writingStyle);
 
@@ -9361,25 +9429,42 @@ const app = createApp({
             // 1.10 Enforce Default Preset (COT)
             const cotPresetName = 'COT';
             const syncCotPresetContent = () => {
+                const useThinkingOpening = usesThinkingCotTag(settings.model);
+                const uiTemplateAnalysisEnabled = isUiTemplateAnalysisEnabled();
                 const cotPresetContent = buildCotPresetContent({
                     memoryEnabled: memorySettings.enabled,
-                    uiTemplateAnalysisEnabled: settings.uiTemplateEnabled
-                        && settings.uiTemplateMainModelAnalysis
-                        && activeUiTemplates.value.length > 0,
-                    useThinkingOpening: usesThinkingCotTag(settings.model)
+                    uiTemplateAnalysisEnabled,
+                    useThinkingOpening
                 });
-                const existingCotPreset = presets.value.find(p => p.name === cotPresetName);
+                let existingCotPreset = presets.value.find(p => p.name === cotPresetName);
                 if (!existingCotPreset) {
                     presets.value.push({
                         name: cotPresetName,
                         content: cotPresetContent,
                         enabled: true
                     });
-                    return;
-                }
-                if (existingCotPreset.content !== cotPresetContent) {
+                    existingCotPreset = presets.value.find(p => p.name === cotPresetName);
+                } else if (existingCotPreset.content !== cotPresetContent) {
                     existingCotPreset.content = cotPresetContent;
                 }
+
+                const prefillEnabled = existingCotPreset?.enabled !== false;
+                BUILTIN_CORE_PRESETS.forEach(preset => {
+                    const prefillPhase = preset.name === '破限预注入 · AI 1' ? 1
+                        : preset.name === '破限预注入 · AI 2' ? 2
+                            : 0;
+                    if (!prefillPhase) return;
+                    const existingPreset = presets.value.find(item => item.name === preset.name);
+                    if (!existingPreset) return;
+                    existingPreset.content = buildCotPresetContent({
+                        memoryEnabled: memorySettings.enabled,
+                        uiTemplateAnalysisEnabled,
+                        useThinkingOpening,
+                        prefillPhase,
+                        prefillEnabled,
+                        prefillBaseContent: preset.content
+                    });
+                });
             };
             syncCotPresetContent();
             watch([
@@ -9387,7 +9472,8 @@ const app = createApp({
                 () => settings.uiTemplateEnabled,
                 () => settings.uiTemplateMainModelAnalysis,
                 () => activeUiTemplates.value.length,
-                () => settings.model
+                () => settings.model,
+                () => presets.value.find(preset => preset.name === cotPresetName)?.enabled
             ], syncCotPresetContent);
             removeLegacyUserRegex();
 
