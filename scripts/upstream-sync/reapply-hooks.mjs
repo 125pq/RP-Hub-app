@@ -6,6 +6,7 @@ import { applyOfflineAssetHooks } from './patches/patch-offline-assets.mjs';
 import { applyPerformanceHooks } from './patches/patch-performance.mjs';
 import { applySidebarRenderingHooks } from './patches/patch-sidebar-rendering.mjs';
 import { applyChatLayoutHooks } from './patches/patch-chat-layout.mjs';
+import { applyDataServicesHooks } from './patches/patch-data-services.mjs';
 
 export async function reapplyHooks() {
   const groups = [
@@ -14,6 +15,7 @@ export async function reapplyHooks() {
     ['webview-sidebar-rendering', applySidebarRenderingHooks],
     ['webview-chat-layout', applyChatLayoutHooks],
     ['offline-assets', applyOfflineAssetHooks],
+    ['data-services-hooks', applyDataServicesHooks],
     ['performance-patches', applyPerformanceHooks],
     ['backup-hooks', applyBackupHooks]
   ];

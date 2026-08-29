@@ -1,4 +1,5 @@
 import { editText, ensureAfter, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
+import { patchCoreUtilsOverlay } from './patch-core-utils.mjs';
 import { patchIndexScriptOverlay } from './index-script-overlay.mjs';
 
 const category = 'android-hooks';
@@ -47,19 +48,7 @@ export async function applyAndroidHooks() {
     return source;
   }));
 
-  changes.push(await editText('assets/js/core-utils.js', category, source => {
-    if (!source.includes('const getPlatformAdapter = () => {')) {
-      source = ensureBefore(
-        source,
-        '    window.RPHubCardUtils = {',
-        `    const getPlatformAdapter = () => {\n        if (window.platformAdapter) return window.platformAdapter;\n        try {\n            if (window.parent !== window && window.parent.platformAdapter) return window.parent.platformAdapter;\n        } catch {}\n        return null;\n    };\n\n    const saveGeneratedFile = async (data, filename, options = {}) => {\n        const mimeType = String(options.mimeType || data?.type || 'application/octet-stream');\n        const adapter = getPlatformAdapter();\n        if (adapter?.exportFile) {\n            const result = await adapter.exportFile({ data, filename, mimeType });\n            if (result?.supported === false) throw new Error('Current platform cannot save files');\n            return result;\n        }\n        const blob = data && typeof data.arrayBuffer === 'function' && typeof data.slice === 'function'\n            ? data\n            : new Blob([data], { type: mimeType });\n        downloadBlob(blob, filename, options);\n        return { supported: true, cancelled: false, bytesWritten: blob.size };\n    };\n\n`,
-        'core file adapter helpers'
-      );
-      source = ensureAfter(source, '        injectPngTextChunk,', '\n        getPlatformAdapter,\n        saveGeneratedFile,', 'core adapter exports');
-    }
-    requireContains(source, 'adapter?.exportFile', 'core-utils exportFile call');
-    return source;
-  }));
+  changes.push(await editText('assets/js/core-utils.js', category, patchCoreUtilsOverlay));
 
   changes.push(await editText('assets/js/update-check.js', category, source => {
     const dispatch = `                    window.dispatchEvent(new CustomEvent('rphub:update-available', {\n                        detail: { versionId: latestVersionId }\n                    }));`;

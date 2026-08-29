@@ -2,6 +2,8 @@ import { dominantEol, rebuildWithOriginalEol } from './lib.mjs';
 import { patchIndexScriptOverlay } from './patches/index-script-overlay.mjs';
 import { patchAndroidNovel } from './patches/patch-android-hooks.mjs';
 import { patchBackupNovel } from './patches/patch-backup.mjs';
+import { patchCoreUtilsOverlay } from './patches/patch-core-utils.mjs';
+import { patchDataServicesOverlay } from './patches/patch-data-services.mjs';
 import { patchOfflineIndex, patchOfflineNovel } from './patches/patch-offline-assets.mjs';
 import { patchSafeAreaIndex, patchSafeAreaNovel, patchSquareHostSafeArea } from './patches/patch-safe-area.mjs';
 
@@ -17,7 +19,9 @@ const transforms = new Map([
     source = patchSafeAreaNovel(source);
     source = patchAndroidNovel(source);
     return patchBackupNovel(source);
-  }]
+  }],
+  ['assets/js/core-utils.js', patchCoreUtilsOverlay],
+  ['assets/js/data-services.js', patchDataServicesOverlay]
 ]);
 
 export const overlayManifest = Object.freeze([...transforms.keys()]);

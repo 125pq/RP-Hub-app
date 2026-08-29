@@ -16,6 +16,39 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-08-29：上游 `1.8.9`（`b409ca6`）核心工具与数据服务冲突
+
+### 现场
+
+- 本地合并父提交为 `60035299239d168b5c8d2bbff9c22562145e7c8d`，共同上游基线为 `0562644622384ae645b2be959aeec0968a11d436`，新的上游目标为 `b409ca6a62857849a3003e072dc2979e00695728`（上游 `1.8.9`）。
+- Git 内容冲突为 `assets/js/core-utils.js` 和 `assets/js/data-services.js`；补丁接线前 resolver 的首个有效错误为 `Path is not in the auto-resolver manifest: assets/js/core-utils.js`。
+
+### 根因
+
+- 本地核心工具的 parse-COT 性能包装、缓存清理导出和 Android 文件保存桥接，以及数据服务的 iframe 性能埋点、离线 jQuery 和流式 `processMainContent`，原本由重应用钩子直接写入，但没有作为纯 overlay 注册到 resolver manifest。
+- 因而 resolver 无法证明 `transform(stage1) === stage2`，此前若采用整文件取一侧会丢失本地功能或上游 `thinking`/变量解析更新；这类冲突必须继续 fail closed。
+
+### 处理
+
+- 将已有 core-utils 逻辑提取为 `patch-core-utils.mjs`，将已有 data-services 逻辑提取为 `patch-data-services.mjs`，按原重应用顺序接入 `overlay-transformers.mjs`；`reapply-hooks.mjs` 新增 data-services 分组。
+- 两个变换均要求关键插入 marker 恰好一次、旧实现 marker 不再存在，并保留 resolver 原有的三阶段、100644、UTF-8/二进制和 EOL proof；未直接手改上游文件。
+- 使用真实 `0562644 → 6003529 → b409ca6` blob 建立两个冲突 stage，确认 resolver 输出为变换后的上游内容，并确认再次重应用为幂等；同时保留上游 `thinking` 支持和 `parseUiTemplateUpdates`。
+
+### 验证
+
+- `node scripts/upstream-sync/tests/auto-resolver.mjs`：通过，真实 `b409ca6` 两冲突 resolver + reapply proof 通过。
+- 完整 `npm run test:upstream-sync`、`npm run test:platform`、`git diff --check` 作为本次修复门禁。
+
+### 版本与发布影响
+
+- 不改 `package.json` 或任何版本号；当前 `1.8.8.1` 版本、Android Release、GitHub/Gitee 更新源均不发布、不 dispatch、不改动。
+- 上游 `1.8.9` 的正式同步应在这些补丁通过审查后由既有 workflow 生成新版本/修订号；本次只修复同步能力和测试，不创建 merge commit。
+
+### 后续风险
+
+- 上游若重命名 core/data 的函数、jQuery 行、iframe 计时器或导出对象，严格 marker 会拒绝同步；下次应先检查首个 anchor/proof 错误，不能放宽 manifest 或改用整文件覆盖。
+- 当前真实冲突 proof 使用仓库已有的 `0562644`、`6003529` 和 `b409ca6` 对象；设备 UI、Android 构建和发布链未在本次隔离修复中执行。
+
 ## 2026-08-26：上游 `1.8.8` 同标签改指向 `0562644`
 
 ### 现场

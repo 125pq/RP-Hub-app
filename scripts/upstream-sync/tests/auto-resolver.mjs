@@ -135,6 +135,42 @@ async function createRenameConflictFixture({ startMerge = true } = {}) {
   return fixture;
 }
 
+async function createRealUpstreamConflictFixture() {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'rphub-real-upstream-1.8.9-'));
+  const paths = ['assets/js/core-utils.js', 'assets/js/data-services.js'];
+  const refs = [
+    ['0562644', 1],
+    ['6003529', 2],
+    ['b409ca6', 3]
+  ];
+  git(fixture, ['init', '-q', '-b', 'main']);
+  git(fixture, ['config', 'user.name', 'Resolver Test']);
+  git(fixture, ['config', 'user.email', 'resolver@example.test']);
+  git(fixture, ['read-tree', '--empty']);
+  await mkdir(path.join(fixture, 'assets', 'js'), { recursive: true });
+
+  const indexRecords = [];
+  for (const relativePath of paths) {
+    for (const [ref, stage] of refs) {
+      const bytes = repoBlob(ref, relativePath);
+      const objectId = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: fixture,
+        input: bytes,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      }).trim();
+      indexRecords.push(`100644 ${objectId} ${stage}\t${relativePath}`);
+    }
+  }
+  execFileSync('git', ['update-index', '--index-info'], {
+    cwd: fixture,
+    input: `${indexRecords.join('\n')}\n`,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  return { fixture, paths };
+}
+
 for (const relativePath of ['index.html', 'novel/index.html']) assertBlobProof(relativePath);
 
 const squareFrameSource = sourceText('bc2d201', 'index.html');
@@ -295,6 +331,87 @@ try {
   git(shapeFixture, ['merge', '--abort']);
 } finally {
   await rm(shapeFixture, { recursive: true, force: true });
+}
+
+const realUpstreamFixture = await createRealUpstreamConflictFixture();
+try {
+  const { fixture, paths } = realUpstreamFixture;
+  assert.deepEqual(
+    gitText(fixture, ['diff', '--name-only', '--diff-filter=U']).split('\n'),
+    paths,
+    'real upstream 1.8.9 fixture must expose both content conflicts'
+  );
+  for (const relativePath of paths) {
+    const base = sourceText('0562644', relativePath);
+    const local = sourceText('6003529', relativePath);
+    const upstream = sourceText('b409ca6', relativePath);
+    assert.equal(
+      normalize(transformOverlayBlob(relativePath, base)),
+      normalize(local),
+      `${relativePath} real upstream stage1 -> stage2 proof`
+    );
+  }
+  assert.throws(
+    () => transformOverlayText(
+      'assets/js/core-utils.js',
+      normalize(sourceText('0562644', 'assets/js/core-utils.js'))
+        .replace('const compressImage = ', 'const driftedCompressImage = ')
+    ),
+    /replacement anchor/,
+    'core-utils anchor drift must fail closed'
+  );
+  assert.throws(
+    () => transformOverlayText(
+      'assets/js/data-services.js',
+      normalize(sourceText('0562644', 'assets/js/data-services.js'))
+        .replace('    const buildExecutableHtmlDocument = ', '    const driftedBuildExecutableHtmlDocument = ')
+    ),
+    /local iframe asset URL/,
+    'data-services anchor drift must fail closed'
+  );
+  const patchedCore = transformOverlayText(
+    'assets/js/core-utils.js',
+    normalize(sourceText('0562644', 'assets/js/core-utils.js'))
+  );
+  assert.throws(
+    () => transformOverlayText(
+      'assets/js/core-utils.js',
+      patchedCore.replace('const parseCotImpl = (text) => {', 'const parseCotImpl = (text) => {\nconst parseCotImpl = (text) => {')
+    ),
+    /exactly one parseCot implementation/,
+    'duplicate core-utils marker must fail closed'
+  );
+  const patchedData = transformOverlayText(
+    'assets/js/data-services.js',
+    normalize(sourceText('0562644', 'assets/js/data-services.js'))
+  );
+  assert.throws(
+    () => transformOverlayText(
+      'assets/js/data-services.js',
+      patchedData.replace(
+        'const processMainContentImpl = (mainText, isGeneratingState) => {',
+        'const processMainContentImpl = (mainText, isGeneratingState) => {\nconst processMainContentImpl = (mainText, isGeneratingState) => {'
+      )
+    ),
+    /exactly one streaming main-content processing/,
+    'duplicate data-services marker must fail closed'
+  );
+  const resolved = await resolveAutoConflicts({ cwd: fixture });
+  assert.deepEqual(resolved, paths, 'real upstream 1.8.9 resolver paths');
+  assert.equal(gitText(fixture, ['diff', '--name-only', '--diff-filter=U']), '');
+  for (const relativePath of paths) {
+    const actual = await readFile(path.join(fixture, relativePath), 'utf8');
+    const upstream = sourceText('b409ca6', relativePath);
+    assert.equal(actual, transformOverlayBlob(relativePath, upstream), `${relativePath} real upstream output`);
+    assert.equal(transformOverlayText(relativePath, normalize(actual)), normalize(actual), `${relativePath} real upstream reapply idempotence`);
+  }
+  const resolvedCore = await readFile(path.join(fixture, 'assets/js/core-utils.js'), 'utf8');
+  const resolvedData = await readFile(path.join(fixture, 'assets/js/data-services.js'), 'utf8');
+  assert.match(resolvedCore, /\(thinking\|think\|cot\)/, 'core upstream thinking support must survive resolution');
+  assert.match(resolvedData, /const parseUiTemplateUpdates = \(rawContent\)/, 'data upstream parser must survive resolution');
+  console.log('Real upstream 1.8.9 (b409ca6) two-conflict resolver + reapply proof: PASS');
+} finally {
+  await rm(realUpstreamFixture.fixture, { recursive: true, force: true });
 }
 
 console.log('Auto-resolver transformer, proof, EOL, and isolated merge fixtures: PASS');
