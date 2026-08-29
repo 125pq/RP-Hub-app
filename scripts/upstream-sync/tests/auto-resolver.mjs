@@ -409,6 +409,11 @@ try {
   const resolvedData = await readFile(path.join(fixture, 'assets/js/data-services.js'), 'utf8');
   assert.match(resolvedCore, /\(thinking\|think\|cot\)/, 'core upstream thinking support must survive resolution');
   assert.match(resolvedData, /const parseUiTemplateUpdates = \(rawContent\)/, 'data upstream parser must survive resolution');
+  assert.doesNotMatch(
+    resolvedData,
+    /createDetailedJsonSyntaxError/,
+    'removed legacy JSON parser helper must not be restored over the 1.8.9 simplified parser'
+  );
   console.log('Real upstream 1.8.9 (b409ca6) two-conflict resolver + reapply proof: PASS');
 } finally {
   await rm(realUpstreamFixture.fixture, { recursive: true, force: true });

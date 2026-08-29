@@ -22,26 +22,29 @@
 
 - 本地合并父提交为 `60035299239d168b5c8d2bbff9c22562145e7c8d`，共同上游基线为 `0562644622384ae645b2be959aeec0968a11d436`，新的上游目标为 `b409ca6a62857849a3003e072dc2979e00695728`（上游 `1.8.9`）。
 - Git 内容冲突为 `assets/js/core-utils.js` 和 `assets/js/data-services.js`；补丁接线前 resolver 的首个有效错误为 `Path is not in the auto-resolver manifest: assets/js/core-utils.js`。
+- 首轮修复后的工作流 `33233300924` 已通过真实双冲突 resolver，但在发布前门禁停于 `data-services.js contract: missing ["createDetailedJsonSyntaxError"]`；构建、提交、Release 和镜像步骤均未执行。
 
 ### 根因
 
 - 本地核心工具的 parse-COT 性能包装、缓存清理导出和 Android 文件保存桥接，以及数据服务的 iframe 性能埋点、离线 jQuery 和流式 `processMainContent`，原本由重应用钩子直接写入，但没有作为纯 overlay 注册到 resolver manifest。
 - 因而 resolver 无法证明 `transform(stage1) === stage2`，此前若采用整文件取一侧会丢失本地功能或上游 `thinking`/变量解析更新；这类冲突必须继续 fail closed。
+- 上游 `1.8.9` 有意用 `parseUiTemplateUpdates` 的简化 `路径=值` 格式替换旧 JSON 解析器；旧的 `merge-regressions.mjs` 仍硬性要求已被上游移除的 `createDetailedJsonSyntaxError`，导致 resolver 正确完成后出现测试误报。
 
 ### 处理
 
 - 将已有 core-utils 逻辑提取为 `patch-core-utils.mjs`，将已有 data-services 逻辑提取为 `patch-data-services.mjs`，按原重应用顺序接入 `overlay-transformers.mjs`；`reapply-hooks.mjs` 新增 data-services 分组。
 - 两个变换均要求关键插入 marker 恰好一次、旧实现 marker 不再存在，并保留 resolver 原有的三阶段、100644、UTF-8/二进制和 EOL proof；未直接手改上游文件。
 - 使用真实 `0562644 → 6003529 → b409ca6` blob 建立两个冲突 stage，确认 resolver 输出为变换后的上游内容，并确认再次重应用为幂等；同时保留上游 `thinking` 支持和 `parseUiTemplateUpdates`。
+- 将数据服务回归契约改为兼容同步前的完整旧 JSON 解析器和同步后的完整简化解析器；真实 1.8.9 resolver fixture 额外断言不会把已移除的旧 helper 重新注入上游结果。
 
 ### 验证
 
 - `node scripts/upstream-sync/tests/auto-resolver.mjs`：通过，真实 `b409ca6` 两冲突 resolver + reapply proof 通过。
-- 完整 `npm run test:upstream-sync`、`npm run test:platform`、`git diff --check` 作为本次修复门禁。
+- 完整 `npm run test:upstream-sync`、`npm run test:platform`、`git diff --check` 作为本次修复门禁；正式 workflow 仍需在后续修复审查通过后重新 dispatch 并跟踪到发布完成。
 
 ### 版本与发布影响
 
-- 不改 `package.json` 或任何版本号；当前 `1.8.8.1` 版本、Android Release、GitHub/Gitee 更新源均不发布、不 dispatch、不改动。
+- 不改 `package.json` 或任何版本号；失败的 `33233300924` 未执行构建、提交、Android Release 或 GitHub/Gitee 更新源步骤。
 - 上游 `1.8.9` 的正式同步应在这些补丁通过审查后由既有 workflow 生成新版本/修订号；本次只修复同步能力和测试，不创建 merge commit。
 
 ### 后续风险

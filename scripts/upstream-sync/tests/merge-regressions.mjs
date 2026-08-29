@@ -59,9 +59,8 @@ assertAll(data, [
   'turnStart',
   'turnEnd',
   'sourceMemories',
-  // UI template parsing (1.8.4)
+  // UI template update block discovery (1.8.4+)
   'findUiTemplateUpdateBlock',
-  'createDetailedJsonSyntaxError',
   // local processMainContent cache
   'processMainContentImpl',
   'processMainContent',
@@ -106,6 +105,36 @@ const dataServicesContext = {
 };
 dataServicesContext.window.parent = dataServicesContext.window;
 runInNewContext(data, dataServicesContext);
+const uiTemplateUtils = dataServicesContext.window.RPHubUiTemplateUtils;
+const legacyUiTemplateParser = uiTemplateUtils.parseUiTemplateUpdateJson;
+const simplifiedUiTemplateParser = uiTemplateUtils.parseUiTemplateUpdates;
+assert.equal(
+  Number(typeof legacyUiTemplateParser === 'function') + Number(typeof simplifiedUiTemplateParser === 'function'),
+  1,
+  'data-services.js must export exactly one complete UI-template parser contract'
+);
+if (typeof legacyUiTemplateParser === 'function') {
+  const parsed = legacyUiTemplateParser('<ui_template_updates>{"updates":[{"id":"card","variables":{"score":42}}]}</ui_template_updates>');
+  assert.equal(JSON.stringify(parsed), '{"updates":[{"id":"card","variables":{"score":42}}]}');
+  assert.throws(
+    () => legacyUiTemplateParser('<ui_template_updates>{"updates":1,}</ui_template_updates>'),
+    error => error?.name === 'SyntaxError'
+      && Number.isInteger(error.jsonLine)
+      && Number.isInteger(error.jsonColumn)
+      && /精确位置/.test(error.message),
+    'legacy UI-template parser must route invalid JSON through the detailed syntax-error helper'
+  );
+} else {
+  const parsed = simplifiedUiTemplateParser('<ui_template_updates>\nscore=42\nname=Alice\n</ui_template_updates>');
+  assert.equal(JSON.stringify(parsed), '{"updates":[{"id":"","variables":{"score":42,"name":"Alice"}}]}');
+  assert.throws(
+    () => simplifiedUiTemplateParser('<ui_template_updates>\nbroken-line\n</ui_template_updates>'),
+    error => error?.name === 'SyntaxError'
+      && error.jsonLine === 1
+      && /简化变量格式错误/.test(error.message),
+    'simplified UI-template parser must reject malformed path=value lines with its line-aware error'
+  );
+}
 const sharedProcessMainContent = dataServicesContext.window.RPHubUiTemplateUtils.processMainContent;
 const incompleteImageResult = sharedProcessMainContent('正文 image###unfinished', true);
 assert.equal(incompleteImageResult.text, '正文 ', 'shared processMainContent must hide an unclosed image token while generating');
