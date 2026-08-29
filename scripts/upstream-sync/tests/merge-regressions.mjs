@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { projectRoot } from '../lib.mjs';
+import { patchAndroidApp } from '../patches/patch-android-hooks.mjs';
 import { patchSidebarComponentTemplate } from '../patches/patch-sidebar-rendering.mjs';
 import path from 'node:path';
 
@@ -32,9 +33,9 @@ assertAll(app, [
   // Android lifecycle / adapters (local platform overlay)
   'initializePlatformAdapters',
   'removePlatformBackListener',
-  'removePlatformStateListener',
   'RPHubOffscreenIframeLifecycle'
 ], 'app.js contract');
+assert.doesNotMatch(app, /removePlatformStateListener|isNativeAppActive/, 'app.js must not retain an unused app-state subscription');
 
 // ---- assets/js/core-utils.js ----
 const core = await read('assets/js/core-utils.js');
@@ -252,6 +253,55 @@ assert.ok(!patched.includes('z-50 w-72 md:w-72 bg-white'), 'patch must remove st
 assert.ok(patched.includes(":class=\"collapsed ? 'w-16 md:w-16' : 'w-72 md:w-72'\""), 'patch must produce mutually exclusive width classes');
 assert.equal(patchSidebarComponentTemplate(patched), patched, 'patch must be idempotent');
 assert.throws(() => patchSidebarComponentTemplate(upstreamSnippet.replace('md:w-72 bg-white', 'md:w-72 CHANGED')), /app-sidebar width classes/, 'patch must fail on drifted upstream snippet');
+
+const androidAppFixture = `        let removePlatformBackListener = () => {};
+        const closeBooleanPanel = (panel) => panel;
+        const confirmCharacterExport = (type) => {
+            return type;
+        };
+            scheduleMobileVisualViewportSync({ force: true });
+            clearTimeout(mobileKeyboardBlurTimer);`;
+const androidAppPatched = patchAndroidApp(androidAppFixture);
+assert.match(androidAppPatched, /adapter\.onBackButton\(handlePlatformBackButton\)/, 'Android app patch must retain the native back listener');
+assert.doesNotMatch(androidAppPatched, /onAppStateChange|removePlatformStateListener|isNativeAppActive/, 'Android app patch must not add an unused app-state listener');
+assert.equal(patchAndroidApp(androidAppPatched), androidAppPatched, 'Android app patch must be idempotent');
+const backDeclaration = '        let removePlatformBackListener = () => {};';
+assert.throws(
+  () => patchAndroidApp(androidAppPatched.replace(backDeclaration, `${backDeclaration}\n${backDeclaration}`)),
+  /Expected exactly one app back-listener cleanup declaration, found 2/,
+  'Android app patch must reject a duplicate current back-listener declaration'
+);
+const initializerStart = androidAppPatched.indexOf('        const initializePlatformAdapters = async () => {');
+const initializerEnd = androidAppPatched.indexOf('        const confirmCharacterExport = (type) => {', initializerStart);
+assert.ok(initializerStart >= 0 && initializerEnd > initializerStart, 'Android app fixture must contain the complete current initializer');
+const currentInitializer = androidAppPatched.slice(initializerStart, initializerEnd);
+assert.throws(
+  () => patchAndroidApp(androidAppPatched.replace(currentInitializer, currentInitializer.repeat(2))),
+  /Expected exactly one app back-listener initialization, found 2/,
+  'Android app patch must reject a duplicate complete current initializer'
+);
+const legacyAndroidApp = androidAppPatched
+  .replace(
+    '        let removePlatformBackListener = () => {};',
+    '        let removePlatformBackListener = () => {};\n        let removePlatformStateListener = () => {};\n        let isNativeAppActive = true;'
+  )
+  .replace(
+    '            removePlatformBackListener = await adapter.onBackButton(handlePlatformBackButton);\n        };',
+    '            removePlatformBackListener = await adapter.onBackButton(handlePlatformBackButton);\n            removePlatformStateListener = await adapter.onAppStateChange(({ isActive }) => {\n                isNativeAppActive = isActive;\n            });\n        };'
+  )
+  .replace(
+    '            clearTimeout(mobileKeyboardBlurTimer);\n            removePlatformBackListener();',
+    '            clearTimeout(mobileKeyboardBlurTimer);\n            removePlatformBackListener();\n            removePlatformStateListener();'
+  );
+assert.equal(patchAndroidApp(legacyAndroidApp), androidAppPatched, 'Android app patch must remove the obsolete lifecycle hook during replay');
+assert.throws(
+  () => patchAndroidApp(androidAppFixture.replace(
+    '        const confirmCharacterExport = (type) => {',
+    '        const initializePlatformAdapters = async () => { /* upstream drift */ };\n        const confirmCharacterExport = (type) => {'
+  )),
+  /app lifecycle adapter drifted/,
+  'Android app patch must fail closed when an existing lifecycle initializer drifts'
+);
 
 const syncUpstreamSource = await read('scripts/upstream-sync/sync-upstream.mjs');
 const syncOrchestrationSource = await read('scripts/upstream-sync/sync-orchestration.mjs');

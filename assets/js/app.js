@@ -1491,8 +1491,6 @@ const app = createApp({
         };
 
         let removePlatformBackListener = () => {};
-        let removePlatformStateListener = () => {};
-        let isNativeAppActive = true;
 
         const closeBooleanPanel = (panel) => {
             if (!panel.value) return false;
@@ -1576,9 +1574,6 @@ const app = createApp({
             const adapter = window.platformAdapter;
             if (!adapter) return;
             removePlatformBackListener = await adapter.onBackButton(handlePlatformBackButton);
-            removePlatformStateListener = await adapter.onAppStateChange(({ isActive }) => {
-                isNativeAppActive = isActive;
-            });
         };
 
         const confirmCharacterExport = (type) => {
@@ -9612,7 +9607,6 @@ const app = createApp({
             if (mobileViewportRaf) cancelAnimationFrame(mobileViewportRaf);
             clearTimeout(mobileKeyboardBlurTimer);
             removePlatformBackListener();
-            removePlatformStateListener();
         });
         const switchProfile = (id) => {
             const profile = userProfiles.value.find(p => p.uuid === id);

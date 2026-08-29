@@ -24,8 +24,8 @@ assert.equal(countOccurrences(android, 'if (global.__rphubAndroidAdapterLoaded) 
 assert.equal(countOccurrences(android, 'platform.installNativeAdapter(new AndroidAdapter(global));'), 1, 'Android adapter must install once');
 
 assert.match(app, /initializePlatformAdapters[\s\S]*adapter\.onBackButton\(handlePlatformBackButton\)/);
-assert.match(app, /initializePlatformAdapters[\s\S]*adapter\.onAppStateChange/);
-assert.match(app, /removePlatformBackListener\(\);[\s\S]*removePlatformStateListener\(\);/);
+assert.match(app, /removePlatformBackListener\(\);/);
+assert.doesNotMatch(app, /removePlatformStateListener|isNativeAppActive/);
 assert.match(core, /adapter\.exportFile\(/);
 assert.match(character, /cardUtils\.saveGeneratedFile\(/);
 assert.match(novel, /adapter\.exportFile[\s\S]*mimeType:\s*'text\/plain'/);
