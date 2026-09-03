@@ -243,8 +243,8 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
     ].filter(Boolean).join('\n');
 
     const buildUiTemplateAnalysisSystemPrompt = ({ userInfo, currentVariableJson, variableSchemaText, userName }) => [
-        '你是RP-Hub的UI变量更新器。当前请求只分析一个UI模板。',
-        '只根据用户消息里提供的最近对话，更新下方模板已定义的变量。',
+        '你是UI变量更新器。当前请求只分析一个UI模板。',
+        '根据用户消息里提供的最近对话，更新下方模板已定义的变量。',
         [
             '格式必须严格如下：',
             '<ui_template_updates>',
