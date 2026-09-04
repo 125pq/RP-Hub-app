@@ -732,13 +732,17 @@ ${closingInstruction}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10201,
+    id: 10202,
     title: '网站公告',
     content: `
-### RP-Hub 1.9.0
+### RP-Hub 1.9.1
 
-- 更新破限预设，修复标记问题
+- 新增抗Gemini截断模式
+- 新增UI模板协议检查功能
+- 优化了记忆系统的效果
+- 修复了部分问题
+- 去除了废弃功能
 
-#### 更新时间：09/03/14:53
+#### 更新时间：09/05/05:50
     `
 });

@@ -617,6 +617,8 @@ const app = createApp({
             useCharacterBackground: true,
             immersiveMode: false,
             showLatestUsageBar: false,
+            preventTruncation: false,
+            truncationMaxAttempts: 5,
             styleFilterEnabled: true,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
@@ -829,6 +831,10 @@ const app = createApp({
         });
 
         const currentModelMode = ref('quality');
+        const isGeminiModel = computed(() => /gemini/i.test(String(settings.model || '')));
+        watch(isGeminiModel, enabled => {
+            if (!enabled) settings.preventTruncation = false;
+        }, { immediate: true });
         const modelMode = computed({
             get: () => {
                 return currentModelMode.value;
@@ -1364,8 +1370,6 @@ const app = createApp({
         const worldInfoKeysText = ref('');
         const editingActiveTool = reactive({ id: undefined, data: {} });
 
-        const sysInstruction = ref('');
-        const showInstructionPanel = ref(false);
         const showContextViewerModal = ref(false);
         const showStoryBranchModal = ref(false);
         const showStoryBranchNameEditor = ref(false);
@@ -3253,6 +3257,7 @@ const app = createApp({
                         : (script.replaceString || '');
 
                     if (!regexPattern) return;
+                    const isImageGenScript = (script.name || script.scriptName) === 'NAI画图正则';
 
                     // 解析 /pattern/flags 格式
                     if (regexPattern.startsWith('/') && regexPattern.lastIndexOf('/') > 0) {
@@ -3266,6 +3271,9 @@ const app = createApp({
                     }
 
                     ({ pattern: regexPattern, flags } = cardUtils.normalizeRegexModifiers(regexPattern, flags));
+                    if (isImageGenScript && settings.preventTruncation) {
+                        regexPattern = regexPattern.replace('(?:###|(?=\\r?\\n)|$)', '###');
+                    }
 
                     const re = new RegExp(regexPattern, flags);
 
@@ -3302,7 +3310,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, settings.preventTruncation, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
@@ -3693,11 +3701,6 @@ const app = createApp({
             clearPendingChatImages();
 
             let finalContent = content;
-            if (sysInstruction.value.trim()) {
-                finalContent += '\n\n[系统指令: ' + sysInstruction.value.trim() + ']';
-                sysInstruction.value = ''; // Auto clear after sending
-            }
-
             if (cardInteraction) {
                 chatHistory.value.push({
                     role: 'user',
@@ -3812,7 +3815,6 @@ const app = createApp({
                 const cotMatch = msg.content.match(/<(thinking|think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
                 const uiTemplateUpdateMatch = findUiTemplateUpdateBlock(msg.content);
                 msg.originalCot = cotMatch ? cotMatch[0] : '';
-                msg.originalSys = parseCot(msg.content).sys;
                 msg.originalUiTemplateUpdate = uiTemplateUpdateMatch ? uiTemplateUpdateMatch[0] : '';
                 msg.originalEditMessageContent = stripUiTemplateUpdateBlock(parseCot(msg.content).main);
                 msg.editMessageContent = msg.originalEditMessageContent;
@@ -3825,7 +3827,6 @@ const app = createApp({
             delete message.editMessageContent;
             delete message.editMessageHeight;
             delete message.originalCot;
-            delete message.originalSys;
             delete message.originalUiTemplateUpdate;
             delete message.originalEditMessageContent;
         };
@@ -3835,9 +3836,6 @@ const app = createApp({
             if (msg) {
                 const contentChanged = String(msg.editMessageContent || '') !== String(msg.originalEditMessageContent || '');
                 let finalContent = msg.editMessageContent;
-                if (msg.originalSys) {
-                    finalContent = finalContent + '\n\n[系统指令:\n' + msg.originalSys + ']';
-                }
                 if (msg.originalUiTemplateUpdate) {
                     finalContent = finalContent.trimEnd() + '\n\n' + msg.originalUiTemplateUpdate;
                 }
@@ -4447,6 +4445,17 @@ const app = createApp({
             });
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
         };
+        const isLikelyTruncatedResponse = (text) => {
+            const value = stripUiTemplateUpdateBlock(String(text || ''))
+                .replace(/<\/?(?:thinking|think|cot)>/gi, '')
+                .replace(/image###[^\r\n]*###\s*$/i, '')
+                .replace(/[*_~`]+\s*$/g, '')
+                .trim();
+            if (!value) return false;
+            return !/[。！？!?；;：:.!?…」』）》）】〕］\]}"'’”]$/.test(value);
+        };
+        const getTruncationMaxAttempts = () => Math.min(10, Math.max(5, Number(settings.truncationMaxAttempts) || 5));
+
         let _wasCancelled = false;
         const generateResponse = async (startTime = null, options = {}) => {
             const reuseGeneratingState = options.reuseGeneratingState === true;
@@ -4454,6 +4463,8 @@ const app = createApp({
             const activeToolDepth = Number(options.activeToolDepth) || 0;
             const continueAssistantMessageId = options.continueAssistantMessageId || null;
             const continuationToolCallId = options.continuationToolCallId || null;
+            const continuationAttempt = Number(options.continuationAttempt) || 0;
+            const continuationPrompt = String(options.continuationPrompt || '请直接接着上一条回复续写，不要重复已经输出的内容，也不要解释续写过程。');
             const requestModel = settings.model;
 
             if (!currentCharacter.value) {
@@ -4476,8 +4487,9 @@ const app = createApp({
             // 避免底部全局 typing 占位气泡冒出来。
             isReceiving.value = !!continuationTargetMessage;
             isThinking.value = false;
-            activeToolContinuationMessageId.value = continuationTargetMessage?.id || null;
-            activeToolContinuationToolCallId.value = continuationTargetMessage ? continuationToolCallId : null;
+            const isToolContinuation = !!(continuationTargetMessage && continuationToolCallId);
+            activeToolContinuationMessageId.value = isToolContinuation ? continuationTargetMessage.id : null;
+            activeToolContinuationToolCallId.value = isToolContinuation ? continuationToolCallId : null;
             activeToolContinuationHasResponse.value = false;
             abortController.value = new AbortController();
             let generationStartTime = startTime || Date.now();
@@ -4802,10 +4814,6 @@ const app = createApp({
                                 failureReason: source.uiTemplateCorrection.reason
                             })}\n\n${content.trimStart()}`;
                         }
-                        const cleanSys = stripDisabledImageGenContext(parsedData.sys || '');
-                        if (cleanSys && source.role === 'user') {
-                            content += '\n\n[系统指令: ' + cleanSys + ']';
-                        }
                         return content.trim();
                     };
                     const cleanContent = sourceMessages
@@ -4890,6 +4898,12 @@ const app = createApp({
                 name,
                 content
             }));
+            if (continueAssistantMessageId && !continuationToolCallId) {
+                apiMessages.push({
+                    role: 'user',
+                    content: continuationPrompt
+                });
+            }
 
             let generatedAssistantMessageId = null;
             let assistantMessage = null;
@@ -4898,6 +4912,7 @@ const app = createApp({
             let continuationContentStarted = false;
             let continuationReasoningStarted = false;
             let responseUsage = null;
+            let generationFailed = false;
 
             if (continuingAssistantMessage && continuationToolCallId && Array.isArray(continuingAssistantMessage.toolCalls)) {
                 continuationToolCall = continuingAssistantMessage.toolCalls.find(call => call && call.id === continuationToolCallId) || null;
@@ -4934,11 +4949,17 @@ const app = createApp({
                 }
 
                 const existing = String(message[field] || '');
+                const appendValue = isContinuation && field === 'content' && !hasStarted
+                    ? String(text).replace(/^\s+/, '')
+                    : text;
+                if (!appendValue) return;
 
                 if (isContinuation && !hasStarted && existing.trim()) {
-                    message[field] = existing.replace(/\s+$/, '') + '\n\n' + text;
+                    message[field] = field === 'content'
+                        ? existing.replace(/\s+$/, '') + appendValue
+                        : existing.replace(/\s+$/, '') + '\n\n' + appendValue;
                 } else {
-                    message[field] = existing + text;
+                    message[field] = existing + appendValue;
                 }
 
                 if (isContinuation && !hasStarted) {
@@ -5091,7 +5112,11 @@ const app = createApp({
 
                 if (assistantMessage) {
                     generatedAssistantMessageId = assistantMessage.id;
-                    if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis) {
+                    const deferUiTemplateAnalysis = settings.preventTruncation
+                        && activeToolDepth === 0
+                        && continuationAttempt < getTruncationMaxAttempts()
+                        && isLikelyTruncatedResponse(assistantMessage.content);
+                    if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis && !deferUiTemplateAnalysis) {
                         applyMainModelUiTemplateUpdates(assistantMessage, requestModel);
                     }
 
@@ -5099,6 +5124,7 @@ const app = createApp({
                     if (recentGenerationTimes.value.length > 5) recentGenerationTimes.value.shift();
                 }
             } catch (error) {
+                generationFailed = true;
                 if (error.name === 'AbortError') {
                     _wasCancelled = true;
                     showToast('生成已中止', 'info');
@@ -5152,32 +5178,65 @@ const app = createApp({
                     continuationToolCall.status = 'done';
                 }
                 collapseActiveNativeReasoning();
+                const wasCancelled = _wasCancelled;
+                _wasCancelled = false;
+                const shouldAutoContinue = settings.preventTruncation
+                    && !wasCancelled
+                    && !generationFailed
+                    && activeToolDepth === 0
+                    && continuationAttempt < getTruncationMaxAttempts()
+                    && assistantMessage
+                    && isLikelyTruncatedResponse(assistantMessage.content);
+                if (shouldAutoContinue) {
+                    isGenerating.value = true;
+                    isReceiving.value = true;
+                }
                 await saveChatHistoryNow();
-                isGenerating.value = false;
-                isReceiving.value = false;
                 isThinking.value = false;
+                if (!shouldAutoContinue) {
+                    isGenerating.value = false;
+                    isReceiving.value = false;
+                }
                 if (!continueAssistantMessageId || activeToolContinuationMessageId.value === continueAssistantMessageId) {
                     activeToolContinuationMessageId.value = null;
                     activeToolContinuationToolCallId.value = null;
                     activeToolContinuationHasResponse.value = false;
                 }
                 abortController.value = null;
-                const wasCancelled = _wasCancelled;
-                _wasCancelled = false;
                 if (waitTimer) {
                     clearInterval(waitTimer);
                     waitTimer = null;
                 }
 
-                const needsPostGenerationTurns = !wasCancelled
-                    && ((settings.uiTemplateEnabled && generatedAssistantMessageId)
-                        || memorySettings.enabled);
-                const activeToolContinued = !wasCancelled && assistantMessage
-                    ? await handleActiveToolCallFromAssistant(assistantMessage, activeToolDepth)
-                    : false;
+                const activeToolContinued = shouldAutoContinue
+                    ? false
+                    : (!wasCancelled && assistantMessage
+                        ? await handleActiveToolCallFromAssistant(assistantMessage, activeToolDepth)
+                        : false);
                 if (!activeToolContinued) {
                     resetActiveToolResultContext();
                 }
+                if (shouldAutoContinue) {
+                    nextTick(() => {
+                        if (chatHistory.value[chatHistory.value.length - 1] !== assistantMessage
+                            || !assistantMessage.id) {
+                            isGenerating.value = false;
+                            isReceiving.value = false;
+                            return;
+                        }
+                        generateResponse(Date.now(), {
+                            reuseGeneratingState: true,
+                            continueAssistantMessageId: assistantMessage.id,
+                            continuationAttempt: continuationAttempt + 1,
+                            continuationPrompt: '输出被截断，请紧接着继续生成，不要重复已经输出的内容。'
+                        });
+                    });
+                    return;
+                }
+
+                const needsPostGenerationTurns = !wasCancelled
+                    && ((settings.uiTemplateEnabled && generatedAssistantMessageId)
+                        || memorySettings.enabled);
                 const hasCompletedTurns = !activeToolContinued && needsPostGenerationTurns && buildConversationTurnSnapshot().turns.length > 0;
 
                 if (hasCompletedTurns && settings.uiTemplateEnabled && generatedAssistantMessageId && !settings.uiTemplateMainModelAnalysis) {
@@ -9428,9 +9487,6 @@ const app = createApp({
                     && !e.target.closest('.settings-help-popover')) {
                     settingsHelpTopic.value = '';
                 }
-                if (showInstructionPanel.value && !e.target.closest('.instruction-panel-container')) {
-                    showInstructionPanel.value = false;
-                }
                 if (showTokenUsageTimeFilter.value && !e.target.closest('.token-usage-time-filter-container')) {
                     showTokenUsageTimeFilter.value = false;
                 }
@@ -9465,8 +9521,11 @@ const app = createApp({
             const imageStart = mainText.lastIndexOf('image###');
             if (imageStart !== -1) {
                 const imageTail = mainText.slice(imageStart + 'image###'.length);
-                if (!imageTail.includes('###') && !/[\r\n]/.test(imageTail)) {
-                    mainText = mainText.slice(0, imageStart);
+                if (!imageTail.includes('###')
+                    && (settings.preventTruncation || !/[\r\n]/.test(imageTail))) {
+                    const lineBreak = imageTail.search(/[\r\n]/);
+                    mainText = mainText.slice(0, imageStart)
+                        + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');
                 }
             }
             const patterns = ['```html', '```vue', '<!DOCTYPE', '<div', '<style'];
@@ -9646,7 +9705,7 @@ const app = createApp({
             processMainContent, replaceUserNamePlaceholder,
             currentView, showDescriptionPanel, showModelSelector, modelSelectionTarget, openModelSelector, showChatModelSelector, showCharacterEditor, showAddCharacterMenu, showPresetEditor, showUiTemplateEditor,
             showActiveToolEditor,
-            showExportModal, sysInstruction, showInstructionPanel, exportItems, selectedExportIndices, // Export Modal
+            showExportModal, exportItems, selectedExportIndices, // Export Modal
             showContextViewerModal, lastContextMessages, lastTriggeredWorldInfos,
             lastContextTotalLength, lastContextFloorCount, // Context Viewer
             showStoryBranchModal, showStoryBranchNameEditor, storyBranchNameDraft,
@@ -9665,7 +9724,7 @@ const app = createApp({
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
             updateModalRef, latestUpdateConfig,
-            showConfirmModal, confirmMessage, modelMode, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
+            showConfirmModal, confirmMessage, modelMode, isGeminiModel, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingCardInteraction, clearPendingCardInteraction, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
             user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,

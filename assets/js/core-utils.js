@@ -17,7 +17,7 @@ const generateUUID = () => {
 
 const parseCotCache = new Map();
 const parseCot = (text) => {
-    if (!text) return { cot: '', main: '', sys: '', isFinished: false };
+    if (!text) return { cot: '', main: '', isFinished: false };
     if (parseCotCache.has(text)) return parseCotCache.get(text);
 
     // 匹配 thinking/think/cot 标签，兼容未闭合、带空格闭合和缺少斜杠的错误闭合
@@ -44,14 +44,7 @@ const parseCot = (text) => {
         return '';
     });
 
-    let sys = '';
-    const sysMatch = mainContent.match(/\n\n\[系统指令:\s*([\s\S]*?)\]\s*$/);
-    if (sysMatch) {
-        sys = sysMatch[1];
-        mainContent = mainContent.slice(0, sysMatch.index).trim();
-    }
-
-    const result = { cot: cotContent.trim(), main: mainContent.trim(), sys: sys, isFinished };
+    const result = { cot: cotContent.trim(), main: mainContent.trim(), isFinished };
     parseCotCache.set(text, result);
     // Limit cache size to prevent memory leaks in extremely long sessions
     if (parseCotCache.size > 2000) {
