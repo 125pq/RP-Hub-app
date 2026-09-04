@@ -56,7 +56,6 @@ const {
     getVectorMemoryFingerprint,
     getVectorMemoryText,
     getVectorLexicalMatch,
-    hasVectorEmbedding,
     isEmbeddingLike,
     isEnabledVectorMemory,
     isVectorMemory,
@@ -611,7 +610,6 @@ const app = createApp({
             contextSize: MAX_CONTEXT_SIZE,
             temperature: 1.0,
             reasoningEffort: '',
-            autoFetchModels: true,
             stream: true,
             activeToolAggressiveness: 'adaptive',
             activeToolAggressivenessVersion: 2,
@@ -9409,9 +9407,7 @@ const app = createApp({
                 selectCharacter(0);
             }
 
-            if (settings.autoFetchModels) {
-                fetchModels();
-            }
+            fetchModels();
 
             // Initial Status Check
             checkAllStatuses();
@@ -9733,118 +9729,6 @@ const app = createApp({
                     showToast(`${modeName}已清空`, 'success');
                 });
             },
-            exportMemories: async () => {
-                const isClassicMode = memorySettings.mode === MEMORY_MODE_CLASSIC;
-                let exportData;
-                if (isClassicMode) {
-                    if (classicMemories.value.length === 0) { showToast('当前模式没有记忆可导出', 'info'); return; }
-                    const exportedMemories = [...classicMemories.value]
-                        .sort((a, b) => (a.turn || 0) - (b.turn || 0))
-                        .map(memory => {
-                            const sourceMemories = isSecondaryClassicMemory(memory)
-                                ? getSecondaryClassicSourceMemories(memory)
-                                : [];
-                            return {
-                                turn: memory.turn,
-                                turnStart: memory.turnStart,
-                                turnEnd: memory.turnEnd,
-                                secondaryCompressed: memory.secondaryCompressed === true,
-                                summaryModel: memory.summaryModel || '',
-                                user: {
-                                    content: memory.sourceUserText
-                                        || sourceMemories.map(item => item.sourceUserText || '').filter(Boolean).join('\n\n'),
-                                    messageIds: memory.sourceUserIds || []
-                                },
-                                assistant: {
-                                    content: memory.sourceAssistantText
-                                        || sourceMemories.map(item => item.sourceAssistantText || '').filter(Boolean).join('\n\n'),
-                                    messageIds: memory.sourceAssistantIds || []
-                                },
-                                summary: memory.summary,
-                                sourceMemories: isSecondaryClassicMemory(memory)
-                                    ? cloneForStorage(memory.sourceMemories || [])
-                                    : undefined
-                            };
-                        });
-                    exportData = {
-                        type: 'rp-hub-summary-memories',
-                        version: 2,
-                        character: currentCharacter.value?.name || 'unknown',
-                        exportedAt: new Date().toISOString(),
-                        total: exportedMemories.length,
-                        memories: exportedMemories
-                    };
-                } else {
-                    exportData = await compactMemoriesForStorageAsync(memories.value);
-                    if (exportData.length === 0) { showToast('当前模式没有记忆可导出', 'info'); return; }
-                }
-                const blob = downloadJsonFile(
-                    exportData,
-                    `${isClassicMode ? 'summary_memories' : 'vector_memories'}_${currentCharacter.value?.name || 'unknown'}.json`,
-                    isClassicMode ? 2 : 0,
-                    { revokeDelay: 1000 }
-                );
-                showToast(`${isClassicMode ? '总结模式' : '向量'}记忆已导出，约 ${Math.max(1, Math.round(blob.size / 1024))} KB`, 'success');
-            },
-            importMemories: (event) => readJsonFileInput(event, async data => {
-                const isClassicMode = memorySettings.mode === MEMORY_MODE_CLASSIC;
-                if (isClassicMode) {
-                    if (data?.type !== 'rp-hub-summary-memories' || !Array.isArray(data.memories)) {
-                        throw new Error('这不是总结模式记忆文件');
-                    }
-                    const normalized = prepareClassicMemoriesForRuntime(data.memories.map(memory => ({
-                        id: generateUUID(),
-                        timestamp: Date.now(),
-                        turn: memory?.turn,
-                        turnStart: memory?.turnStart,
-                        turnEnd: memory?.turnEnd,
-                        summary: memory?.summary,
-                        enabled: true,
-                        classicMemory: true,
-                        secondaryCompressed: memory?.secondaryCompressed === true,
-                        summaryModel: String(memory?.summaryModel || ''),
-                        sourceUserIds: Array.isArray(memory?.user?.messageIds) ? memory.user.messageIds : [],
-                        sourceAssistantIds: Array.isArray(memory?.assistant?.messageIds) ? memory.assistant.messageIds : [],
-                        sourceUserText: String(memory?.user?.content || ''),
-                        sourceAssistantText: String(memory?.assistant?.content || ''),
-                        sourceMemories: Array.isArray(memory?.sourceMemories) ? memory.sourceMemories : []
-                    })));
-                    if (normalized.length === 0) throw new Error('文件中没有有效的总结模式记忆');
-                    const existingKeys = new Set(classicMemories.value.map(memory => getClassicMemoryKey(memory.sourceAssistantIds, memory.turn)));
-                    const added = normalized.filter(memory => {
-                        const key = getClassicMemoryKey(memory.sourceAssistantIds, memory.turn);
-                        if (existingKeys.has(key)) return false;
-                        existingKeys.add(key);
-                        return true;
-                    });
-                    classicMemories.value = [...classicMemories.value, ...added];
-                    await saveClassicMemoriesNow();
-                    showToast(`成功导入 ${added.length} 条总结模式记忆`, 'success');
-                    return;
-                }
-
-                const items = Array.isArray(data) ? data : data?.memories;
-                if (!Array.isArray(items)) throw new Error('文件内容不正确');
-                const normalized = items
-                    .filter(m => m && m.vectorMemory === true && hasVectorEmbedding(m))
-                    .map(m => {
-                        const { importance, ...memoryData } = m;
-                        return {
-                            ...memoryData,
-                            id: memoryData.id || generateUUID(),
-                            timestamp: memoryData.timestamp || Date.now(),
-                            turn: memoryData.turn || 0,
-                            summary: String(memoryData.summary || memoryData.paragraph || '').trim(),
-                            vectorMemory: true,
-                            chunkMode: 'paragraph',
-                            enabled: memoryData.enabled !== false
-                        };
-                    });
-                if (normalized.length === 0) throw new Error('这不是向量记忆文件');
-                memories.value = [...memories.value, ...prepareMemoriesForRuntime(normalized)];
-                await saveMemoriesNow();
-                showToast(`成功导入 ${normalized.length} 个分片`, 'success');
-            }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
             fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers

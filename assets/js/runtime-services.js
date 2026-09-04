@@ -422,7 +422,11 @@
         const latestMainTokenUsage = computed(() => tokenUsageHistory.value.find(
             record => record.type === 'chat' || record.type === 'tool_continuation'
         ) || null);
-        const formatLatestTokenCount = value => `${(Number(value || 0) / 1000).toFixed(2)}k`;
+        const formatLatestTokenCount = value => {
+            const count = Number(value || 0);
+            if (count <= 0) return '0.00w';
+            return `${Math.max(0.01, count / 10000).toFixed(2)}w`;
+        };
         const formatLatestUsageCost = quota => Number.isFinite(quota)
             ? `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
             : '--';
