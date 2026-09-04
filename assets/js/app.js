@@ -2432,6 +2432,10 @@ const app = createApp({
         };
 
         const getLastAssistantMessage = () => [...chatHistory.value].reverse().find(msg => msg && msg.role === 'assistant');
+        const summarizeUiTemplateFailure = (reason) => {
+            const text = String(reason || 'UI模板变量校验失败').replace(/\s+/g, ' ').trim();
+            return text.length > 800 ? `${text.slice(0, 797)}...` : text;
+        };
         const buildMainModelUiTemplateUpdatePrompt = () => {
             if (!settings.uiTemplateEnabled || !settings.uiTemplateMainModelAnalysis) return '';
             const templates = activeUiTemplates.value;
@@ -2456,14 +2460,15 @@ const app = createApp({
                 return { handled: false, changed: false };
             }
             delete targetMessage.uiTemplateAnalysisFailure;
-            const recordFailure = (result, reason) => {
+            const recordFailure = (reason) => {
+                const summary = summarizeUiTemplateFailure(reason);
                 targetMessage.uiTemplateAnalysisFailure = {
-                    result,
-                    reason,
+                    summary,
+                    reason: summary,
                     sourceMessageId: targetMessage.id || null
                 };
                 failUiTemplateAnalysis('变量分析失败，下次请求将自动修正', targetMessage.id || null);
-                console.warn('[UI模板] 主模型变量分析失败:', reason, result);
+                console.warn('[UI模板] 主模型变量分析失败:', summary);
                 return { handled: true, changed: false };
             };
             const match = findUiTemplateUpdateBlock(targetMessage.content);
@@ -2471,19 +2476,19 @@ const app = createApp({
                 const missingTemplates = templates
                     .map(template => `模板“${template.name || '未命名'}”（ID：${template.id}）`)
                     .join('；');
-                return recordFailure(`未输出：${missingTemplates}`, `未输出UI模板变量块：${missingTemplates}`);
+                return recordFailure(`未输出UI模板变量块：${missingTemplates}`);
             }
 
             let updates = [];
             try {
                 const updateContent = match[1];
-                const parsed = parseUiTemplateUpdates(updateContent);
+                const parsed = parseUiTemplateUpdates(updateContent, templates);
                 updates = normalizeUiTemplateUpdateList(parsed, templates);
             } catch (e) {
                 const reason = e instanceof SyntaxError
                     ? `变量块格式错误：${e.message}`
                     : e.message;
-                return recordFailure(e?.jsonSource || match[1], reason);
+                return recordFailure(reason);
             }
 
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));
@@ -2548,12 +2553,11 @@ const app = createApp({
             const userMessage = chatHistory.value[userIndex];
             const failure = failureMessage.uiTemplateAnalysisFailure;
             const correctionPrompt = BUILTIN_PROMPTS.buildMainModelUiTemplateCorrectionPrompt({
-                failedResult: failure.result,
+                failureSummary: failure.summary || summarizeUiTemplateFailure(failure.reason),
                 failureReason: failure.reason
             });
             userMessage.uiTemplateCorrection = {
-                result: failure.result,
-                reason: failure.reason,
+                summary: failure.summary || summarizeUiTemplateFailure(failure.reason),
                 sourceMessageId: failure.sourceMessageId || failureMessage.id || null
             };
             delete failureMessage.uiTemplateAnalysisFailure;
@@ -3958,7 +3962,10 @@ const app = createApp({
                 .map(m => ({
                     role: m.role,
                     name: m.role === 'user' ? user.name : (m.name || currentCharacter.value.name),
-                    content: replaceUserNamePlaceholder(appendMessageImageDescriptions(m, parseCot(m.content || '').main))
+                    content: replaceUserNamePlaceholder(appendMessageImageDescriptions(
+                        m,
+                        parseCot(stripUiTemplateUpdateBlock(m.content || '')).main
+                    ))
                 }));
             const recentMessages = sourceMessages.slice(-normalizedUiTemplateAnalysisDepth);
 
@@ -4036,7 +4043,17 @@ const app = createApp({
                         const data = await response.json();
                         if (!isCurrentRun()) return;
                         let content = data.choices?.[0]?.message?.content || '';
-                        const parsed = parseUiTemplateUpdates(content);
+                        const latestUiTemplateAnalysis = {
+                            time: new Date().toISOString(),
+                            model,
+                            templateId: template.id,
+                            templateName: template.name || template.id,
+                            content: String(content)
+                        };
+                        window.__RPHubLastUiTemplateAnalysis = latestUiTemplateAnalysis;
+                        console.info('[UI模板][副模型] 最新一次变量输出：', latestUiTemplateAnalysis);
+                        const updateBlock = findUiTemplateUpdateBlock(content);
+                        const parsed = parseUiTemplateUpdates(updateBlock ? updateBlock[1] : content, [template]);
                         const updates = normalizeUiTemplateUpdates(parsed, template);
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
@@ -4772,7 +4789,7 @@ const app = createApp({
                     const cleanSourceContent = (source) => {
                         // Remove internal thinking/COT from history before sending, then restore only the retained recent blocks.
                         const parsedData = parseCot(source.content || '');
-                        let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateContextInjection(parsedData.main)));
+                        let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateUpdateBlock(stripUiTemplateContextInjection(parsedData.main))));
                         const recentThinking = source.role === 'assistant' ? recentThinkingByMessage.get(source) : '';
                         if (recentThinking) content = `${wrapAnalysis(retainedThinkingTag, recentThinking)}${content}`;
                         if (source === openingSourceMessage && openingThinking) content = `${openingThinking}${content}`;
@@ -4783,7 +4800,7 @@ const app = createApp({
                             && !suppressUiTemplateCorrection
                             && source.uiTemplateCorrection) {
                             content = `${BUILTIN_PROMPTS.buildMainModelUiTemplateCorrectionPrompt({
-                                failedResult: source.uiTemplateCorrection.result,
+                                failureSummary: source.uiTemplateCorrection.summary,
                                 failureReason: source.uiTemplateCorrection.reason
                             })}\n\n${content.trimStart()}`;
                         }
