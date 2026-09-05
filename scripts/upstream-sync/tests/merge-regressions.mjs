@@ -117,9 +117,9 @@ dataServicesContext.window.parent = dataServicesContext.window;
 runInNewContext(data, dataServicesContext);
 const uiTemplateUtils = dataServicesContext.window.RPHubUiTemplateUtils;
 const legacyUiTemplateParser = uiTemplateUtils.parseUiTemplateUpdateJson;
-const simplifiedUiTemplateParser = uiTemplateUtils.parseUiTemplateUpdates;
+const currentUiTemplateParser = uiTemplateUtils.parseUiTemplateUpdates;
 assert.equal(
-  Number(typeof legacyUiTemplateParser === 'function') + Number(typeof simplifiedUiTemplateParser === 'function'),
+  Number(typeof legacyUiTemplateParser === 'function') + Number(typeof currentUiTemplateParser === 'function'),
   1,
   'data-services.js must export exactly one complete UI-template parser contract'
 );
@@ -135,15 +135,45 @@ if (typeof legacyUiTemplateParser === 'function') {
     'legacy UI-template parser must route invalid JSON through the detailed syntax-error helper'
   );
 } else {
-  const parsed = simplifiedUiTemplateParser('<ui_template_updates>\nscore=42\nname=Alice\n</ui_template_updates>');
-  assert.equal(JSON.stringify(parsed), '{"updates":[{"id":"","variables":{"score":42,"name":"Alice"}}]}');
-  assert.throws(
-    () => simplifiedUiTemplateParser('<ui_template_updates>\nbroken-line\n</ui_template_updates>'),
-    error => error?.name === 'SyntaxError'
-      && error.jsonLine === 1
-      && /简化变量格式错误/.test(error.message),
-    'simplified UI-template parser must reject malformed path=value lines with its line-aware error'
-  );
+  let jsonProbe;
+  let jsonProbeError;
+  try {
+    jsonProbe = currentUiTemplateParser('{"score":42,"name":"Alice"}');
+  } catch (error) {
+    jsonProbeError = error;
+  }
+  const usesJsonContract = JSON.stringify(jsonProbe) === '{"updates":[{"id":"","variables":{"score":42,"name":"Alice"}}]}';
+  if (usesJsonContract) {
+    assert.equal(jsonProbeError, undefined, 'JSON parser probe must not throw');
+    const fenced = currentUiTemplateParser('```json\n{"score":42}\n```');
+    assert.equal(JSON.stringify(fenced), '{"updates":[{"id":"","variables":{"score":42}}]}');
+    const multi = currentUiTemplateParser(
+      '[{"id":" card ","variables":{"score":42}},{"id":"name","variables":{"value":"Alice"}}]',
+      [{ id: 'card' }, { id: 'name' }]
+    );
+    assert.equal(JSON.stringify(multi), '{"updates":[{"id":"card","variables":{"score":42}},{"id":"name","variables":{"value":"Alice"}}]}');
+    assert.throws(
+      () => currentUiTemplateParser('{"score":}'),
+      error => error?.name === 'SyntaxError'
+        && error.jsonSource === '{"score":}'
+        && /JSON变量块格式错误/.test(error.message),
+      'JSON UI-template parser must reject malformed JSON and preserve the parsed source'
+    );
+  } else {
+    assert.ok(
+      jsonProbeError?.name === 'SyntaxError' && /简化变量格式错误/.test(jsonProbeError.message),
+      'UI-template parser must implement either the reviewed JSON or path=value contract'
+    );
+    const parsed = currentUiTemplateParser('<ui_template_updates>\nscore=42\nname=Alice\n</ui_template_updates>');
+    assert.equal(JSON.stringify(parsed), '{"updates":[{"id":"","variables":{"score":42,"name":"Alice"}}]}');
+    assert.throws(
+      () => currentUiTemplateParser('<ui_template_updates>\nbroken-line\n</ui_template_updates>'),
+      error => error?.name === 'SyntaxError'
+        && error.jsonLine === 1
+        && /简化变量格式错误/.test(error.message),
+      'simplified UI-template parser must reject malformed path=value lines with its line-aware error'
+    );
+  }
 }
 const sharedProcessMainContent = dataServicesContext.window.RPHubUiTemplateUtils.processMainContent;
 const incompleteImageResult = sharedProcessMainContent('正文 image###unfinished', true);
@@ -330,4 +360,4 @@ assert.match(appSource, /batchController\.signal,\s*manual/);
 const presenceServerSource = await read('presence-server/server.js');
 assert.match(presenceServerSource, /if\s*\(versionRefreshPromise\)\s*return\s*versionRefreshPromise;/);
 assert.match(presenceServerSource, /latestVersionId\s*=\s*Math\.max\(latestVersionId,\s*versionId\);/);
-console.log('Upstream 1.8.4 merge regression contract: PASS');
+console.log('Upstream merge regression contracts: PASS');

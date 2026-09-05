@@ -24,12 +24,14 @@
 - Git 内容冲突为 `assets/js/app.js`、`assets/js/core-utils.js` 和 `assets/js/data-services.js`；首个有效错误为 `Path is not in the auto-resolver manifest: assets/js/app.js`。
 - 失败后的 issue 报告步骤又因仓库禁用 Issues 返回错误；这是次生告警失败，不是同步、构建或发布失败的根因。
 - 失败发生在 prepare-only 合并阶段，依赖安装、测试、Android 构建、提交、GitHub Release 和 Gitee 镜像步骤均未执行。
+- 第二门禁失败工作流为 `33964536295`：三个冲突均已自动解析，resolver、重应用幂等和 adapter proof 全部通过；随后 `Verify adapter and upstream hooks` 在 `merge-regressions.mjs:138` 首次失败，旧测试向 1.9.1 的 `parseUiTemplateUpdates` 传入了 `路径=值`，触发 `JSON变量块格式错误`。后续构建与发布仍全部跳过，Issues 禁用报错仍只是次生失败。
 
 ### 根因
 
 - 既有 resolver 只登记了可从旧上游 blob 纯重放的 HTML、core-utils 和 data-services overlay；`app.js` 的本地 Android 返回键、Square 镜像、备份桥、离屏 iframe 和性能钩子此前依赖 Git 自动合并，因此遇到内容重叠时按设计 fail closed。
 - `app.js` 有两个真实冲突块：上游重新加入了支持 `preventTruncation` 的内联 `processMainContent`，而本地已将该处理器移到 data-services 的共享缓存；上游同时移除了记忆导入导出 UI 和 handler，并移除了 handler 使用的 `hasVectorEmbedding` 导入。
 - 直接选 ours 会留下无 UI 入口且引用已删除 helper 的记忆 handler，并丢失上游防截断语义；直接选 theirs 则会与本地导入的共享 `processMainContent` 重名，并丢失本地缓存路径。
+- 第二门禁不是 resolver 或运行时代码回归：1.9.1 有意保留 `parseUiTemplateUpdates` 名称并将其输入改为原始 JSON（含 fenced JSON 和多模板数组）；既有回归测试仅按导出函数名把它误判为 1.8.9 的简化 `路径=值` 合约。
 
 ### 处理
 
@@ -37,6 +39,7 @@
 - 正文处理保留 data-services 的共享缓存，并在 app wrapper 中先执行上游 `preventTruncation` 的不完整 `image###` 清理，再调用缓存实现。
 - 记忆导入导出 handler 随上游删除：上游 `index.html` 已移除对应按钮，且 `hasVectorEmbedding` 已删除；保留该块只会制造不可达代码和运行时引用错误。其他 Android 文件导出、完整备份和用户选择保存位置路径保持不变。
 - 输出按新的 upstream blob 重建 EOL，而不是继承 Git 冲突 marker 的 checkout 换行；真实合并的 EOL baseline 保持零新增噪声，没有扩大 allowance。
+- 第二门禁只修正测试契约，不改生产 parser：用真实解析结果辨识 1.8.9 `路径=值` 与 1.9.1 JSON 合约，并分别验证合法输入和对应的 SyntaxError；无法匹配任一完整已审查行为时继续 fail closed，不依赖源码字符串断言。
 
 ### 验证
 
@@ -44,10 +47,12 @@
 - 真实隔离 worktree 合并得到与 workflow 一致的三个冲突；解析后无未合并路径，连续两次重应用均为 `REAPPLY_CHANGED_FILES=0`，`node --check assets/js/app.js` 和 `git diff --check` 通过。
 - `node scripts/upstream-sync/tests/eol-baseline-guard.mjs`：以 `MERGE_HEAD=9c06119` 为基线通过；未增加 `app.js` 或其他文件的 EOL allowance。
 - 完整 `npm run test:upstream-sync`、`npm run test:platform` 和 `npm run test:performance` 均通过；Web 构建及 Android/发布链仍由审查后的正式 workflow 执行并核验。
+- 第二门禁修复后，当前 1.8.9 工作树真实执行 `路径=值` 成功/失败路径通过；`807d8a6 + 9c06119` 隔离合并结果真实执行 JSON、fenced JSON、多模板数组和 malformed JSON 路径也通过。
 
 ### 版本与发布影响
 
 - 修复补丁本身不改版本号、不创建同步 merge commit，也不发布 Release；失败的 `33951149392` 没有生成 APK 或更新 GitHub/Gitee 发布面。
+- 第二门禁失败的 `33964536295` 同样未进入构建、提交或发布步骤；本次测试修复也不改变版本元数据。
 - 审查通过后应由既有 workflow 重新合并 `1.9.1`、计算 Android 修订号并完成发布，随后分别核对远程 `main`、Release target/APK/SHA、`android-latest` 和 Gitee 镜像。
 
 ### 后续风险
