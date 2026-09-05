@@ -3272,7 +3272,9 @@ const app = createApp({
 
                     ({ pattern: regexPattern, flags } = cardUtils.normalizeRegexModifiers(regexPattern, flags));
                     if (isImageGenScript && settings.preventTruncation) {
-                        regexPattern = regexPattern.replace('(?:###|(?=\\r?\\n)|$)', '###');
+                        regexPattern = regexPattern
+                            .replace('([^\\r\\n]*?)', '([\\s\\S]*?)')
+                            .replace('(?:###|(?=\\r?\\n)|$)', '###');
                     }
 
                     const re = new RegExp(regexPattern, flags);
@@ -5228,7 +5230,7 @@ const app = createApp({
                             reuseGeneratingState: true,
                             continueAssistantMessageId: assistantMessage.id,
                             continuationAttempt: continuationAttempt + 1,
-                            continuationPrompt: '输出被截断，请紧接着继续生成，不要重复已经输出的内容。'
+                            continuationPrompt: '输出被截断，请按输出规则衔接着最后一个字尽快补全当前阶段剧情，不要重复已经输出的内容，不要冗余输出，不要开启新的剧情段落。'
                         });
                     });
                     return;
