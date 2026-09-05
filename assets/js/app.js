@@ -56,7 +56,6 @@ const {
     getVectorMemoryFingerprint,
     getVectorMemoryText,
     getVectorLexicalMatch,
-    hasVectorEmbedding,
     isEmbeddingLike,
     isEnabledVectorMemory,
     isVectorMemory,
@@ -116,7 +115,7 @@ const {
     setUiTemplateValue,
     stringifyUiSchema,
     stripUiTemplateUpdateBlock,
-    processMainContent
+    processMainContent: processMainContentCached
 } = window.RPHubUiTemplateUtils;
 const {
     cloneForStorage,
@@ -614,7 +613,6 @@ const app = createApp({
             contextSize: MAX_CONTEXT_SIZE,
             temperature: 1.0,
             reasoningEffort: '',
-            autoFetchModels: true,
             stream: true,
             activeToolAggressiveness: 'adaptive',
             activeToolAggressivenessVersion: 2,
@@ -622,6 +620,8 @@ const app = createApp({
             useCharacterBackground: true,
             immersiveMode: false,
             showLatestUsageBar: false,
+            preventTruncation: false,
+            truncationMaxAttempts: 5,
             styleFilterEnabled: true,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
@@ -834,6 +834,10 @@ const app = createApp({
         });
 
         const currentModelMode = ref('quality');
+        const isGeminiModel = computed(() => /gemini/i.test(String(settings.model || '')));
+        watch(isGeminiModel, enabled => {
+            if (!enabled) settings.preventTruncation = false;
+        }, { immediate: true });
         const modelMode = computed({
             get: () => {
                 return currentModelMode.value;
@@ -1391,8 +1395,6 @@ const app = createApp({
         const worldInfoKeysText = ref('');
         const editingActiveTool = reactive({ id: undefined, data: {} });
 
-        const sysInstruction = ref('');
-        const showInstructionPanel = ref(false);
         const showContextViewerModal = ref(false);
         const showStoryBranchModal = ref(false);
         const showStoryBranchNameEditor = ref(false);
@@ -2562,6 +2564,10 @@ const app = createApp({
         };
 
         const getLastAssistantMessage = () => [...chatHistory.value].reverse().find(msg => msg && msg.role === 'assistant');
+        const summarizeUiTemplateFailure = (reason) => {
+            const text = String(reason || 'UI模板变量校验失败').replace(/\s+/g, ' ').trim();
+            return text.length > 800 ? `${text.slice(0, 797)}...` : text;
+        };
         const buildMainModelUiTemplateUpdatePrompt = () => {
             if (!settings.uiTemplateEnabled || !settings.uiTemplateMainModelAnalysis) return '';
             const templates = activeUiTemplates.value;
@@ -2586,14 +2592,15 @@ const app = createApp({
                 return { handled: false, changed: false };
             }
             delete targetMessage.uiTemplateAnalysisFailure;
-            const recordFailure = (result, reason) => {
+            const recordFailure = (reason) => {
+                const summary = summarizeUiTemplateFailure(reason);
                 targetMessage.uiTemplateAnalysisFailure = {
-                    result,
-                    reason,
+                    summary,
+                    reason: summary,
                     sourceMessageId: targetMessage.id || null
                 };
                 failUiTemplateAnalysis('变量分析失败，下次请求将自动修正', targetMessage.id || null);
-                console.warn('[UI模板] 主模型变量分析失败:', reason, result);
+                console.warn('[UI模板] 主模型变量分析失败:', summary);
                 return { handled: true, changed: false };
             };
             const match = findUiTemplateUpdateBlock(targetMessage.content);
@@ -2601,19 +2608,19 @@ const app = createApp({
                 const missingTemplates = templates
                     .map(template => `模板“${template.name || '未命名'}”（ID：${template.id}）`)
                     .join('；');
-                return recordFailure(`未输出：${missingTemplates}`, `未输出UI模板变量块：${missingTemplates}`);
+                return recordFailure(`未输出UI模板变量块：${missingTemplates}`);
             }
 
             let updates = [];
             try {
                 const updateContent = match[1];
-                const parsed = parseUiTemplateUpdates(updateContent);
+                const parsed = parseUiTemplateUpdates(updateContent, templates);
                 updates = normalizeUiTemplateUpdateList(parsed, templates);
             } catch (e) {
                 const reason = e instanceof SyntaxError
                     ? `变量块格式错误：${e.message}`
                     : e.message;
-                return recordFailure(e?.jsonSource || match[1], reason);
+                return recordFailure(reason);
             }
 
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));
@@ -2678,12 +2685,11 @@ const app = createApp({
             const userMessage = chatHistory.value[userIndex];
             const failure = failureMessage.uiTemplateAnalysisFailure;
             const correctionPrompt = BUILTIN_PROMPTS.buildMainModelUiTemplateCorrectionPrompt({
-                failedResult: failure.result,
+                failureSummary: failure.summary || summarizeUiTemplateFailure(failure.reason),
                 failureReason: failure.reason
             });
             userMessage.uiTemplateCorrection = {
-                result: failure.result,
-                reason: failure.reason,
+                summary: failure.summary || summarizeUiTemplateFailure(failure.reason),
                 sourceMessageId: failure.sourceMessageId || failureMessage.id || null
             };
             delete failureMessage.uiTemplateAnalysisFailure;
@@ -3381,6 +3387,7 @@ const app = createApp({
                         : (script.replaceString || '');
 
                     if (!regexPattern) return;
+                    const isImageGenScript = (script.name || script.scriptName) === 'NAI画图正则';
 
                     // 解析 /pattern/flags 格式
                     if (regexPattern.startsWith('/') && regexPattern.lastIndexOf('/') > 0) {
@@ -3394,6 +3401,9 @@ const app = createApp({
                     }
 
                     ({ pattern: regexPattern, flags } = cardUtils.normalizeRegexModifiers(regexPattern, flags));
+                    if (isImageGenScript && settings.preventTruncation) {
+                        regexPattern = regexPattern.replace('(?:###|(?=\\r?\\n)|$)', '###');
+                    }
 
                     const re = new RegExp(regexPattern, flags);
 
@@ -3436,7 +3446,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, settings.preventTruncation, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
@@ -3833,11 +3843,6 @@ const app = createApp({
             clearPendingChatImages();
 
             let finalContent = content;
-            if (sysInstruction.value.trim()) {
-                finalContent += '\n\n[系统指令: ' + sysInstruction.value.trim() + ']';
-                sysInstruction.value = ''; // Auto clear after sending
-            }
-
             if (cardInteraction) {
                 chatHistory.value.push({
                     role: 'user',
@@ -3952,7 +3957,6 @@ const app = createApp({
                 const cotMatch = msg.content.match(/<(thinking|think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
                 const uiTemplateUpdateMatch = findUiTemplateUpdateBlock(msg.content);
                 msg.originalCot = cotMatch ? cotMatch[0] : '';
-                msg.originalSys = parseCot(msg.content).sys;
                 msg.originalUiTemplateUpdate = uiTemplateUpdateMatch ? uiTemplateUpdateMatch[0] : '';
                 msg.originalEditMessageContent = stripUiTemplateUpdateBlock(parseCot(msg.content).main);
                 msg.editMessageContent = msg.originalEditMessageContent;
@@ -3965,7 +3969,6 @@ const app = createApp({
             delete message.editMessageContent;
             delete message.editMessageHeight;
             delete message.originalCot;
-            delete message.originalSys;
             delete message.originalUiTemplateUpdate;
             delete message.originalEditMessageContent;
         };
@@ -3975,9 +3978,6 @@ const app = createApp({
             if (msg) {
                 const contentChanged = String(msg.editMessageContent || '') !== String(msg.originalEditMessageContent || '');
                 let finalContent = msg.editMessageContent;
-                if (msg.originalSys) {
-                    finalContent = finalContent + '\n\n[系统指令:\n' + msg.originalSys + ']';
-                }
                 if (msg.originalUiTemplateUpdate) {
                     finalContent = finalContent.trimEnd() + '\n\n' + msg.originalUiTemplateUpdate;
                 }
@@ -4100,7 +4100,10 @@ const app = createApp({
                 .map(m => ({
                     role: m.role,
                     name: m.role === 'user' ? user.name : (m.name || currentCharacter.value.name),
-                    content: replaceUserNamePlaceholder(appendMessageImageDescriptions(m, parseCot(m.content || '').main))
+                    content: replaceUserNamePlaceholder(appendMessageImageDescriptions(
+                        m,
+                        parseCot(stripUiTemplateUpdateBlock(m.content || '')).main
+                    ))
                 }));
             const recentMessages = sourceMessages.slice(-normalizedUiTemplateAnalysisDepth);
 
@@ -4178,7 +4181,17 @@ const app = createApp({
                         const data = await response.json();
                         if (!isCurrentRun()) return;
                         let content = data.choices?.[0]?.message?.content || '';
-                        const parsed = parseUiTemplateUpdates(content);
+                        const latestUiTemplateAnalysis = {
+                            time: new Date().toISOString(),
+                            model,
+                            templateId: template.id,
+                            templateName: template.name || template.id,
+                            content: String(content)
+                        };
+                        window.__RPHubLastUiTemplateAnalysis = latestUiTemplateAnalysis;
+                        console.info('[UI模板][副模型] 最新一次变量输出：', latestUiTemplateAnalysis);
+                        const updateBlock = findUiTemplateUpdateBlock(content);
+                        const parsed = parseUiTemplateUpdates(updateBlock ? updateBlock[1] : content, [template]);
                         const updates = normalizeUiTemplateUpdates(parsed, template);
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
@@ -4575,6 +4588,17 @@ const app = createApp({
             });
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
         };
+        const isLikelyTruncatedResponse = (text) => {
+            const value = stripUiTemplateUpdateBlock(String(text || ''))
+                .replace(/<\/?(?:thinking|think|cot)>/gi, '')
+                .replace(/image###[^\r\n]*###\s*$/i, '')
+                .replace(/[*_~`]+\s*$/g, '')
+                .trim();
+            if (!value) return false;
+            return !/[。！？!?；;：:.!?…」』）》）】〕］\]}"'’”]$/.test(value);
+        };
+        const getTruncationMaxAttempts = () => Math.min(10, Math.max(5, Number(settings.truncationMaxAttempts) || 5));
+
         let _wasCancelled = false;
         const generateResponse = async (startTime = null, options = {}) => {
             const reuseGeneratingState = options.reuseGeneratingState === true;
@@ -4582,6 +4606,8 @@ const app = createApp({
             const activeToolDepth = Number(options.activeToolDepth) || 0;
             const continueAssistantMessageId = options.continueAssistantMessageId || null;
             const continuationToolCallId = options.continuationToolCallId || null;
+            const continuationAttempt = Number(options.continuationAttempt) || 0;
+            const continuationPrompt = String(options.continuationPrompt || '请直接接着上一条回复续写，不要重复已经输出的内容，也不要解释续写过程。');
             const requestModel = settings.model;
 
             if (!currentCharacter.value) {
@@ -4604,8 +4630,9 @@ const app = createApp({
             // 避免底部全局 typing 占位气泡冒出来。
             isReceiving.value = !!continuationTargetMessage;
             isThinking.value = false;
-            activeToolContinuationMessageId.value = continuationTargetMessage?.id || null;
-            activeToolContinuationToolCallId.value = continuationTargetMessage ? continuationToolCallId : null;
+            const isToolContinuation = !!(continuationTargetMessage && continuationToolCallId);
+            activeToolContinuationMessageId.value = isToolContinuation ? continuationTargetMessage.id : null;
+            activeToolContinuationToolCallId.value = isToolContinuation ? continuationToolCallId : null;
             activeToolContinuationHasResponse.value = false;
             abortController.value = new AbortController();
             let generationStartTime = startTime || Date.now();
@@ -4915,7 +4942,7 @@ const app = createApp({
                     const cleanSourceContent = (source) => {
                         // Remove internal thinking/COT from history before sending, then restore only the retained recent blocks.
                         const parsedData = parseCot(source.content || '');
-                        let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateContextInjection(parsedData.main)));
+                        let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateUpdateBlock(stripUiTemplateContextInjection(parsedData.main))));
                         const recentThinking = source.role === 'assistant' ? recentThinkingByMessage.get(source) : '';
                         if (recentThinking) content = `${wrapAnalysis(retainedThinkingTag, recentThinking)}${content}`;
                         if (source === openingSourceMessage && openingThinking) content = `${openingThinking}${content}`;
@@ -4926,13 +4953,9 @@ const app = createApp({
                             && !suppressUiTemplateCorrection
                             && source.uiTemplateCorrection) {
                             content = `${BUILTIN_PROMPTS.buildMainModelUiTemplateCorrectionPrompt({
-                                failedResult: source.uiTemplateCorrection.result,
+                                failureSummary: source.uiTemplateCorrection.summary,
                                 failureReason: source.uiTemplateCorrection.reason
                             })}\n\n${content.trimStart()}`;
-                        }
-                        const cleanSys = stripDisabledImageGenContext(parsedData.sys || '');
-                        if (cleanSys && source.role === 'user') {
-                            content += '\n\n[系统指令: ' + cleanSys + ']';
                         }
                         return content.trim();
                     };
@@ -5018,6 +5041,12 @@ const app = createApp({
                 name,
                 content
             }));
+            if (continueAssistantMessageId && !continuationToolCallId) {
+                apiMessages.push({
+                    role: 'user',
+                    content: continuationPrompt
+                });
+            }
 
             let generatedAssistantMessageId = null;
             let assistantMessage = null;
@@ -5026,6 +5055,7 @@ const app = createApp({
             let continuationContentStarted = false;
             let continuationReasoningStarted = false;
             let responseUsage = null;
+            let generationFailed = false;
 
             if (continuingAssistantMessage && continuationToolCallId && Array.isArray(continuingAssistantMessage.toolCalls)) {
                 continuationToolCall = continuingAssistantMessage.toolCalls.find(call => call && call.id === continuationToolCallId) || null;
@@ -5064,11 +5094,17 @@ const app = createApp({
                 }
 
                 const existing = String(message[field] || '');
+                const appendValue = isContinuation && field === 'content' && !hasStarted
+                    ? String(text).replace(/^\s+/, '')
+                    : text;
+                if (!appendValue) return;
 
                 if (isContinuation && !hasStarted && existing.trim()) {
-                    message[field] = existing.replace(/\s+$/, '') + '\n\n' + text;
+                    message[field] = field === 'content'
+                        ? existing.replace(/\s+$/, '') + appendValue
+                        : existing.replace(/\s+$/, '') + '\n\n' + appendValue;
                 } else {
-                    message[field] = existing + text;
+                    message[field] = existing + appendValue;
                 }
 
                 if (isContinuation && !hasStarted) {
@@ -5231,7 +5267,11 @@ const app = createApp({
 
                 if (assistantMessage) {
                     generatedAssistantMessageId = assistantMessage.id;
-                    if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis) {
+                    const deferUiTemplateAnalysis = settings.preventTruncation
+                        && activeToolDepth === 0
+                        && continuationAttempt < getTruncationMaxAttempts()
+                        && isLikelyTruncatedResponse(assistantMessage.content);
+                    if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis && !deferUiTemplateAnalysis) {
                         applyMainModelUiTemplateUpdates(assistantMessage, requestModel);
                     }
 
@@ -5239,6 +5279,7 @@ const app = createApp({
                     if (recentGenerationTimes.value.length > 5) recentGenerationTimes.value.shift();
                 }
             } catch (error) {
+                generationFailed = true;
                 if (error.name === 'AbortError') {
                     _wasCancelled = true;
                     showToast('生成已中止', 'info');
@@ -5292,32 +5333,65 @@ const app = createApp({
                     continuationToolCall.status = 'done';
                 }
                 collapseActiveNativeReasoning();
+                const wasCancelled = _wasCancelled;
+                _wasCancelled = false;
+                const shouldAutoContinue = settings.preventTruncation
+                    && !wasCancelled
+                    && !generationFailed
+                    && activeToolDepth === 0
+                    && continuationAttempt < getTruncationMaxAttempts()
+                    && assistantMessage
+                    && isLikelyTruncatedResponse(assistantMessage.content);
+                if (shouldAutoContinue) {
+                    isGenerating.value = true;
+                    isReceiving.value = true;
+                }
                 await saveChatHistoryNow();
-                isGenerating.value = false;
-                isReceiving.value = false;
                 isThinking.value = false;
+                if (!shouldAutoContinue) {
+                    isGenerating.value = false;
+                    isReceiving.value = false;
+                }
                 if (!continueAssistantMessageId || activeToolContinuationMessageId.value === continueAssistantMessageId) {
                     activeToolContinuationMessageId.value = null;
                     activeToolContinuationToolCallId.value = null;
                     activeToolContinuationHasResponse.value = false;
                 }
                 abortController.value = null;
-                const wasCancelled = _wasCancelled;
-                _wasCancelled = false;
                 if (waitTimer) {
                     clearInterval(waitTimer);
                     waitTimer = null;
                 }
 
-                const needsPostGenerationTurns = !wasCancelled
-                    && ((settings.uiTemplateEnabled && generatedAssistantMessageId)
-                        || memorySettings.enabled);
-                const activeToolContinued = !wasCancelled && assistantMessage
-                    ? await handleActiveToolCallFromAssistant(assistantMessage, activeToolDepth)
-                    : false;
+                const activeToolContinued = shouldAutoContinue
+                    ? false
+                    : (!wasCancelled && assistantMessage
+                        ? await handleActiveToolCallFromAssistant(assistantMessage, activeToolDepth)
+                        : false);
                 if (!activeToolContinued) {
                     resetActiveToolResultContext();
                 }
+                if (shouldAutoContinue) {
+                    nextTick(() => {
+                        if (chatHistory.value[chatHistory.value.length - 1] !== assistantMessage
+                            || !assistantMessage.id) {
+                            isGenerating.value = false;
+                            isReceiving.value = false;
+                            return;
+                        }
+                        generateResponse(Date.now(), {
+                            reuseGeneratingState: true,
+                            continueAssistantMessageId: assistantMessage.id,
+                            continuationAttempt: continuationAttempt + 1,
+                            continuationPrompt: '输出被截断，请紧接着继续生成，不要重复已经输出的内容。'
+                        });
+                    });
+                    return;
+                }
+
+                const needsPostGenerationTurns = !wasCancelled
+                    && ((settings.uiTemplateEnabled && generatedAssistantMessageId)
+                        || memorySettings.enabled);
                 const hasCompletedTurns = !activeToolContinued && needsPostGenerationTurns && buildConversationTurnSnapshot().turns.length > 0;
 
                 if (hasCompletedTurns && settings.uiTemplateEnabled && generatedAssistantMessageId && !settings.uiTemplateMainModelAnalysis) {
@@ -9530,9 +9604,7 @@ const app = createApp({
                 selectCharacter(0);
             }
 
-            if (settings.autoFetchModels) {
-                fetchModels();
-            }
+            fetchModels();
 
             // Initial Status Check
             checkAllStatuses();
@@ -9553,9 +9625,6 @@ const app = createApp({
                     && !e.target.closest('.settings-help-trigger')
                     && !e.target.closest('.settings-help-popover')) {
                     settingsHelpTopic.value = '';
-                }
-                if (showInstructionPanel.value && !e.target.closest('.instruction-panel-container')) {
-                    showInstructionPanel.value = false;
                 }
                 if (showTokenUsageTimeFilter.value && !e.target.closest('.token-usage-time-filter-container')) {
                     showTokenUsageTimeFilter.value = false;
@@ -9608,6 +9677,24 @@ const app = createApp({
             clearTimeout(mobileKeyboardBlurTimer);
             removePlatformBackListener();
         });
+        // Keep the shared cached renderer while preserving upstream's
+        // prevent-truncation handling for incomplete image markers.
+        const processMainContent = (mainText, isGeneratingState) => {
+            let normalizedMainText = mainText;
+            if (isGeneratingState && settings.preventTruncation) {
+                const imageStart = normalizedMainText.lastIndexOf('image###');
+                if (imageStart !== -1) {
+                    const imageTail = normalizedMainText.slice(imageStart + 'image###'.length);
+                    if (!imageTail.includes('###')) {
+                        const lineBreak = imageTail.search(/[\r\n]/);
+                        normalizedMainText = normalizedMainText.slice(0, imageStart)
+                            + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');
+                    }
+                }
+            }
+            return processMainContentCached(normalizedMainText, isGeneratingState);
+        };
+
         const switchProfile = (id) => {
             const profile = userProfiles.value.find(p => p.uuid === id);
             if (profile) {
@@ -9772,7 +9859,7 @@ const app = createApp({
             processMainContent, replaceUserNamePlaceholder,
             currentView, showDescriptionPanel, showModelSelector, modelSelectionTarget, openModelSelector, showChatModelSelector, showCharacterEditor, showAddCharacterMenu, showPresetEditor, showUiTemplateEditor,
             showActiveToolEditor,
-            showExportModal, sysInstruction, showInstructionPanel, exportItems, selectedExportIndices, // Export Modal
+            showExportModal, exportItems, selectedExportIndices, // Export Modal
             showContextViewerModal, lastContextMessages, lastTriggeredWorldInfos,
             lastContextTotalLength, lastContextFloorCount, // Context Viewer
             showStoryBranchModal, showStoryBranchNameEditor, storyBranchNameDraft,
@@ -9791,7 +9878,7 @@ const app = createApp({
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
             updateModalRef, latestUpdateConfig,
-            showConfirmModal, confirmMessage, modelMode, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
+            showConfirmModal, confirmMessage, modelMode, isGeminiModel, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingCardInteraction, clearPendingCardInteraction, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
             user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
@@ -9855,125 +9942,6 @@ const app = createApp({
                     showToast(`${modeName}已清空`, 'success');
                 });
             },
-            exportMemories: async () => {
-                const isClassicMode = memorySettings.mode === MEMORY_MODE_CLASSIC;
-                let exportData;
-                if (isClassicMode) {
-                    if (classicMemories.value.length === 0) { showToast('当前模式没有记忆可导出', 'info'); return; }
-                    const exportedMemories = [...classicMemories.value]
-                        .sort((a, b) => (a.turn || 0) - (b.turn || 0))
-                        .map(memory => {
-                            const sourceMemories = isSecondaryClassicMemory(memory)
-                                ? getSecondaryClassicSourceMemories(memory)
-                                : [];
-                            return {
-                                turn: memory.turn,
-                                turnStart: memory.turnStart,
-                                turnEnd: memory.turnEnd,
-                                secondaryCompressed: memory.secondaryCompressed === true,
-                                summaryModel: memory.summaryModel || '',
-                                user: {
-                                    content: memory.sourceUserText
-                                        || sourceMemories.map(item => item.sourceUserText || '').filter(Boolean).join('\n\n'),
-                                    messageIds: memory.sourceUserIds || []
-                                },
-                                assistant: {
-                                    content: memory.sourceAssistantText
-                                        || sourceMemories.map(item => item.sourceAssistantText || '').filter(Boolean).join('\n\n'),
-                                    messageIds: memory.sourceAssistantIds || []
-                                },
-                                summary: memory.summary,
-                                sourceMemories: isSecondaryClassicMemory(memory)
-                                    ? cloneForStorage(memory.sourceMemories || [])
-                                    : undefined
-                            };
-                        });
-                    exportData = {
-                        type: 'rp-hub-summary-memories',
-                        version: 2,
-                        character: currentCharacter.value?.name || 'unknown',
-                        exportedAt: new Date().toISOString(),
-                        total: exportedMemories.length,
-                        memories: exportedMemories
-                    };
-                } else {
-                    exportData = await compactMemoriesForStorageAsync(memories.value);
-                    if (exportData.length === 0) { showToast('当前模式没有记忆可导出', 'info'); return; }
-                }
-                let result;
-                try {
-                    result = await downloadJsonFile(
-                        exportData,
-                        `${isClassicMode ? 'summary_memories' : 'vector_memories'}_${currentCharacter.value?.name || 'unknown'}.json`,
-                        isClassicMode ? 2 : 0,
-                        { revokeDelay: 1000 }
-                    );
-                } catch (error) {
-                    showToast(`记忆导出失败: ${error.message || '文件保存失败'}`, 'error');
-                    return;
-                }
-                if (result.cancelled) return;
-                showToast(`${isClassicMode ? '总结模式' : '向量'}记忆已导出，约 ${Math.max(1, Math.round((result.bytesWritten || 0) / 1024))} KB`, 'success');
-            },
-            importMemories: (event) => readJsonFileInput(event, async data => {
-                const isClassicMode = memorySettings.mode === MEMORY_MODE_CLASSIC;
-                if (isClassicMode) {
-                    if (data?.type !== 'rp-hub-summary-memories' || !Array.isArray(data.memories)) {
-                        throw new Error('这不是总结模式记忆文件');
-                    }
-                    const normalized = prepareClassicMemoriesForRuntime(data.memories.map(memory => ({
-                        id: generateUUID(),
-                        timestamp: Date.now(),
-                        turn: memory?.turn,
-                        turnStart: memory?.turnStart,
-                        turnEnd: memory?.turnEnd,
-                        summary: memory?.summary,
-                        enabled: true,
-                        classicMemory: true,
-                        secondaryCompressed: memory?.secondaryCompressed === true,
-                        summaryModel: String(memory?.summaryModel || ''),
-                        sourceUserIds: Array.isArray(memory?.user?.messageIds) ? memory.user.messageIds : [],
-                        sourceAssistantIds: Array.isArray(memory?.assistant?.messageIds) ? memory.assistant.messageIds : [],
-                        sourceUserText: String(memory?.user?.content || ''),
-                        sourceAssistantText: String(memory?.assistant?.content || ''),
-                        sourceMemories: Array.isArray(memory?.sourceMemories) ? memory.sourceMemories : []
-                    })));
-                    if (normalized.length === 0) throw new Error('文件中没有有效的总结模式记忆');
-                    const existingKeys = new Set(classicMemories.value.map(memory => getClassicMemoryKey(memory.sourceAssistantIds, memory.turn)));
-                    const added = normalized.filter(memory => {
-                        const key = getClassicMemoryKey(memory.sourceAssistantIds, memory.turn);
-                        if (existingKeys.has(key)) return false;
-                        existingKeys.add(key);
-                        return true;
-                    });
-                    classicMemories.value = [...classicMemories.value, ...added];
-                    await saveClassicMemoriesNow();
-                    showToast(`成功导入 ${added.length} 条总结模式记忆`, 'success');
-                    return;
-                }
-
-                const items = Array.isArray(data) ? data : data?.memories;
-                if (!Array.isArray(items)) throw new Error('文件内容不正确');
-                const normalized = items
-                    .filter(m => m && m.vectorMemory === true && hasVectorEmbedding(m))
-                    .map(m => {
-                        const { importance, ...memoryData } = m;
-                        return {
-                            ...memoryData,
-                            id: memoryData.id || generateUUID(),
-                            timestamp: memoryData.timestamp || Date.now(),
-                            turn: memoryData.turn || 0,
-                            summary: String(memoryData.summary || memoryData.paragraph || '').trim(),
-                            vectorMemory: true,
-                            chunkMode: 'paragraph',
-                            enabled: memoryData.enabled !== false
-                        };
-                    });
-                if (normalized.length === 0) throw new Error('这不是向量记忆文件');
-                memories.value = [...memories.value, ...prepareMemoriesForRuntime(normalized)];
-                await saveMemoriesNow();
-                showToast(`成功导入 ${normalized.length} 个分片`, 'success');
-            }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
             fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
