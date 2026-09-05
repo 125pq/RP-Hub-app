@@ -2,7 +2,7 @@ const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount, watch, n
 const { useStorageManagement, useTokenUsage } = window.RPHubComposables;
 const { createMessageRenderer } = window.RPHubMessageRenderer;
 const { AppSidebar } = window.RPHubLayoutComponents;
-const { requestChatCompletion } = window.RPHubApiClient;
+const { requestChatCompletion, requestJson } = window.RPHubApiClient;
 const { buildApiEndpoint } = window.RPHubApiUtils;
 const {
     ActionConfirmModal,
@@ -38,10 +38,9 @@ const {
 const {
     compressImage,
     defaultAvatar,
-    extractApiErrorMessage,
-    extractApiUsageFromText,
     generateUUID,
     getApiUsagePayload,
+    getImageTagRegex,
     normalizeApiUsage,
     parseCot,
     stringifyErrorDetail
@@ -832,9 +831,7 @@ const app = createApp({
 
         const currentModelMode = ref('quality');
         const isGeminiModel = computed(() => /gemini/i.test(String(settings.model || '')));
-        watch(isGeminiModel, enabled => {
-            if (!enabled) settings.preventTruncation = false;
-        }, { immediate: true });
+        const isTruncationEnabled = computed(() => isGeminiModel.value && settings.preventTruncation);
         const modelMode = computed({
             get: () => {
                 return currentModelMode.value;
@@ -1427,6 +1424,13 @@ const app = createApp({
             saveStoredValue: setStoredValue,
             toast: (...args) => showToast(...args)
         });
+        const requestTrackedChatCompletion = (options, type) => {
+            const apiUrl = settings.apiUrl;
+            const request = { url: buildApiEndpoint(apiUrl, 'chat/completions'), apiKey: settings.apiKey, ...options };
+            return requestChatCompletion({ ...request, onUsage: (usage, metrics) => recordApiUsage(usage, {
+                type, model: request.model, apiUrl, apiKey: request.apiKey, ...metrics
+            }) });
+        };
         const {
             cleanupUnusedStorage,
             formatStorageSize,
@@ -2148,8 +2152,8 @@ const app = createApp({
             const cards = [...event.currentTarget.querySelectorAll('.generated-image-card')];
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
-            const mainText = parseCot(message?.content || '').main;
-            const imageMatches = [...mainText.matchAll(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/g)];
+            const sourceText = String(message?.content || '');
+            const imageMatches = cardUtils.findUnprotectedMatches(sourceText, getImageTagRegex(isTruncationEnabled.value));
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
@@ -2162,11 +2166,9 @@ const app = createApp({
             const swapIndex = Math.floor(Math.random() * (tags.length - 1));
             [tags[swapIndex], tags[swapIndex + 1]] = [tags[swapIndex + 1], tags[swapIndex]];
             const updatedToken = `image###${tags.join(', ')}###`;
-            const updatedMainText = mainText.slice(0, imageMatch.index)
+            const updatedContent = sourceText.slice(0, imageMatch.index)
                 + updatedToken
-                + mainText.slice(imageMatch.index + imageMatch[0].length);
-            const mainStart = message.content.lastIndexOf(mainText);
-            if (mainStart < 0) return;
+                + sourceText.slice(imageMatch.index + imageMatch[0].length);
             const sourceUrl = card.dataset.imageRequest || card.querySelector('img')?.getAttribute('src');
             if (!sourceUrl) return;
             const nextImageUrl = new URL(sourceUrl, window.location.href);
@@ -2187,9 +2189,7 @@ const app = createApp({
                     finishLoading();
                     return;
                 }
-                message.content = originalContent.slice(0, mainStart)
-                    + updatedMainText
-                    + originalContent.slice(mainStart + mainText.length);
+                message.content = updatedContent;
                 message.shouldAnimate = false;
                 scheduleChatHistorySave();
                 showToast('已重新生成图片', 'success');
@@ -3212,7 +3212,7 @@ const app = createApp({
             if (isAutoImageGenEnabled.value) return text; // 生图开启时保留
             return String(text)
                 .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, '')
-                .replace(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/gi, '')
+                .replace(getImageTagRegex(isTruncationEnabled.value), '')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -3271,13 +3271,9 @@ const app = createApp({
                     }
 
                     ({ pattern: regexPattern, flags } = cardUtils.normalizeRegexModifiers(regexPattern, flags));
-                    if (isImageGenScript && settings.preventTruncation) {
-                        regexPattern = regexPattern
-                            .replace('([^\\r\\n]*?)', '([\\s\\S]*?)')
-                            .replace('(?:###|(?=\\r?\\n)|$)', '###');
-                    }
-
-                    const re = new RegExp(regexPattern, flags);
+                    const re = isImageGenScript
+                        ? getImageTagRegex(isTruncationEnabled.value)
+                        : new RegExp(regexPattern, flags);
 
                     // --- Protection Logic Start ---
                     // 只有当正则不包含 < 或 > 且不包含 markdown 代码块标记 (```) 时，才启用 HTML/代码块保护
@@ -3312,7 +3308,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, settings.styleFilterEnabled, settings.preventTruncation, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, isTruncationEnabled.value, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
@@ -3382,11 +3378,7 @@ const app = createApp({
             try {
                 if (isManual) showToast('正在获取模型列表...', 'info');
                 const url = buildApiEndpoint(settings.apiUrl, 'models');
-                const response = await fetch(url, {
-                    headers: { 'Authorization': `Bearer ${apiKey}` }
-                });
-                if (!response.ok) throw new Error('Failed to fetch models');
-                const data = await response.json();
+                const data = await requestJson({ url, apiKey });
                 availableModels.value = data.data || [];
                 if (isManual) showToast(`成功获取 ${availableModels.value.length} 个模型`, 'success');
             } catch (error) {
@@ -3474,11 +3466,8 @@ const app = createApp({
                 return;
             }
             await checkConnectionStatus(apiStatus, apiLatency, 'API', signal => (
-            fetch(buildApiEndpoint(settings.apiUrl, 'models'), {
-                    headers: { 'Authorization': `Bearer ${settings.apiKey}` },
-                    signal
-                })
-            ));
+                requestJson({ url: buildApiEndpoint(settings.apiUrl, 'models'), apiKey: settings.apiKey, signal })
+            ), () => true);
         };
 
         const checkImageGenStatus = async () => {
@@ -3590,11 +3579,8 @@ const app = createApp({
             reader.readAsDataURL(file);
         });
         const recognizeChatImage = async (image) => {
-            const requestStartedAt = Date.now();
             try {
-                const result = await requestChatCompletion({
-                url: buildApiEndpoint(settings.apiUrl, 'chat/completions'),
-                    apiKey: settings.apiKey,
+                const result = await requestTrackedChatCompletion({
                     model: settings.visionModel,
                     temperature: 0.2,
                     stream: false,
@@ -3611,7 +3597,7 @@ const app = createApp({
                             }
                         ]
                     }]
-                });
+                }, 'image_recognition');
                 const target = pendingChatImages.value.find(item => item.id === image.id);
                 if (!target) return true;
                 const description = (Array.isArray(result.content)
@@ -3620,13 +3606,6 @@ const app = createApp({
                 if (!description) throw new Error('识图模型没有返回有效描述');
                 target.description = description;
                 target.status = 'ready';
-                recordApiUsage(result.usage, {
-                    type: 'image_recognition',
-                    model: settings.visionModel,
-                    isStream: false,
-                    durationMs: Date.now() - requestStartedAt,
-                    outputCharacters: description.length
-                });
                 return true;
             } catch (error) {
                 const target = pendingChatImages.value.find(item => item.id === image.id);
@@ -3814,11 +3793,12 @@ const app = createApp({
                 const messageEl = chatContainer.value?.querySelector(`[data-chat-index="${index}"] .message-content-wrapper`);
                 const messageHeight = messageEl?.getBoundingClientRect?.().height || 0;
                 msg.isEditing_Message = true;
-                const cotMatch = msg.content.match(/<(thinking|think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
+                const cotInfo = parseCot(msg.content);
                 const uiTemplateUpdateMatch = findUiTemplateUpdateBlock(msg.content);
-                msg.originalCot = cotMatch ? cotMatch[0] : '';
+                msg.originalCot = cotInfo.ranges.map(({ start, end }) => msg.content.slice(start, end)).join('\n\n')
+                    + cotInfo.closingTags;
                 msg.originalUiTemplateUpdate = uiTemplateUpdateMatch ? uiTemplateUpdateMatch[0] : '';
-                msg.originalEditMessageContent = stripUiTemplateUpdateBlock(parseCot(msg.content).main);
+                msg.originalEditMessageContent = stripUiTemplateUpdateBlock(cotInfo.main);
                 msg.editMessageContent = msg.originalEditMessageContent;
                 msg.editMessageHeight = Math.min(0.7 * window.innerHeight, Math.max(88, Math.round(messageHeight || 160)));
             }
@@ -3837,6 +3817,12 @@ const app = createApp({
             const msg = chatHistory.value[index];
             if (msg) {
                 const contentChanged = String(msg.editMessageContent || '') !== String(msg.originalEditMessageContent || '');
+                if (!contentChanged) {
+                    clearMessageEditState(msg);
+                    await saveChatHistoryNow();
+                    showToast('消息未改动', 'success');
+                    return;
+                }
                 let finalContent = msg.editMessageContent;
                 if (msg.originalUiTemplateUpdate) {
                     finalContent = finalContent.trimEnd() + '\n\n' + msg.originalUiTemplateUpdate;
@@ -3845,16 +3831,9 @@ const app = createApp({
                     finalContent = msg.originalCot + '\n\n' + finalContent;
                 }
                 msg.content = finalContent;
-                if (contentChanged) {
-                    delete msg.styleFilterHits;
-                    openStyleFilterMessageKey.value = '';
-                }
+                delete msg.styleFilterHits;
+                openStyleFilterMessageKey.value = '';
                 clearMessageEditState(msg);
-                if (!contentChanged) {
-                    await saveChatHistoryNow();
-                    showToast('消息已保存', 'success');
-                    return;
-                }
                 abortConversationBackgroundWork();
                 const snapshot = await ensureConversationMessageIds();
                 const affectedTurn = snapshot.turns.find(turnInfo =>
@@ -3972,8 +3951,6 @@ const app = createApp({
                 markUiTemplateStatus('skipped', '未选模型');
                 return false;
             }
-            const url = buildApiEndpoint(settings.apiUrl, 'chat/completions');
-
             try {
                 const updateRun = startUiTemplateUpdateRun();
                 const isCurrentRun = () => isUiTemplateUpdateRunCurrent(updateRun.seq, lockedTargetMessageId);
@@ -4001,46 +3978,28 @@ const app = createApp({
 
                 await Promise.all(templates.map(async (template) => {
                     const model = fallbackModel;
-                    const requestStartedAt = Date.now();
                     try {
                         const currentVariableJson = JSON.stringify(template.variableState || {}, null, 2);
                         const variableSchemaText = stringifyUiSchema(template.variableSchema).trim();
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${settings.apiKey}`
-                            },
-                            body: JSON.stringify({
-                                model,
-                                temperature: 0.2,
-                                stream: false,
-                                messages: [
-                                    {
-                                        role: 'system',
-                                        content: replaceUserNamePlaceholder(BUILTIN_PROMPTS.buildUiTemplateAnalysisSystemPrompt({
-                                            templateId: template.id,
-                                            userInfo: buildUserInfoPrompt(),
-                                            currentVariableJson,
-                                            variableSchemaText,
-                                            userName: user.name
-                                        }))
-                                    },
-                                    {
-                                        role: 'user',
-                                        content: JSON.stringify({
-                                            recentMessages
-                                        }, null, 2)
-                                    }
-                                ]
-                            }),
+                        const result = await requestTrackedChatCompletion({
+                            model, temperature: 0.2, stream: false,
+                            messages: [
+                                {
+                                    role: 'system',
+                                    content: replaceUserNamePlaceholder(BUILTIN_PROMPTS.buildUiTemplateAnalysisSystemPrompt({
+                                        templateId: template.id,
+                                        userInfo: buildUserInfoPrompt(),
+                                        currentVariableJson,
+                                        variableSchemaText,
+                                        userName: user.name
+                                    }))
+                                },
+                                { role: 'user', content: JSON.stringify({ recentMessages }, null, 2) }
+                            ],
                             signal: updateRun.signal
-                        });
+                        }, 'ui_template');
                         if (!isCurrentRun()) return;
-                        if (!response.ok) throw new Error(`API Error: ${response.status}`);
-                        const data = await response.json();
-                        if (!isCurrentRun()) return;
-                        let content = data.choices?.[0]?.message?.content || '';
+                        const content = parseCot(result.content).main;
                         const latestUiTemplateAnalysis = {
                             time: new Date().toISOString(),
                             model,
@@ -4053,13 +4012,6 @@ const app = createApp({
                         const updateBlock = findUiTemplateUpdateBlock(content);
                         const parsed = parseUiTemplateUpdates(updateBlock ? updateBlock[1] : content, [template]);
                         const updates = normalizeUiTemplateUpdates(parsed, template);
-                        recordApiUsage(getApiUsagePayload(data), {
-                            type: 'ui_template',
-                            model,
-                            isStream: false,
-                            durationMs: Date.now() - requestStartedAt,
-                            outputCharacters: content.length
-                        });
                         pendingTemplateUpdates.push({ template, updates, model });
                     } catch (e) {
                         if (updateRun.signal.aborted || !isCurrentRun()) return;
@@ -4420,13 +4372,11 @@ const app = createApp({
         const usesThinkingCotTag = (model) => /(?:deepseek|glm|kimi)/i.test(String(model || ''));
         const getMessageThinkingText = (message, includeNativeReasoning = true) => {
             const parts = includeNativeReasoning ? [String(message?.reasoning || '').trim()] : [];
-            const content = String(message?.content || '');
-            const thinkingPattern = /<(thinking|think|cot)>([\s\S]*?)(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/gi;
-            for (const match of content.matchAll(thinkingPattern)) parts.push(String(match[2] || '').trim());
+            parts.push(parseCot(message?.content || '').rawCot);
             return [...new Set(parts)].filter(Boolean).join('\n\n');
         };
         const wrapAnalysis = (tag, text) => text
-            ? `<${tag}>\n${text}\n</${tag}>\n`
+            ? `<${tag}>\n${text.replace(/<\s*\/?\s*(?:thinking|think|cot)\s*>/gi, '')}\n</${tag}>\n`
             : '';
         const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
@@ -4448,13 +4398,14 @@ const app = createApp({
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
         };
         const isLikelyTruncatedResponse = (text) => {
-            const value = stripUiTemplateUpdateBlock(String(text || ''))
-                .replace(/<\/?(?:thinking|think|cot)>/gi, '')
+            const parsed = parseCot(stripUiTemplateUpdateBlock(String(text || '')));
+            if (parsed.ranges.length && !parsed.isFinished) return true;
+            const value = parsed.main
                 .replace(/image###[^\r\n]*###\s*$/i, '')
                 .replace(/[*_~`]+\s*$/g, '')
                 .trim();
             if (!value) return false;
-            return !/[。！？!?；;：:.!?…」』）》）】〕］\]}"'’”]$/.test(value);
+            return !/(?:###|[。！？!?；;：:.!?…」』）》）】〕］\]}"'’”>])$/.test(value);
         };
         const getTruncationMaxAttempts = () => Math.min(10, Math.max(5, Number(settings.truncationMaxAttempts) || 5));
 
@@ -4477,9 +4428,6 @@ const app = createApp({
             const continuationTargetMessage = continueAssistantMessageId
                 ? chatHistory.value.find(msg => msg && msg.role === 'assistant' && msg.id === continueAssistantMessageId) || null
                 : null;
-            const initialAssistantOutputLength = continuationTargetMessage
-                ? String(continuationTargetMessage.content || '').length + String(continuationTargetMessage.reasoning || '').length
-                : 0;
             if (!continuationTargetMessage && activeToolDepth === 0) {
                 resetActiveToolResultContext();
             }
@@ -4801,7 +4749,9 @@ const app = createApp({
                     const cleanSourceContent = (source) => {
                         // Remove internal thinking/COT from history before sending, then restore only the retained recent blocks.
                         const parsedData = parseCot(source.content || '');
-                        let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateUpdateBlock(stripUiTemplateContextInjection(parsedData.main))));
+                        let content = stripUiTemplateContextInjection(parsedData.main);
+                        if (!settings.uiTemplateEnabled || !settings.uiTemplateMainModelAnalysis) content = stripUiTemplateUpdateBlock(content);
+                        content = stripDisabledImageGenContext(stripNextResponsePrompt(content));
                         const recentThinking = source.role === 'assistant' ? recentThinkingByMessage.get(source) : '';
                         if (recentThinking) content = `${wrapAnalysis(retainedThinkingTag, recentThinking)}${content}`;
                         if (source === openingSourceMessage && openingThinking) content = `${openingThinking}${content}`;
@@ -4913,7 +4863,6 @@ const app = createApp({
             let continuationToolCall = null;
             let continuationContentStarted = false;
             let continuationReasoningStarted = false;
-            let responseUsage = null;
             let generationFailed = false;
 
             if (continuingAssistantMessage && continuationToolCallId && Array.isArray(continuingAssistantMessage.toolCalls)) {
@@ -4974,39 +4923,6 @@ const app = createApp({
                 if (isContinuation) activeToolContinuationHasResponse.value = true;
             };
 
-            const nativeReasoningClosedMessages = new WeakSet();
-            const normalizeNativeReasoningBoundary = (message) => {
-                if (!message) return;
-                if (nativeReasoningClosedMessages.has(message)) return;
-                const reasoning = String(message.reasoning || '');
-                const closeMatch = reasoning.match(/<\/\s*(thinking|think|cot)\s*>/i);
-                if (!closeMatch) return;
-
-                const before = reasoning.slice(0, closeMatch.index)
-                    .replace(/<\s*(thinking|think|cot)\s*>/gi, '')
-                    .trim();
-                const after = reasoning.slice(closeMatch.index + closeMatch[0].length).trim();
-                message.reasoning = before;
-                if (after) {
-                    message.content = [String(message.content || '').trimEnd(), after]
-                        .filter(Boolean)
-                        .join('\n\n');
-                }
-                nativeReasoningClosedMessages.add(message);
-                isThinking.value = false;
-                collapseNativeReasoning(message);
-            };
-
-            const appendAssistantReasoning = (message, text) => {
-                if (!message || !text) return;
-                if (nativeReasoningClosedMessages.has(message)) {
-                    appendAssistantText(message, 'content', text);
-                    return;
-                }
-                appendAssistantText(message, 'reasoning', text);
-                normalizeNativeReasoningBoundary(message);
-            };
-
             const createAssistantMessage = (content = '', reasoning = '') => reactive({
                 role: 'assistant',
                 name: currentCharacter.value.name,
@@ -5024,15 +4940,13 @@ const app = createApp({
                 if (assistantMessage) return assistantMessage;
                 if (continuingAssistantMessage) {
                     assistantMessage = prepareAssistantMessageForAppend(continuingAssistantMessage);
-                    normalizeNativeReasoningBoundary(assistantMessage);
-                    if (reasoning) appendAssistantReasoning(assistantMessage, reasoning);
+                    if (reasoning) appendAssistantText(assistantMessage, 'reasoning', reasoning);
                     if (content) appendAssistantText(assistantMessage, 'content', content);
                     isReceiving.value = true;
                     return assistantMessage;
                 }
 
                 assistantMessage = createAssistantMessage(content, reasoning);
-                normalizeNativeReasoningBoundary(assistantMessage);
                 promoteActiveToolCallsFromAssistant(assistantMessage);
                 chatHistory.value.push(assistantMessage);
                 isReceiving.value = true;
@@ -5040,9 +4954,7 @@ const app = createApp({
             };
 
             try {
-                const responseResult = await requestChatCompletion({
-                url: buildApiEndpoint(settings.apiUrl, 'chat/completions'),
-                    apiKey: settings.apiKey,
+                const responseResult = await requestTrackedChatCompletion({
                     model: requestModel,
                     messages: apiMessages,
                     temperature: settings.temperature,
@@ -5060,7 +4972,7 @@ const app = createApp({
                             seededContent = !!content;
                             seededReasoning = !!reasoning;
                             if (seededReasoning) {
-                                isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
+                                isThinking.value = true;
                             }
                             if (seededContent && !reasoning) {
                                 isThinking.value = false;
@@ -5069,8 +4981,9 @@ const app = createApp({
                             await nextTick();
                         }
                         if (reasoning && !seededReasoning) {
-                            appendAssistantReasoning(assistantMessage, reasoning);
-                            isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
+                            // 原生思考中的文字标签不能改变 API 已指定的通道。
+                            appendAssistantText(assistantMessage, 'reasoning', reasoning);
+                            isThinking.value = true;
                         }
                         if (content && !seededContent) {
                             appendAssistantText(assistantMessage, 'content', content);
@@ -5078,8 +4991,7 @@ const app = createApp({
                             collapseNativeReasoning(assistantMessage);
                         }
                     }
-                });
-                responseUsage = responseResult.usage || responseUsage;
+                }, activeToolDepth > 0 ? 'tool_continuation' : 'chat');
 
                 if (!responseResult.isStream) {
                     const { content, reasoning } = responseResult;
@@ -5099,22 +5011,10 @@ const app = createApp({
                     }
                 }
                 const duration = Date.now() - generationStartTime;
-                const outputCharacters = assistantMessage
-                    ? Math.max(0, String(assistantMessage.content || '').length
-                        + String(assistantMessage.reasoning || '').length
-                        - initialAssistantOutputLength)
-                    : 0;
-                recordApiUsage(responseUsage, {
-                    type: activeToolDepth > 0 ? 'tool_continuation' : 'chat',
-                    model: requestModel,
-                    isStream: responseResult.isStream,
-                    durationMs: duration,
-                    outputCharacters
-                });
 
                 if (assistantMessage) {
                     generatedAssistantMessageId = assistantMessage.id;
-                    const deferUiTemplateAnalysis = settings.preventTruncation
+                    const deferUiTemplateAnalysis = isTruncationEnabled.value
                         && activeToolDepth === 0
                         && continuationAttempt < getTruncationMaxAttempts()
                         && isLikelyTruncatedResponse(assistantMessage.content);
@@ -5182,7 +5082,7 @@ const app = createApp({
                 collapseActiveNativeReasoning();
                 const wasCancelled = _wasCancelled;
                 _wasCancelled = false;
-                const shouldAutoContinue = settings.preventTruncation
+                const shouldAutoContinue = isTruncationEnabled.value
                     && !wasCancelled
                     && !generationFailed
                     && activeToolDepth === 0
@@ -5417,72 +5317,20 @@ const app = createApp({
             };
         };
 
-        const getClassicSummaryResponseContent = (rawText) => {
-            const readContent = (value) => {
-                if (Array.isArray(value)) {
-                    return value.map(item => item?.text || item?.content || '').join('');
-                }
-                return String(value || '');
-            };
-
-            try {
-                const data = JSON.parse(rawText);
-                const apiError = extractApiErrorMessage(data);
-                if (apiError) throw new Error(apiError);
-                return readContent(data.choices?.[0]?.message?.content || data.choices?.[0]?.text);
-            } catch (error) {
-                if (error?.name !== 'SyntaxError') throw error;
-            }
-
-            let content = '';
-            String(rawText || '').split(/\r?\n/).forEach(line => {
-                const trimmed = line.trim();
-                if (!trimmed.startsWith('data:')) return;
-                const payload = trimmed.replace(/^data:\s*/, '');
-                if (!payload || payload === '[DONE]') return;
-                try {
-                    const data = JSON.parse(payload);
-                    const choice = data.choices?.[0];
-                    content += readContent(choice?.delta?.content || choice?.message?.content || choice?.text);
-                } catch (_) { }
-            });
-            return content;
-        };
-
         const requestClassicMemoryCompletion = async (requestMessages, signal) => {
             const model = String(memorySettings.classicModel || '').trim();
             if (!settings.apiUrl || !settings.apiKey) throw new Error('请先配置 API 地址和 Key');
             if (!model) throw new Error('请先选择总结模式副模型');
 
-            const requestStartedAt = Date.now();
-            const response = await fetch(buildApiEndpoint(settings.apiUrl, 'chat/completions'), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${settings.apiKey}`
-                },
-                body: JSON.stringify({ model, temperature: 0.2, stream: false, messages: requestMessages }),
-                signal
-            });
-            const rawText = await response.text();
-            if (!response.ok) {
-                let payload = null;
-                try { payload = JSON.parse(rawText); } catch (_) { }
-                throw new Error(extractApiErrorMessage(payload, response.status) || `API Error: ${response.status}`);
-            }
-            const summary = getClassicSummaryResponseContent(rawText)
+            const result = await requestTrackedChatCompletion({
+                model, temperature: 0.2, stream: false, messages: requestMessages, signal
+            }, 'summary');
+            const summary = parseCot(result.content).main
                 .replace(/^```(?:text|markdown)?\s*/i, '')
                 .replace(/\s*```$/, '')
                 .replace(/^(?:最新对话总结|总结)[:：]\s*/i, '')
                 .trim();
             if (!summary) throw new Error('副模型没有返回有效总结');
-            recordApiUsage(extractApiUsageFromText(rawText), {
-                type: 'summary',
-                model,
-                isStream: false,
-                durationMs: Date.now() - requestStartedAt,
-                outputCharacters: summary.length
-            });
             return summary.replace(/\n{3,}/g, '\n\n');
         };
 
@@ -5866,27 +5714,16 @@ const app = createApp({
             if (normalizedInputs.some(input => !input)) throw new Error('嵌入内容不能为空');
 
             const requestStartedAt = Date.now();
-            const response = await fetch(buildApiEndpoint(settings.apiUrl, 'embeddings'), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${settings.apiKey}`
-                },
-                body: JSON.stringify({
-                    model,
-                    input: normalizedInputs.length === 1 ? normalizedInputs[0] : normalizedInputs
-                }),
-                signal
+            const apiUrl = settings.apiUrl;
+            const apiKey = settings.apiKey;
+            const data = await requestJson({
+                url: buildApiEndpoint(apiUrl, 'embeddings'), apiKey, signal,
+                body: { model, input: normalizedInputs.length === 1 ? normalizedInputs[0] : normalizedInputs }
             });
-
-            if (!response.ok) {
-                let errorPayload = null;
-                try { errorPayload = await response.json(); } catch (_) { }
-                const apiError = extractApiErrorMessage(errorPayload, response.status);
-                throw new Error(apiError || `Embedding API Error: ${response.status}`);
-            }
-
-            const data = await response.json();
+            recordApiUsage(getApiUsagePayload(data), {
+                type: 'embedding', model, apiUrl, apiKey, isStream: false,
+                durationMs: Date.now() - requestStartedAt, outputCharacters: 0
+            });
             const rows = Array.isArray(data.data) ? [...data.data] : [];
             rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
             const vectors = rows.map(row => normalizeEmbedding(row.embedding));
@@ -5900,13 +5737,6 @@ const app = createApp({
                 throw new Error('嵌入接口返回的数据不完整');
             }
 
-            recordApiUsage(getApiUsagePayload(data), {
-                type: 'embedding',
-                model,
-                isStream: false,
-                durationMs: Date.now() - requestStartedAt,
-                outputCharacters: 0
-            });
             return vectors;
         };
 
@@ -8176,7 +8006,7 @@ const app = createApp({
             const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
-                regex: '/image###([^\\r\\n]*?)(?:###|(?=\\r?\\n)|$)/g',
+                regex: getImageTagRegex().toString(),
             replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
@@ -9520,11 +9350,11 @@ const app = createApp({
         const processMainContent = (mainText, isGeneratingState) => {
             mainText = stripUiTemplateUpdateBlock(mainText);
             if (!isGeneratingState) return { text: mainText, showSpinner: false };
-            const imageStart = mainText.lastIndexOf('image###');
+            const imageStart = cardUtils.findLastUnprotectedMatch(mainText, /image###/gi)?.index ?? -1;
             if (imageStart !== -1) {
                 const imageTail = mainText.slice(imageStart + 'image###'.length);
                 if (!imageTail.includes('###')
-                    && (settings.preventTruncation || !/[\r\n]/.test(imageTail))) {
+                    && (isTruncationEnabled.value || !/[\r\n]/.test(imageTail))) {
                     const lineBreak = imageTail.search(/[\r\n]/);
                     mainText = mainText.slice(0, imageStart)
                         + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');

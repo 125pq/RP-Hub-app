@@ -1,177 +1,4 @@
-// RP-Hub runtime services: API transport, message rendering and application composables.
-
-// --- API client ---
-(function () {
-    const {
-        extractApiErrorMessage,
-        formatApiErrorMessage,
-        getApiUsagePayload
-    } = window.RPHubUtils;
-    const { extractNativeReasoning } = window.RPHubCardUtils;
-
-    const throwApiError = (message) => {
-        const error = new Error(message);
-        error.isApiError = true;
-        throw error;
-    };
-
-    const parsePayload = (rawText, status) => {
-        const data = JSON.parse(rawText);
-        const apiError = extractApiErrorMessage(data, status);
-        if (apiError) throwApiError(apiError);
-        return data;
-    };
-
-    const readFailedResponse = async (response) => {
-        let detail = '';
-        try {
-            const rawText = await response.text();
-            if (rawText) {
-                try {
-                    detail = parsePayload(rawText, response.status);
-                } catch (error) {
-                    if (error.isApiError) throw error;
-                    detail = rawText;
-                }
-            }
-        } catch (error) {
-            if (error.isApiError) throw error;
-        }
-        throw new Error(formatApiErrorMessage(response.status, detail));
-    };
-
-    const parseSsePayload = (text, status) => {
-        const data = JSON.parse(text);
-        const apiError = extractApiErrorMessage(data, status);
-        if (apiError) throwApiError(apiError);
-        const choice = data.choices?.[0];
-        if (!choice) return { data, content: '', reasoning: '' };
-        const delta = choice.delta || choice.message || {};
-        return {
-            data,
-            content: delta.content || '',
-            reasoning: extractNativeReasoning(delta) || extractNativeReasoning(choice)
-        };
-    };
-
-    const STREAM_RENDER_INTERVAL = 60;
-
-    const readStreamingResponse = async (response, onDelta) => {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let usage = null;
-        let pendingContent = '';
-        let pendingReasoning = '';
-        let flushPromise = Promise.resolve();
-
-        const flushPending = () => {
-            if (!pendingContent && !pendingReasoning) return;
-            const delta = { content: pendingContent, reasoning: pendingReasoning };
-            pendingContent = '';
-            pendingReasoning = '';
-            flushPromise = flushPromise.then(() => onDelta?.(delta));
-        };
-
-        const flushInterval = setInterval(flushPending, STREAM_RENDER_INTERVAL);
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop();
-                for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    if (!trimmedLine.startsWith('data: ')) continue;
-                    const payload = trimmedLine.slice(6);
-                    if (payload === '[DONE]') continue;
-                    try {
-                        const chunk = parseSsePayload(payload, response.status);
-                        usage = getApiUsagePayload(chunk.data) || usage;
-                        pendingContent += chunk.content;
-                        pendingReasoning += chunk.reasoning;
-                    } catch (error) {
-                        if (error.isApiError) throw error;
-                        if (/error/i.test(payload)) throw new Error(formatApiErrorMessage(response.status, payload));
-                        console.warn('Error parsing stream chunk:', error);
-                    }
-                }
-            }
-            return { content: '', reasoning: '', usage };
-        } finally {
-            clearInterval(flushInterval);
-            flushPending();
-            await flushPromise;
-        }
-    };
-
-    const readNonStreamingResponse = async (response) => {
-        const rawText = await response.text();
-        try {
-            const data = parsePayload(rawText, response.status);
-            const choice = data.choices?.[0] || {};
-            const message = choice.message || {};
-            return {
-                content: message.content || '',
-                reasoning: extractNativeReasoning(message) || extractNativeReasoning(choice),
-                usage: getApiUsagePayload(data)
-            };
-        } catch (error) {
-            if (error.isApiError) throw error;
-        }
-
-        let content = '';
-        let reasoning = '';
-        let usage = null;
-        for (const line of rawText.split('\n')) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine.startsWith('data:')) continue;
-            const payload = trimmedLine.replace(/^data:\s*/, '');
-            if (payload === '[DONE]') continue;
-            try {
-                const chunk = parseSsePayload(payload, response.status);
-                usage = getApiUsagePayload(chunk.data) || usage;
-                content += chunk.content;
-                reasoning += chunk.reasoning;
-            } catch (error) {
-                if (error.isApiError) throw error;
-                if (/error/i.test(payload)) throw new Error(formatApiErrorMessage(response.status, payload));
-            }
-        }
-        return { content, reasoning, usage };
-    };
-
-    const requestChatCompletion = async (options) => {
-        const response = await fetch(options.url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${options.apiKey}`
-            },
-            body: JSON.stringify({
-                model: options.model,
-                messages: options.messages,
-                temperature: options.temperature,
-                ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
-                stream: options.stream,
-                ...(options.stream ? { stream_options: { include_usage: true } } : {})
-            }),
-            signal: options.signal
-        });
-        if (!response.ok) await readFailedResponse(response);
-
-        const contentType = response.headers.get('content-type');
-        const isStream = !!(options.stream && contentType?.includes('text/event-stream'));
-        const result = isStream
-            ? await readStreamingResponse(response, options.onDelta)
-            : await readNonStreamingResponse(response);
-        return { ...result, isStream };
-    };
-
-    window.RPHubApiClient = Object.freeze({ requestChatCompletion });
-})();
+// RP-Hub message rendering and application composables.
 
 // --- Message renderer ---
 (function () {
@@ -478,14 +305,14 @@
                 timestamp: Date.now(),
                 type: meta.type || 'chat',
                 model: String(meta.model || ''),
-                apiUrl: String(getApiUrl?.() || ''),
+                apiUrl: String(meta.apiUrl ?? getApiUrl?.() ?? ''),
                 isStream: meta.isStream === true,
                 durationMs: Number.isFinite(meta.durationMs) ? Math.max(0, meta.durationMs) : null,
                 outputCharacters: Number.isFinite(meta.outputCharacters) ? Math.max(0, meta.outputCharacters) : null,
                 ...normalizeApiUsage(usage)
             });
             tokenUsageHistory.value.unshift(record);
-            const apiKey = String(getApiKey?.() || '').trim();
+            const apiKey = String(meta.apiKey ?? getApiKey?.() ?? '').trim();
             if (record.apiUrl && apiKey) fetchLatestQuota(record, apiKey);
             saveTokenUsageHistoryNow().catch(error => console.error('Token usage history save failed:', error));
         };

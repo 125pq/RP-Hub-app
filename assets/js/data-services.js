@@ -1643,7 +1643,9 @@ ${content}
 
     const findUiTemplateUpdateBlock = (text) => {
         const source = String(text || '');
-        const taggedCandidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /<ui_template_updates\b[^>]*>/i);
+        const taggedCandidate = window.RPHubCardUtils.findLastUnprotectedMatch(
+            source, /<ui_template_updates\b[^>]*>/i, { includeUiTemplateUpdates: true }
+        );
         const taggedTail = taggedCandidate ? source.slice(taggedCandidate.index).trimEnd() : '';
         const tagged = taggedTail.match(/^<ui_template_updates\b[^>]*>([\s\S]*?)(?:<\/ui_template_updates>)?$/i);
         if (tagged) {
