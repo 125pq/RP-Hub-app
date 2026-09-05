@@ -70,8 +70,17 @@ assertAll(data, [
   "!imageTail.includes('###') && !/[\\r\\n]/.test(imageTail)"
 ], 'data-services.js contract');
 
-assert.match(app, /stripUiTemplateUpdateBlock,\s*processMainContent\s*\n\s*\} = window\.RPHubUiTemplateUtils/);
-assert.doesNotMatch(app, /const processMainContent\s*=/, 'app.js must use the shared cached processMainContent implementation');
+assert.match(
+  app,
+  /stripUiTemplateUpdateBlock,\s*processMainContent(?:: processMainContentCached)?\s*\n\s*\} = window\.RPHubUiTemplateUtils/,
+  'app.js must import the shared cached processMainContent implementation'
+);
+if (app.includes('processMainContent: processMainContentCached')) {
+  assert.match(app, /return processMainContentCached\(normalizedMainText, isGeneratingState\);/);
+  assert.match(app, /isGeneratingState && settings\.preventTruncation/);
+} else {
+  assert.doesNotMatch(app, /const processMainContent\s*=/, 'app.js must use the shared cached processMainContent implementation');
+}
 
 const dataServicesContext = {
   window: {

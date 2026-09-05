@@ -16,6 +16,45 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-05：上游 `1.9.1`（`9c06119`）应用入口冲突
+
+### 现场
+
+- 失败工作流为 `33951149392`；本地父提交为 `8829214408fe7fcc53a5b960e4e7512dc787d9e0`，共同上游基线为 `b409ca6a62857849a3003e072dc2979e00695728`，新目标为 `9c0611964a39ff8cca8831d97ecf18b04abb1990`（上游 `1.9.1`）。
+- Git 内容冲突为 `assets/js/app.js`、`assets/js/core-utils.js` 和 `assets/js/data-services.js`；首个有效错误为 `Path is not in the auto-resolver manifest: assets/js/app.js`。
+- 失败后的 issue 报告步骤又因仓库禁用 Issues 返回错误；这是次生告警失败，不是同步、构建或发布失败的根因。
+- 失败发生在 prepare-only 合并阶段，依赖安装、测试、Android 构建、提交、GitHub Release 和 Gitee 镜像步骤均未执行。
+
+### 根因
+
+- 既有 resolver 只登记了可从旧上游 blob 纯重放的 HTML、core-utils 和 data-services overlay；`app.js` 的本地 Android 返回键、Square 镜像、备份桥、离屏 iframe 和性能钩子此前依赖 Git 自动合并，因此遇到内容重叠时按设计 fail closed。
+- `app.js` 有两个真实冲突块：上游重新加入了支持 `preventTruncation` 的内联 `processMainContent`，而本地已将该处理器移到 data-services 的共享缓存；上游同时移除了记忆导入导出 UI 和 handler，并移除了 handler 使用的 `hasVectorEmbedding` 导入。
+- 直接选 ours 会留下无 UI 入口且引用已删除 helper 的记忆 handler，并丢失上游防截断语义；直接选 theirs 则会与本地导入的共享 `processMainContent` 重名，并丢失本地缓存路径。
+
+### 处理
+
+- 新增 `patch-app-conflict.mjs` 专用解析器，只接受已经审查的两个冲突形态、完整 1/2/3 stage、普通 UTF-8 `100644` 文件和恰好两个冲突块；冲突双方去除边界空白后的 SHA-256 摘要必须与真实 workflow/隔离 fixture 完全一致，块内任何新增语句、锚点漂移、重复 marker 或本地关键钩子缺失都会拒绝整次解析。
+- 正文处理保留 data-services 的共享缓存，并在 app wrapper 中先执行上游 `preventTruncation` 的不完整 `image###` 清理，再调用缓存实现。
+- 记忆导入导出 handler 随上游删除：上游 `index.html` 已移除对应按钮，且 `hasVectorEmbedding` 已删除；保留该块只会制造不可达代码和运行时引用错误。其他 Android 文件导出、完整备份和用户选择保存位置路径保持不变。
+- 输出按新的 upstream blob 重建 EOL，而不是继承 Git 冲突 marker 的 checkout 换行；真实合并的 EOL baseline 保持零新增噪声，没有扩大 allowance。
+
+### 验证
+
+- `node scripts/upstream-sync/tests/auto-resolver.mjs`：真实 `b409ca6 → 8829214 → 9c06119` 三冲突 fixture 通过，并验证额外冲突块、ours/theirs 任一侧注入额外语句都会 fail closed。
+- 真实隔离 worktree 合并得到与 workflow 一致的三个冲突；解析后无未合并路径，连续两次重应用均为 `REAPPLY_CHANGED_FILES=0`，`node --check assets/js/app.js` 和 `git diff --check` 通过。
+- `node scripts/upstream-sync/tests/eol-baseline-guard.mjs`：以 `MERGE_HEAD=9c06119` 为基线通过；未增加 `app.js` 或其他文件的 EOL allowance。
+- 完整 `npm run test:upstream-sync`、`npm run test:platform` 和 `npm run test:performance` 均通过；Web 构建及 Android/发布链仍由审查后的正式 workflow 执行并核验。
+
+### 版本与发布影响
+
+- 修复补丁本身不改版本号、不创建同步 merge commit，也不发布 Release；失败的 `33951149392` 没有生成 APK 或更新 GitHub/Gitee 发布面。
+- 审查通过后应由既有 workflow 重新合并 `1.9.1`、计算 Android 修订号并完成发布，随后分别核对远程 `main`、Release target/APK/SHA、`android-latest` 和 Gitee 镜像。
+
+### 后续风险
+
+- 该 app resolver 有意绑定两个已审查冲突形态；上游再次移动正文处理、改变记忆设置返回结构或产生第三个 app 冲突块时会再次 fail closed，应先读首个有效错误并更新专用补丁，不能退回整文件 ours/theirs。
+- 本次隔离验证覆盖合并语义、语法、EOL 和钩子幂等；Android 实机 UI、APK 和发布面必须等正式 workflow 成功后单独验证。
+
 ## 2026-08-29：上游 `1.8.9`（`b409ca6`）核心工具与数据服务冲突
 
 ### 现场

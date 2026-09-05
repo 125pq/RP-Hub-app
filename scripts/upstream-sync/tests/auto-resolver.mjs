@@ -7,6 +7,7 @@ import { projectRoot } from '../lib.mjs';
 import { resolveAutoConflicts } from '../auto-resolver.mjs';
 import { mergeWithAutoResolver } from '../sync-orchestration.mjs';
 import { transformOverlayBlob, transformOverlayText } from '../overlay-transformers.mjs';
+import { resolveAppConflictBlob } from '../patches/patch-app-conflict.mjs';
 import { patchOfflineCharacter } from '../patches/patch-offline-assets.mjs';
 import { patchSquareHostSafeArea } from '../patches/patch-safe-area.mjs';
 
@@ -269,9 +270,9 @@ try {
 }
 
 const unknownFixture = await createConflictFixture({
-  baseFiles: { 'app.js': 'base\n' },
-  localFiles: { 'app.js': 'local\n' },
-  upstreamFiles: { 'app.js': 'upstream\n' },
+  baseFiles: { 'unregistered.js': 'base\n' },
+  localFiles: { 'unregistered.js': 'local\n' },
+  upstreamFiles: { 'unregistered.js': 'upstream\n' },
   startMerge: false
 });
 try {
@@ -417,6 +418,92 @@ try {
   console.log('Real upstream 1.8.9 (b409ca6) two-conflict resolver + reapply proof: PASS');
 } finally {
   await rm(realUpstreamFixture.fixture, { recursive: true, force: true });
+}
+
+const real191Paths = ['assets/js/app.js', 'assets/js/core-utils.js', 'assets/js/data-services.js'];
+const pre191LocalParent = '8829214408fe7fcc53a5b960e4e7512dc787d9e0';
+const real191Fixture = await createConflictFixture({
+  baseFiles: Object.fromEntries(real191Paths.map(relativePath => [relativePath, repoBlob('b409ca6', relativePath)])),
+  localFiles: Object.fromEntries(real191Paths.map(relativePath => [relativePath, repoBlob(pre191LocalParent, relativePath)])),
+  upstreamFiles: Object.fromEntries(real191Paths.map(relativePath => [relativePath, repoBlob('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath)]))
+});
+try {
+  assert.deepEqual(
+    gitText(real191Fixture, ['diff', '--name-only', '--diff-filter=U']).split('\n'),
+    real191Paths,
+    'real upstream 1.9.1 fixture must expose all three content conflicts'
+  );
+  const mergedApp = await readFile(path.join(real191Fixture, 'assets/js/app.js'), 'utf8');
+  const appStages = {
+    base: git(real191Fixture, ['show', ':1:assets/js/app.js']).toString('utf8'),
+    local: git(real191Fixture, ['show', ':2:assets/js/app.js']).toString('utf8'),
+    upstream: git(real191Fixture, ['show', ':3:assets/js/app.js']).toString('utf8')
+  };
+  const injectedOursApp = mergedApp.replace(
+    /^<<<<<<< [^\n]+\n/m,
+    match => `${match}const injectedLocalStatement = true;\n`
+  );
+  const injectedTheirsApp = mergedApp.replace(
+    /^=======\r?\n/m,
+    match => `${match}const injectedUpstreamStatement = true;\n`
+  );
+  assert.notEqual(injectedOursApp, mergedApp, 'ours-side injection fixture must mutate the conflict block');
+  assert.notEqual(injectedTheirsApp, mergedApp, 'theirs-side injection fixture must mutate the conflict block');
+  assert.throws(
+    () => resolveAppConflictBlob({
+      ...appStages,
+      merged: injectedOursApp
+    }),
+    /Unexpected app conflict block normalized summary/,
+    'app resolver must reject an extra statement on the reviewed ours side'
+  );
+  assert.throws(
+    () => resolveAppConflictBlob({
+      ...appStages,
+      merged: injectedTheirsApp
+    }),
+    /Unexpected app conflict block normalized summary/,
+    'app resolver must reject an extra statement on the reviewed theirs side'
+  );
+  assert.throws(
+    () => resolveAppConflictBlob({ ...appStages, merged: `${mergedApp}\n<<<<<<< extra\nlocal\n=======\nupstream\n>>>>>>> extra\n` }),
+    /exactly two app conflict blocks/,
+    'app resolver must reject additional conflict blocks'
+  );
+  const resolved = await resolveAutoConflicts({ cwd: real191Fixture });
+  assert.deepEqual(resolved, real191Paths, 'real upstream 1.9.1 resolver paths');
+  assert.equal(gitText(real191Fixture, ['diff', '--name-only', '--diff-filter=U']), '');
+  const appNumstat = args => gitText(real191Fixture, ['diff', '--numstat', ...args, 'upstream', '--', 'assets/js/app.js'])
+    .split('\t')
+    .slice(0, 2)
+    .reduce((total, value) => total + Number(value || 0), 0);
+  assert.equal(
+    appNumstat([]),
+    appNumstat(['--ignore-space-at-eol']),
+    'resolved app must not add EOL-only noise against the upstream blob'
+  );
+  const resolvedApp = normalize(await readFile(path.join(real191Fixture, 'assets/js/app.js'), 'utf8'));
+  for (const marker of [
+    'processMainContent: processMainContentCached',
+    'return processMainContentCached(normalizedMainText, isGeneratingState);',
+    'isGeneratingState && settings.preventTruncation',
+    'let removePlatformBackListener = () => {};',
+    '// Wanxiang Square mirror preference hook.',
+    '// Backup flush bridges (local full-backup export/restore).',
+    'window.RPHubOffscreenIframeLifecycle?.attach(container);'
+  ]) assert.match(resolvedApp, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `resolved app marker: ${marker}`);
+  assert.doesNotMatch(resolvedApp, /exportMemories: async \(\) => \{|importMemories: \(event\) =>|hasVectorEmbedding/);
+  for (const relativePath of ['assets/js/core-utils.js', 'assets/js/data-services.js']) {
+    const actual = await readFile(path.join(real191Fixture, relativePath), 'utf8');
+    assert.equal(
+      normalize(actual),
+      normalize(transformOverlayBlob(relativePath, sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath))),
+      `${relativePath} real upstream 1.9.1 output`
+    );
+  }
+  console.log('Real upstream 1.9.1 (9c06119) three-conflict resolver proof: PASS');
+} finally {
+  await rm(real191Fixture, { recursive: true, force: true });
 }
 
 console.log('Auto-resolver transformer, proof, EOL, and isolated merge fixtures: PASS');

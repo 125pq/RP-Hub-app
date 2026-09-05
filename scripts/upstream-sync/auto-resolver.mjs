@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './lib.mjs';
 import { overlayManifest, transformOverlayBlob } from './overlay-transformers.mjs';
+import { appConflictPath, resolveAppConflictBlob } from './patches/patch-app-conflict.mjs';
 
-const manifest = new Set(overlayManifest);
+const manifest = new Set([...overlayManifest, appConflictPath]);
 
 function gitBuffer(cwd, args) {
   return execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -83,12 +85,22 @@ function validateStages(cwd, grouped) {
     }
     const stageText = new Map();
     for (const stage of [1, 2, 3]) stageText.set(stage, readTextBlob(cwd, byStage.get(stage)).text);
-    const transformedLocal = transformOverlayBlob(relativePath, stageText.get(1));
-    if (normalizeEol(transformedLocal) !== normalizeEol(stageText.get(2))) {
-      throw new Error(`Registered transformer proof failed for ${relativePath}: transform(stage1) != stage2`);
+    let resolved;
+    if (relativePath === appConflictPath) {
+      resolved = resolveAppConflictBlob({
+        base: stageText.get(1),
+        local: stageText.get(2),
+        upstream: stageText.get(3),
+        merged: readFileSync(assertSafeRelativePath(relativePath, cwd), 'utf8')
+      });
+    } else {
+      const transformedLocal = transformOverlayBlob(relativePath, stageText.get(1));
+      if (normalizeEol(transformedLocal) !== normalizeEol(stageText.get(2))) {
+        throw new Error(`Registered transformer proof failed for ${relativePath}: transform(stage1) != stage2`);
+      }
+      resolved = transformOverlayBlob(relativePath, stageText.get(3));
     }
-    const transformedUpstream = transformOverlayBlob(relativePath, stageText.get(3));
-    plans.push({ relativePath, absolutePath: assertSafeRelativePath(relativePath, cwd), transformedUpstream });
+    plans.push({ relativePath, absolutePath: assertSafeRelativePath(relativePath, cwd), resolved });
   }
   return plans;
 }
@@ -99,7 +111,7 @@ export async function resolveAutoConflicts({ cwd = projectRoot } = {}) {
   const grouped = collectStages(cwd);
   const plans = validateStages(cwd, grouped);
   for (const plan of plans) {
-    await writeFile(plan.absolutePath, plan.transformedUpstream, 'utf8');
+    await writeFile(plan.absolutePath, plan.resolved, 'utf8');
   }
   for (const plan of plans) {
     gitBuffer(cwd, ['add', '--', plan.relativePath]);
