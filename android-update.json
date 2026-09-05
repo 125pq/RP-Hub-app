@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.9.1",
+  "versionCode": 1090100,
+  "tag": "v1.9.1-android",
+  "notes": "## 上游 RP-Hub 1.9.1 更新说明\n\n- 新增抗Gemini截断模式\r\n- 新增UI模板协议检查功能\r\n- 优化了记忆系统的效果\r\n- 修复了部分问题\r\n- 去除了废弃功能\n\n## APK 校验\n\nAPK SHA-256：`2dfcab414d7ca2c1eb9dbc5ebe353e773a06621563af564232295274d86a964c`\n",
+  "apk": {
+    "name": "RP-Hub-1.9.1-release.apk",
+    "sources": [
+      [
+        "https://github.com/125pq/RP-Hub-app/releases/download/v1.9.1-android/RP-Hub-1.9.1-release.apk"
+      ],
+      [
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.1-release.apk.part-000",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.1-release.apk.part-001",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.1-release.apk.part-002",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.1-release.apk.part-003",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.1-release.apk.part-004"
+      ]
+    ],
+    "size": 17637224,
+    "sha256": "2dfcab414d7ca2c1eb9dbc5ebe353e773a06621563af564232295274d86a964c"
+  }
+}
