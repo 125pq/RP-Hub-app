@@ -51,6 +51,13 @@ multi_agent_v2 = true
 Worker 用最便宜够用的，Reviewer 用最强推理的。换 API、换主模型都不需要改配置。
 默认子代理worker和reviewer用自定义模型的luna max和sol high
 
+### 代理生命周期
+
+每次新的、不同的任务都必须新建本任务专用的 Worker；如该任务需要 Review，也必须新建
+本任务专用的 Reviewer。不复用上一任务的 Worker / Reviewer，以节约上下文并避免上下文污染。
+同一任务的第 2 轮修订仍按升级规则交回同一个 Worker；只有任务边界发生变化（例如新增目标或
+验收范围改变），才视为新任务并新建代理。
+
 ### 主 Agent 的职责边界
 
 主 Agent 负责规划、拆分、关键决策、最终把关，**不负责大量阅读**。
