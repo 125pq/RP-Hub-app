@@ -205,7 +205,7 @@
                 <!-- Character Background Layer -->
                 <div v-if="settings.useCharacterBackground && currentCharacter && currentCharacter?.avatar"
                     class="absolute -inset-4 bg-cover bg-center bg-no-repeat pointer-events-none transition-opacity duration-500 z-0 blur-[2px] char-bg-blur"
-                    :style="{ backgroundImage: `url(${currentCharacter?.avatar})`, opacity: 0.9 }">
+                    :style="{ backgroundImage: `url(${JSON.stringify(currentCharacter.avatar)})`, opacity: 0.9 }">
                 </div>
 
                 <!-- Blur Overlay for Description Panel -->

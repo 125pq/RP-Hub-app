@@ -771,10 +771,34 @@ const app = createApp({
             }
         };
 
-        // Listen for workshop ready message to trigger sync
-        window.addEventListener('message', (event) => {
+        let workshopImportPending = false;
+        // Only the workshop frame can request settings sync or character import.
+        window.addEventListener('message', async (event) => {
             if (event.data && event.data.type === 'WORKSHOP_READY') {
+                if (event.source !== document.querySelector('iframe[src*="character/index.html"]')?.contentWindow) return;
                 syncSettingsToGenerator();
+            }
+
+            if (event.data?.type === 'WORKSHOP_IMPORT_AND_PLAY') {
+                const iframe = document.querySelector('iframe[src*="character/index.html"]');
+                if (!iframe || event.source !== iframe.contentWindow || workshopImportPending) return;
+                workshopImportPending = true;
+                try {
+                    if (!event.data.card?.data || typeof event.data.card.data.name !== 'string' || !event.data.card.data.name.trim()) {
+                        throw new Error('角色卡缺少名称，请先完善角色卡');
+                    }
+                    const char = await importCharacterData(event.data.card, event.data.avatar, false);
+                    if (currentCharacter.value?.uuid !== char.uuid || currentView.value !== 'chat') {
+                        throw new Error('角色卡已导入，暂时未能进入对话，请从角色卡管理中打开');
+                    }
+                } catch (error) {
+                    console.error('Workshop import failed:', error);
+                    event.source.postMessage({ type: 'WORKSHOP_IMPORT_RESULT', error: error.message || '导入失败，请重试' }, '*');
+                    showToast(error.message || '导入失败，请重试', 'error');
+                } finally {
+                    workshopImportPending = false;
+                }
+                return;
             }
 
             if (event.data?.type === 'REQUEST_RPHUB_API_SETTINGS') {
@@ -8139,6 +8163,50 @@ const app = createApp({
             editingWorldInfo.data.keys = parseWorldInfoKeysText(worldInfoKeysText.value, editingWorldInfo.data.useRegex);
         };
 
+        const importCharacterData = async (rawData, avatarUrl, askImageGeneration = true) => {
+            const imported = cardUtils.parseImportedCharacterCard(rawData);
+            const char = {
+                name: imported.name,
+                description: imported.description,
+                first_mes: imported.first_mes,
+                avatar: avatarUrl || defaultAvatar,
+                personality: imported.personality,
+                creator_notes: imported.creator_notes,
+                worldInfo: imported.worldInfoEntries
+                    .map(entry => normalizeWorldInfoEntry({ ...entry, scope: 'character' }))
+                    .filter(entry => entry.scope !== 'global'),
+                regexScripts: imported.regexScripts
+                    .map(script => cardUtils.normalizeImportedRegexScript(
+                        { ...script, scope: 'character' },
+                        { fallbackScope: 'character', systemNames: systemRegexNames }
+                    ))
+                    .filter(script => script.scope !== 'global'),
+                uiTemplates: imported.uiTemplates.map(template => normalizeUiTemplate({
+                    ...sanitizeUiTemplateImportEntry(template),
+                    id: generateUUID(),
+                    scope: 'character'
+                })),
+                recentGenerationTimes: [],
+                uuid: generateUUID(),
+                createdAt: Date.now()
+            };
+
+            characters.value.push(char);
+            try {
+                await saveCharactersNow();
+            } catch (error) {
+                const index = characters.value.findIndex(item => item.uuid === char.uuid);
+                if (index >= 0) characters.value.splice(index, 1);
+                throw error;
+            }
+
+            // Auto-select the new character and enter chat immediately.
+            const newCharacterIndex = characters.value.findIndex(item => item.uuid === char.uuid);
+            showAddCharacterMenu.value = false;
+            await selectCharacter(newCharacterIndex, askImageGeneration);
+            return char;
+        };
+
         const importCharacter = (event) => {
             const file = event.target.files[0];
             if (!file) return;
@@ -8147,48 +8215,6 @@ const app = createApp({
 
             // Reset file input
             event.target.value = '';
-
-            const processCharacterData = async (rawData, avatarUrl) => {
-                try {
-                    const imported = cardUtils.parseImportedCharacterCard(rawData);
-                    const char = {
-                        name: imported.name,
-                        description: imported.description,
-                        first_mes: imported.first_mes,
-                        avatar: avatarUrl || defaultAvatar,
-                        personality: imported.personality,
-                        creator_notes: imported.creator_notes,
-                        worldInfo: imported.worldInfoEntries
-                            .map(entry => normalizeWorldInfoEntry({ ...entry, scope: 'character' }))
-                            .filter(entry => entry.scope !== 'global'),
-                        regexScripts: imported.regexScripts
-                            .map(script => cardUtils.normalizeImportedRegexScript(
-                                { ...script, scope: 'character' },
-                                { fallbackScope: 'character', systemNames: systemRegexNames }
-                            ))
-                            .filter(script => script.scope !== 'global'),
-                        uiTemplates: imported.uiTemplates.map(template => normalizeUiTemplate({
-                            ...sanitizeUiTemplateImportEntry(template),
-                            id: generateUUID(),
-                            scope: 'character'
-                        })),
-                        recentGenerationTimes: [],
-                        uuid: generateUUID(),
-                        createdAt: Date.now()
-                    };
-
-                    characters.value.push(char);
-
-                    // Auto-select the new character and enter chat immediately.
-                    const newCharacterIndex = characters.value.length - 1;
-                    showAddCharacterMenu.value = false;
-                    await selectCharacter(newCharacterIndex, true);
-
-                } catch (err) {
-                    console.error("Character processing error:", err);
-                    showToast('解析角色数据失败: ' + err.message, 'error');
-                }
-            };
 
             if (file.name.toLowerCase().endsWith('.jsonl')) {
                 const reader = new FileReader();
@@ -8306,7 +8332,7 @@ const app = createApp({
                 reader.onload = async (e) => {
                     try {
                         const data = JSON.parse(e.target.result);
-                        await processCharacterData(data, null);
+                        await importCharacterData(data, null);
                     } catch (err) {
                         showToast('JSON解析失败: ' + err.message, 'error');
                     }
@@ -8320,7 +8346,7 @@ const app = createApp({
                         const { data } = cardUtils.parsePngCharacterData(buffer);
                         const blob = new Blob([buffer], { type: 'image/png' });
                         const avatarUrl = await cardUtils.blobToDataUrl(blob);
-                        await processCharacterData(data, avatarUrl);
+                        await importCharacterData(data, avatarUrl);
                     } catch (err) {
                         if (err.chunks) console.warn("Available chunks:", Object.keys(err.chunks));
                         console.error(err);
