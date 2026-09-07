@@ -5,7 +5,9 @@ import { sha256File } from '../lib.mjs';
 const files = [
   'index.html',
   'assets/js/app.js',
+  'assets/js/api-utils.js',
   'assets/js/core-utils.js',
+  'assets/js/ui-components.js',
   'assets/js/runtime-services.js',
   'assets/css/styles.css',
   'character/index.html',

@@ -1,11 +1,14 @@
 import { dominantEol, rebuildWithOriginalEol } from './lib.mjs';
 import { patchIndexScriptOverlay } from './patches/index-script-overlay.mjs';
-import { patchAndroidNovel } from './patches/patch-android-hooks.mjs';
-import { patchBackupNovel } from './patches/patch-backup.mjs';
+import { patchApiUtilsOverlay } from './patches/patch-api-utils.mjs';
+import { patchRuntimeServicesOverlay } from './patches/patch-performance.mjs';
+import { patchAndroidCharacter, patchAndroidNovel } from './patches/patch-android-hooks.mjs';
+import { patchBackupCharacter, patchBackupNovel } from './patches/patch-backup.mjs';
 import { patchCoreUtilsOverlay } from './patches/patch-core-utils.mjs';
 import { patchDataServicesOverlay } from './patches/patch-data-services.mjs';
-import { patchOfflineIndex, patchOfflineNovel } from './patches/patch-offline-assets.mjs';
-import { patchSafeAreaIndex, patchSafeAreaNovel, patchSquareHostSafeArea } from './patches/patch-safe-area.mjs';
+import { patchOfflineCharacter, patchOfflineIndex, patchOfflineNovel } from './patches/patch-offline-assets.mjs';
+import { patchSafeAreaCharacter, patchSafeAreaIndex, patchSafeAreaNovel, patchSquareHostSafeArea } from './patches/patch-safe-area.mjs';
+import { patchUiComponentsOverlay } from './patches/patch-ui-components.mjs';
 
 const transforms = new Map([
   ['index.html', source => {
@@ -20,8 +23,17 @@ const transforms = new Map([
     source = patchAndroidNovel(source);
     return patchBackupNovel(source);
   }],
+  ['character/index.html', source => {
+    source = patchSafeAreaCharacter(source);
+    source = patchOfflineCharacter(source);
+    source = patchAndroidCharacter(source);
+    return patchBackupCharacter(source);
+  }],
   ['assets/js/core-utils.js', patchCoreUtilsOverlay],
-  ['assets/js/data-services.js', patchDataServicesOverlay]
+  ['assets/js/data-services.js', patchDataServicesOverlay],
+  ['assets/js/runtime-services.js', patchRuntimeServicesOverlay],
+  ['assets/js/ui-components.js', patchUiComponentsOverlay],
+  ['assets/js/api-utils.js', patchApiUtilsOverlay]
 ]);
 
 export const overlayManifest = Object.freeze([...transforms.keys()]);

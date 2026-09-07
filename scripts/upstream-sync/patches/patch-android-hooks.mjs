@@ -92,6 +92,91 @@ export function patchAndroidApp(source) {
   return source;
 }
 
+export function patchAndroidCharacter(source) {
+  const replacements = [
+    [
+      `                const downloadFile = (blob, filename) => {
+                    cardUtils.downloadBlob(blob, filename, { targetBlank: true, revokeDelay: 2000 });
+                };
+
+                const exportJSON = () => {
+                    const data = getCardData();
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const filename = sanitizeFilename(currentCharacter.value.name) + '.json';
+                    downloadFile(blob, filename);
+                };`,
+      `                const downloadFile = async (data, filename, mimeType) => {
+                    try {
+                        return await cardUtils.saveGeneratedFile(data, filename, {
+                            mimeType: mimeType || data?.type || 'application/octet-stream',
+                            targetBlank: true,
+                            revokeDelay: 2000
+                        });
+                    } catch (error) {
+                        showToast(\`导出失败: \${error.message || '文件保存失败'}\`, 'error');
+                        return { cancelled: true, error: true };
+                    }
+                };
+
+                const exportJSON = async () => {
+                    const data = getCardData();
+                    const filename = sanitizeFilename(currentCharacter.value.name) + '.json';
+                    await downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');
+                };`,
+      'character public save hook'
+    ],
+    [
+      `                    const blob = new Blob([newPng], { type: 'image/png' });
+                    const filename = sanitizeFilename(currentCharacter.value.name) + '.png';
+                    downloadFile(blob, filename);`,
+      `                    const blob = new Blob([newPng], { type: 'image/png' });
+                    const filename = sanitizeFilename(currentCharacter.value.name) + '.png';
+                    await downloadFile(blob, filename);`,
+      'character PNG save hook'
+    ],
+    [
+      '                const confirmSelectiveExport = () => {',
+      '                const confirmSelectiveExport = async () => {',
+      'character selective export async hook'
+    ],
+    [
+      `                    const data = config.build(selectedItems);
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const filename = buildSelectiveExportFilename(exportPicker.type, selectedItems, selectedMeta);
+                    downloadFile(blob, filename);`,
+      `                    const data = config.build(selectedItems);
+                    const filename = buildSelectiveExportFilename(exportPicker.type, selectedItems, selectedMeta);
+                    const result = await downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');
+                    if (result.cancelled) return;`,
+      'character selective export save hook'
+    ]
+  ];
+  const states = replacements.map(([before, after, label]) => ({
+    before,
+    after,
+    label,
+    beforeCount: countOccurrences(source, before),
+    afterCount: countOccurrences(source, after)
+  }));
+  const pristine = states.every(({ beforeCount, afterCount }) => beforeCount === 1 && afterCount === 0);
+  const patched = states.every(({ beforeCount, afterCount }) => beforeCount === 0 && afterCount === 1);
+  if (!pristine && !patched) {
+    const detail = states.map(({ label, beforeCount, afterCount }) => `${label}:old=${beforeCount},new=${afterCount}`).join('; ');
+    throw new Error(`Partial Android character export hook state: ${detail}`);
+  }
+  if (pristine) {
+    for (const { before, after } of states) source = source.replace(before, after);
+  }
+  for (const { before, after, label } of states) {
+    const beforeCount = countOccurrences(source, before);
+    const afterCount = countOccurrences(source, after);
+    if (beforeCount !== 0 || afterCount !== 1) {
+      throw new Error(`Android character hook validation failed for ${label}: old=${beforeCount}, new=${afterCount}`);
+    }
+  }
+  return source;
+}
+
 export async function applyAndroidHooks() {
   const changes = [];
 
@@ -111,17 +196,7 @@ export async function applyAndroidHooks() {
     return source;
   }));
 
-  changes.push(await editText('character/index.html', category, source => {    if (!source.includes('cardUtils.saveGeneratedFile')) {
-      source = replaceOnce(
-        source,
-        `                const downloadFile = (blob, filename) => {\n                    cardUtils.downloadBlob(blob, filename, { targetBlank: true, revokeDelay: 2000 });\n                };`,
-        `                const downloadFile = async (data, filename, mimeType) => {\n                    try {\n                        return await cardUtils.saveGeneratedFile(data, filename, {\n                            mimeType: mimeType || data?.type || 'application/octet-stream',\n                            targetBlank: true,\n                            revokeDelay: 2000\n                        });\n                    } catch (error) {\n                        showToast(\`Export failed: \${error.message || 'file save failed'}\`, 'error');\n                        return { cancelled: true, error: true };\n                    }\n                };`,
-        'character public save hook'
-      );
-    }
-    requireContains(source, 'cardUtils.saveGeneratedFile', 'character public file save');
-    return source;
-  }));
+  changes.push(await editText('character/index.html', category, patchAndroidCharacter));
 
   changes.push(await editText('novel/index.html', category, patchAndroidNovel));
 

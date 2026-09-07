@@ -7,6 +7,8 @@ import { applyPerformanceHooks } from './patches/patch-performance.mjs';
 import { applySidebarRenderingHooks } from './patches/patch-sidebar-rendering.mjs';
 import { applyChatLayoutHooks } from './patches/patch-chat-layout.mjs';
 import { applyDataServicesHooks } from './patches/patch-data-services.mjs';
+import { applyApiUtilsHooks } from './patches/patch-api-utils.mjs';
+import { applyUiComponentsHooks } from './patches/patch-ui-components.mjs';
 
 export async function reapplyHooks() {
   const groups = [
@@ -17,6 +19,8 @@ export async function reapplyHooks() {
     ['offline-assets', applyOfflineAssetHooks],
     ['data-services-hooks', applyDataServicesHooks],
     ['performance-patches', applyPerformanceHooks],
+    ['api-utils-hooks', applyApiUtilsHooks],
+    ['ui-components-overlay', applyUiComponentsHooks],
     ['backup-hooks', applyBackupHooks]
   ];
   const changes = [];

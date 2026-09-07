@@ -1,4 +1,4 @@
-import { editText, ensureAfter, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
+import { countOccurrences, editText, ensureAfter, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
 import { patchIndexScriptOverlay } from './index-script-overlay.mjs';
 
 const category = 'backup-hooks';
@@ -110,6 +110,65 @@ export function patchBackupNovel(source) {
     );
   }
   requireContains(source, "flushData.type !== 'RPHUB_BACKUP_FLUSH'", 'novel backup flush handler');
+  return source;
+}
+
+export function patchBackupCharacter(source) {
+  const anchor = `                    debouncedSave(newVal);
+                }, { deep: true });`;
+  const hook = `
+
+                // Flush any pending debounced writes on demand (used by the main-app
+                // backup bridge before taking a snapshot).
+                const flushWorkshopData = async () => {
+                    const json = JSON.stringify(characters.value);
+                    await localforage.setItem('ai_chargen_characters', json);
+                    const { customModels, ...persistentOptions } = options;
+                    localStorage.setItem('ai_chargen_options', JSON.stringify(persistentOptions));
+                    localStorage.setItem('ai_chargen_active_index', currentCharacterIndex.value);
+                };
+                window.addEventListener('message', (flushEvent) => {
+                    const flushData = flushEvent?.data || {};
+                    if (flushData.type !== 'RPHUB_BACKUP_FLUSH') return;
+                    const requestId = flushData.requestId;
+                    (async () => {
+                        try {
+                            await flushWorkshopData();
+                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');
+                        } catch (_) {
+                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');
+                        }
+                    })();
+                });`;
+  const anchorCount = countOccurrences(source, anchor);
+  const hookCount = countOccurrences(source, hook);
+  const positionedCount = countOccurrences(source, `${anchor}${hook}`);
+  if (anchorCount !== 1) throw new Error(`Expected one anchor for character backup flush, found ${anchorCount}`);
+  if (hookCount === 0) {
+    for (const marker of [
+      'const flushWorkshopData = async () => {',
+      "flushData.type !== 'RPHUB_BACKUP_FLUSH'",
+      "window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');",
+      "window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');"
+    ]) {
+      if (source.includes(marker)) throw new Error(`Partial character backup hook detected: ${marker}`);
+    }
+    source = source.replace(anchor, `${anchor}${hook}`);
+  } else if (hookCount !== 1 || positionedCount !== 1) {
+    throw new Error(`Expected one positioned character backup hook, found hook=${hookCount} positioned=${positionedCount}`);
+  }
+  for (const [marker, label] of [
+    ['const flushWorkshopData = async () => {', 'character backup flush function'],
+    ["flushData.type !== 'RPHUB_BACKUP_FLUSH'", 'character backup request handler'],
+    ["window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');", 'character backup success response'],
+    ["window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');", 'character backup failure response']
+  ]) {
+    const count = countOccurrences(source, marker);
+    if (count !== 1) throw new Error(`Expected exactly one ${label}, found ${count}`);
+  }
+  if (countOccurrences(source, hook) !== 1 || countOccurrences(source, `${anchor}${hook}`) !== 1) {
+    throw new Error('Character backup hook failed exact positioned validation');
+  }
   return source;
 }
 
@@ -232,40 +291,7 @@ export async function applyBackupHooks() {
   }));
 
   // --- character/index.html: flush handler -----------------------------------
-  changes.push(await editText('character/index.html', category, source => {
-    if (!source.includes("flushData.type !== 'RPHUB_BACKUP_FLUSH'")) {
-      source = ensureAfter(
-        source,
-        `                    debouncedSave(newVal);
-                }, { deep: true });`,
-        `\n\n                // Flush any pending debounced writes on demand (used by the main-app
-                // backup bridge before taking a snapshot).
-                const flushWorkshopData = async () => {
-                    const json = JSON.stringify(characters.value);
-                    await localforage.setItem('ai_chargen_characters', json);
-                    const { customModels, ...persistentOptions } = options;
-                    localStorage.setItem('ai_chargen_options', JSON.stringify(persistentOptions));
-                    localStorage.setItem('ai_chargen_active_index', currentCharacterIndex.value);
-                };
-                window.addEventListener('message', (flushEvent) => {
-                    const flushData = flushEvent?.data || {};
-                    if (flushData.type !== 'RPHUB_BACKUP_FLUSH') return;
-                    const requestId = flushData.requestId;
-                    (async () => {
-                        try {
-                            await flushWorkshopData();
-                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: true }, '*');
-                        } catch (_) {
-                            window.parent?.postMessage({ type: 'RPHUB_BACKUP_FLUSHED', requestId, ok: false }, '*');
-                        }
-                    })();
-                });`,
-        'character backup flush'
-      );
-    }
-    requireContains(source, "flushData.type !== 'RPHUB_BACKUP_FLUSH'", 'character backup flush handler');
-    return source;
-  }));
+  changes.push(await editText('character/index.html', category, patchBackupCharacter));
 
   // --- novel/index.html: flush handler ---------------------------------------
   changes.push(await editText('novel/index.html', category, patchBackupNovel));

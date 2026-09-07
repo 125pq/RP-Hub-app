@@ -65,12 +65,33 @@ const cardAdapterOverlay = `    const getPlatformAdapter = () => {
 
 `;
 
+function splitParseCot(source) {
+  if (source.includes(parseCotImplMarker)) return source;
+
+  const declaration = 'const parseCot = (text) => {';
+  const count = countOccurrences(source, declaration);
+  if (count !== 1) throw new Error(`Expected one parseCot declaration, found ${count}`);
+
+  // These are the complete reviewed function headers from the supported
+  // upstream releases. Replacing only the declaration preserves each release's
+  // parser body, while the exact early-return line makes payload drift fail
+  // closed instead of accepting an arbitrary parseCot implementation.
+  const reviewedHeaders = [
+    `${declaration}\n    if (!text) return { cot: '', main: '', sys: '', isFinished: false };`,
+    `${declaration}\n    if (!text) return { cot: '', main: '', isFinished: false };`,
+    `${declaration}\n    if (!text) return { cot: '', rawCot: '', ranges: [], closingTags: '', main: '', isFinished: false };`
+  ];
+  const matched = reviewedHeaders.filter(header => source.includes(header));
+  if (matched.length !== 1) throw new Error('parseCot early-return payload drifted');
+  return source.replace(matched[0], matched[0].replace(declaration, parseCotImplMarker));
+}
+
 const cardAdapterExports = `
         getPlatformAdapter,
         saveGeneratedFile,`;
 
 export function patchCoreUtilsOverlay(source) {
-  source = replaceOnce(source, 'const parseCot = (text) => {', parseCotImplMarker, 'parseCot performance implementation split');
+  source = splitParseCot(source);
   const parseCotAnchor = '\n\nconst compressImage = (source, maxWidth = 300, quality = 0.7)';
   const parseCotReplacement = `\n${parseCotPerfOverlay}\n\nconst compressImage = (source, maxWidth = 300, quality = 0.7)`;
   source = replaceOnce(source, parseCotAnchor, parseCotReplacement, 'parseCot performance wrapper');

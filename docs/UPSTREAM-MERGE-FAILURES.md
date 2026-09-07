@@ -16,6 +16,43 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-07：上游 `1.9.2`（`a83d907`）七文件冲突与 API 模块迁移
+
+### 现场
+
+- 失败工作流为 `34094881035`；工作流本地父提交为 `3c29614cb0269e32adb347eabcbeb3f0a1407494`，修复验证使用包含两项已审查本地提交的 `cc32094b03cd9fd452d7aca586d3d4594381fb78`，共同上游基线为 `9c0611964a39ff8cca8831d97ecf18b04abb1990`，稳定 Release 目标为 `1.9.2` 的 `a83d907497106e401f0988b29b653422159e4c7f`。
+- Git 内容冲突恰为 `assets/js/app.js`、`assets/js/core-utils.js`、`assets/js/runtime-services.js`、`assets/js/ui-components.js`、`character/index.html`、`index.html` 和 `novel/index.html`。工作流首个有效错误为 `Expected 1 local shared main-content import, found 0`；失败报告随后又因仓库禁用 Issues 报错，属于次生错误。
+- 失败发生在 prepare-only 合并阶段，测试、Android 构建、提交、GitHub Release 和 Gitee 镜像均未执行。审计时 `upstream/main=9877b7d` 已比稳定 tag 多三个未发布提交，本次 resolver 和 fixture 只绑定稳定 tag，未混入移动分支。
+
+### 根因
+
+- 1.9.2 将模型 API transport 从 `runtime-services.js` 拆到 `api-utils.js`，并把 `runtime-services.js` 缩为 renderer/composable；本地段落感知流式调度和性能埋点仍留在旧 runtime。既有 reapply 只验证旧 marker 已存在，不能从共同基线纯重建本地 stage，也不能把本地行为迁移到新 API 模块。
+- 1.9.2 同时移除了 data-services 的共享 `processMainContent`，在 app 内加入 UI 标签/fence 感知的流式截断器。旧 app resolver 只认识 1.9.1 的未别名共享导入，却遇到本地已经别名为 `processMainContentCached` 的 stage，因此在检查第一个冲突前 fail closed；继续保留旧缓存 wrapper 又会丢失新的 UI 解析行为并引用已删除导出。
+- `ui-components.js` 与 `character/index.html` 的本地 safe-area、离线资源、文件导出和备份钩子此前分散在只验证现状的 reapply 回调中，没有完整纯 transform；`core-utils.js` 的 `parseCot` 空输入结果又新增 `rawCot/ranges/closingTags`，旧精确头部锚点需要显式审查更新。
+
+### 处理
+
+- app 专用 resolver 增加且只增加真实 1.9.2 单冲突摘要：要求完整 1/2/3 stage、恰好一个冲突块和精确双方 SHA-256；该块采用上游新 UI-aware processor，并精确移除已失效的共享缓存别名。Android back、Square 镜像、备份桥、离屏 iframe 和性能 attach 等非冲突本地钩子仍逐项 exact-once 校验。
+- 为 runtime、UI 和 character 抽出可纯重放的严格 transform；旧 runtime 的 stage1→stage2 仍逐字符证明，新 1.9.2 runtime 只接 renderer 性能 wrapper，API 流式调度迁移到 `api-utils.js`。所有删除、插入和替换均使用唯一锚点，缺失、重复、旧 marker 残留或 payload 漂移都会拒绝，不使用整文件 ours/theirs。
+- character transform 按现有 reapply 顺序组合 safe-area、离线字体/运行时、本地 Tailwind preview、Android 文件保存和备份 flush；修正真实 `<head>` 与内嵌预览字符串中多个 `</head>` 的作用域判断。`parseCot` 只接受历史已支持头部及 1.9.2 精确空结果结构，保留上游完整新 parser body。
+- overlay manifest 和 reapply 清单登记 `character/index.html`、`runtime-services.js`、`ui-components.js`、`api-utils.js`；输出继续按上游 blob 的逐行原始 EOL 重建，不扩大任何 EOL allowance。
+
+### 验证
+
+- `node scripts/upstream-sync/tests/auto-resolver.mjs`：通过；真实完整仓库 `cc32094 + a83d907` 合并精确产生七个冲突，全部解析，另覆盖 app 块注入/额外块、core payload 漂移、UI 重复 marker、API 锚点漂移和二次 overlay 幂等。
+- 全新隔离 worktree 的真实合并先得到相同七冲突；resolver 后第一次完整 reapply 只迁移非冲突的 `assets/js/api-utils.js`（`REAPPLY_CHANGED_FILES=1`），第二次所有分组均无改动并明确输出 `REAPPLY_CHANGED_FILES=0`，无剩余冲突，五个受影响 JS 入口语法检查通过；合并后的 `npm run test:performance` 也通过。
+- 完整 `npm run test:upstream-sync`、`npm run test:platform`、`npm run test:performance`、`npm run build:web`、`npm run verify:dist`、`android-release-workflow.mjs` 和 `git diff --check` 均通过；dist 校验为 46/46 source matches、0 forbidden files、0 remote application runtime dependencies。
+
+### 版本与发布影响
+
+- 本次只修复和验证同步能力，不改版本号、不提交、不 push、不 dispatch，也不创建 Release；失败运行 `34094881035` 没有发布副作用。
+- 审查通过并由后续授权流程正式运行后，仍必须以稳定 `1.9.2/a83d907` 为目标；不能因 `upstream/main` 更新而把未发布的 `9877b7d` 等提交带入 Android Release。
+
+### 后续风险
+
+- 这些 resolver 有意绑定 1.9.2 的模块边界和精确锚点；上游再次移动 API、UI processor 或 character 模板时应再次 fail closed，先读取首个 proof/anchor 错误后人工审查，不能放宽 manifest。
+- 本轮验证只覆盖代码、隔离合并和构建产物契约；正式 APK、设备 UI、GitHub/Gitee 分支与镜像仍需在后续获准发布时单独核验。
+
 ## 2026-09-05：上游 `1.9.1`（`9c06119`）应用入口冲突
 
 ### 现场

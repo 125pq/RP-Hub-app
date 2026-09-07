@@ -7,7 +7,9 @@ import { projectRoot } from '../lib.mjs';
 import { resolveAutoConflicts } from '../auto-resolver.mjs';
 import { mergeWithAutoResolver } from '../sync-orchestration.mjs';
 import { transformOverlayBlob, transformOverlayText } from '../overlay-transformers.mjs';
+import { patchAndroidCharacter } from '../patches/patch-android-hooks.mjs';
 import { resolveAppConflictBlob } from '../patches/patch-app-conflict.mjs';
+import { patchBackupCharacter } from '../patches/patch-backup.mjs';
 import { patchOfflineCharacter } from '../patches/patch-offline-assets.mjs';
 import { patchSquareHostSafeArea } from '../patches/patch-safe-area.mjs';
 
@@ -216,6 +218,27 @@ assert.throws(
   /offline asset/,
   'raw character upstream runtime must not pass local asset validation'
 );
+const stableCharacter192 = normalize(sourceText('a83d907497106e401f0988b29b653422159e4c7f', 'character/index.html'));
+assert.throws(
+  () => patchBackupCharacter(`${stableCharacter192}\nflushData.type !== 'RPHUB_BACKUP_FLUSH'\n`),
+  /Partial character backup hook detected/,
+  'character backup marker injection must fail closed'
+);
+const androidCharacter192 = patchAndroidCharacter(stableCharacter192);
+const androidReplacementStart = androidCharacter192.indexOf('                const downloadFile = async (data, filename, mimeType) => {');
+const androidReplacementEnd = androidCharacter192.indexOf('\n\n                const exportPNG = async () => {', androidReplacementStart);
+assert.ok(androidReplacementStart >= 0 && androidReplacementEnd > androidReplacementStart, 'character Android replacement fixture boundaries');
+assert.throws(
+  () => patchAndroidCharacter(`${stableCharacter192}\n${androidCharacter192.slice(androidReplacementStart, androidReplacementEnd)}\n`),
+  /Partial Android character export hook state/,
+  'misplaced complete Android hook with old implementation must fail closed'
+);
+const offlineCharacter192 = patchOfflineCharacter(stableCharacter192);
+assert.throws(
+  () => patchOfflineCharacter(`${offlineCharacter192}\n<script src="../assets/vendor/vue/vue.global.prod.js"></script>\n`),
+  /Expected exactly one character\/index\.html offline asset \.\.\/assets\/vendor\/vue\/vue\.global\.prod\.js, found 2/,
+  'duplicate local character runtime must fail closed'
+);
 const registeredIndexReplay = transformOverlayText('index.html', normalize(sourceText('5739165', 'index.html')));
 const unregisteredIndexLocal = normalize(sourceText('ddc8f75', 'index.html'))
   .replace('<!-- GitHub Pages rebuild marker', '<!-- unregistered delta -->\n    <!-- GitHub Pages rebuild marker');
@@ -420,6 +443,22 @@ try {
   await rm(realUpstreamFixture.fixture, { recursive: true, force: true });
 }
 
+async function createRealRepositoryMergeFixture(localRef, upstreamRef) {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'rphub-real-repository-merge-'));
+  git(fixture, ['init', '-q', '-b', 'fixture']);
+  git(fixture, ['config', 'user.name', 'Resolver Test']);
+  git(fixture, ['config', 'user.email', 'resolver@example.test']);
+  git(fixture, ['remote', 'add', 'source', projectRoot]);
+  git(fixture, ['fetch', '-q', 'source', `${localRef}:refs/heads/local`, `${upstreamRef}:refs/heads/upstream`]);
+  git(fixture, ['checkout', '-q', 'local']);
+  try {
+    git(fixture, ['merge', '--no-ff', '--no-commit', 'upstream']);
+  } catch {
+    // The exact repository merge is expected to stop on reviewed conflicts.
+  }
+  return fixture;
+}
+
 const real191Paths = ['assets/js/app.js', 'assets/js/core-utils.js', 'assets/js/data-services.js'];
 const pre191LocalParent = '8829214408fe7fcc53a5b960e4e7512dc787d9e0';
 const real191Fixture = await createConflictFixture({
@@ -504,6 +543,101 @@ try {
   console.log('Real upstream 1.9.1 (9c06119) three-conflict resolver proof: PASS');
 } finally {
   await rm(real191Fixture, { recursive: true, force: true });
+}
+
+const stable192 = 'a83d907497106e401f0988b29b653422159e4c7f';
+const pre192Local = 'cc32094b03cd9fd452d7aca586d3d4594381fb78';
+const real192Paths = [
+  'assets/js/app.js',
+  'assets/js/core-utils.js',
+  'assets/js/runtime-services.js',
+  'assets/js/ui-components.js',
+  'character/index.html',
+  'index.html',
+  'novel/index.html'
+];
+const real192Fixture = await createRealRepositoryMergeFixture(pre192Local, stable192);
+try {
+  assert.deepEqual(
+    gitText(real192Fixture, ['diff', '--name-only', '--diff-filter=U']).split('\n'),
+    real192Paths,
+    'real upstream 1.9.2 fixture must expose all seven content conflicts'
+  );
+  for (const relativePath of real192Paths.filter(relativePath => relativePath !== 'assets/js/app.js')) {
+    assert.equal(
+      normalize(transformOverlayBlob(relativePath, sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath))),
+      normalize(sourceText(pre192Local, relativePath)),
+      `${relativePath} real upstream 1.9.2 stage1 -> stage2 proof`
+    );
+  }
+
+  const mergedApp192 = await readFile(path.join(real192Fixture, 'assets/js/app.js'), 'utf8');
+  const appStages192 = {
+    base: git(real192Fixture, ['show', ':1:assets/js/app.js']).toString('utf8'),
+    local: git(real192Fixture, ['show', ':2:assets/js/app.js']).toString('utf8'),
+    upstream: git(real192Fixture, ['show', ':3:assets/js/app.js']).toString('utf8')
+  };
+  assert.throws(
+    () => resolveAppConflictBlob({
+      ...appStages192,
+      merged: mergedApp192.replace(/^<<<<<<< [^\n]+\n/m, match => `${match}const injected192 = true;\n`)
+    }),
+    /Unexpected app conflict block normalized summary/,
+    '1.9.2 app resolver must reject ours-side injection'
+  );
+  assert.throws(
+    () => resolveAppConflictBlob({ ...appStages192, merged: `${mergedApp192}\n<<<<<<< extra\nlocal\n=======\nupstream\n>>>>>>> extra\n` }),
+    /exactly one app conflict block/,
+    '1.9.2 app resolver must reject additional conflict blocks'
+  );
+
+  const resolved192 = await resolveAutoConflicts({ cwd: real192Fixture });
+  assert.deepEqual(resolved192, real192Paths, 'real upstream 1.9.2 resolver paths');
+  assert.equal(gitText(real192Fixture, ['diff', '--name-only', '--diff-filter=U']), '');
+  for (const relativePath of real192Paths.filter(relativePath => relativePath !== 'assets/js/app.js')) {
+    const actual = await readFile(path.join(real192Fixture, relativePath), 'utf8');
+    const expected = transformOverlayBlob(relativePath, sourceText(stable192, relativePath));
+    assert.equal(actual, expected, `${relativePath} real upstream 1.9.2 output`);
+    assert.equal(transformOverlayBlob(relativePath, actual), actual, `${relativePath} real upstream 1.9.2 second reapply`);
+  }
+  const resolvedApp192 = normalize(await readFile(path.join(real192Fixture, 'assets/js/app.js'), 'utf8'));
+  for (const marker of [
+    'const uiTokens = ',
+    '&& (isTruncationEnabled.value || !/[\\r\\n]/.test(imageTail))',
+    'let removePlatformBackListener = () => {};',
+    '// Wanxiang Square mirror preference hook.',
+    '// Backup flush bridges (local full-backup export/restore).',
+    'window.__RPH_PERF__?.attachApp?.(appInstance);'
+  ]) assert.ok(resolvedApp192.includes(marker), `resolved 1.9.2 app marker: ${marker}`);
+  assert.doesNotMatch(resolvedApp192, /processMainContentCached|<<<<<<<|=======|>>>>>>>/);
+
+  const upstreamApi192 = normalize(sourceText(stable192, 'assets/js/api-utils.js'));
+  const patchedApi192 = transformOverlayText('assets/js/api-utils.js', upstreamApi192);
+  assert.equal(transformOverlayText('assets/js/api-utils.js', patchedApi192), patchedApi192, '1.9.2 API migration overlay idempotence');
+  assert.throws(
+    () => transformOverlayText('assets/js/api-utils.js', upstreamApi192.replace('const accept = data => {', 'const acceptDrifted = data => {')),
+    /API stream request state|result content accumulation/,
+    '1.9.2 API request anchor drift must fail closed'
+  );
+  assert.throws(
+    () => transformOverlayText(
+      'assets/js/core-utils.js',
+      normalize(sourceText(stable192, 'assets/js/core-utils.js')).replace("rawCot: '', ranges: []", "rawCot: 'drift', ranges: []")
+    ),
+    /early-return payload drifted/,
+    '1.9.2 parseCot payload drift must fail closed'
+  );
+  assert.throws(
+    () => transformOverlayText(
+      'assets/js/ui-components.js',
+      `${normalize(sourceText(stable192, 'assets/js/ui-components.js'))}\n<div class="safe-sidebar-footer"></div>\n`
+    ),
+    /safe sidebar footer/,
+    '1.9.2 UI duplicate marker must fail closed'
+  );
+  console.log('Real upstream 1.9.2 (a83d907) seven-conflict resolver + API migration + second reapply proof: PASS');
+} finally {
+  await rm(real192Fixture, { recursive: true, force: true });
 }
 
 console.log('Auto-resolver transformer, proof, EOL, and isolated merge fixtures: PASS');

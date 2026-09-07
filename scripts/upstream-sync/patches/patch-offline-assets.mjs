@@ -1,4 +1,4 @@
-import { editText, replaceOnce, requireContains } from '../lib.mjs';
+import { countOccurrences, editText, replaceOnce, requireContains } from '../lib.mjs';
 
 const category = 'offline-assets';
 
@@ -97,12 +97,177 @@ export function patchOfflineNovel(source) {
 }
 
 export function patchOfflineCharacter(source) {
+  source = replaceOnce(
+    source,
+    `    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>`,
+    `    <link href="../assets/vendor/fonts/fonts.css" rel="stylesheet">
+    <link href="../assets/generated/character.css" rel="stylesheet">
+    <script src="../assets/vendor/vue/vue.global.prod.js"></script>
+    <script src="../assets/vendor/localforage/localforage.min.js"></script>`,
+    'character offline assets'
+  );
+  const characterTailwindConfig = `    <script>
+        tailwind.config = {
+            future: {
+                hoverOnlyWhenSupported: true,
+            },
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['var(--app-font-family)', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Microsoft YaHei', 'Noto Sans SC', 'Arial', 'sans-serif'],
+                        serif: ['var(--app-font-serif)', 'Lora', 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN', 'STSong', 'SimSun', 'Georgia', 'Cambria', 'Times New Roman', 'Times', 'serif']
+                    },
+                    colors: {
+                        primary: '#65c3c8',
+                        secondary: '#ef9fbc',
+                        accent: '#eeaf3a',
+                    }
+                }
+            }
+        }
+    </script>
+`;
+  if (source.includes(characterTailwindConfig)) {
+    const count = source.split(characterTailwindConfig).length - 1;
+    if (count !== 1) throw new Error(`Expected one character Tailwind runtime config, found ${count}`);
+    source = source.replace(characterTailwindConfig, '');
+  } else if (source.includes('tailwind.config = {')) {
+    throw new Error('Character Tailwind runtime config drifted');
+  }
+  source = replaceOnce(
+    source,
+    `        #app {
+            font-family: var(--app-font-family) !important;
+            height: var(--app-visual-height, 100%);
+            min-height: 0;
+        }
+
+        .workshop-layout,`,
+    `        #app {
+            font-family: var(--app-font-family) !important;
+            height: var(--app-visual-height, 100%);
+            min-height: 0;
+        }
+
+
+        .workshop-layout,`,
+    'character generated stylesheet separation'
+  );
+  source = replaceOnce(
+    source,
+    '                const getWorkshopFontCss = (value = document.documentElement.dataset.appFont) => fontFamilyCssMap[normalizeFontFamily(value)];',
+    `                const getWorkshopFontCss = (value = document.documentElement.dataset.appFont) => fontFamilyCssMap[normalizeFontFamily(value)];
+                const getLocalAssetUrl = (relativePath) => new URL(relativePath, window.location.href).href;
+                const previewTailwindRuntimeUrl = getLocalAssetUrl('../assets/vendor/tailwind-preview/tailwind-runtime.min.js');`,
+    'character local preview runtime URL'
+  );
+  const previewFallback = `                        const tailwindRuntime = \`
+                            <script src="\${previewTailwindRuntimeUrl}"><\\/script>
+                            <script>
+                                (function () {
+                                    window.tailwind = window.tailwind || {};
+
+                                    function startTailwindRuntime() {
+                                        if (typeof window.createTailwindcss !== 'function') {
+                                            console.error('Local Tailwind preview runtime failed to load.');
+                                            return;
+                                        }
+
+                                        var compiler = window.createTailwindcss({
+                                            tailwindConfig: window.tailwind.config || {}
+                                        });
+                                        var style = document.createElement('style');
+                                        style.id = 'rp-hub-preview-tailwind';
+                                        document.head.appendChild(style);
+
+                                        var timer = null;
+                                        var compiling = false;
+                                        var rerun = false;
+
+                                        async function compilePreviewStyles() {
+                                            if (compiling) {
+                                                rerun = true;
+                                                return;
+                                            }
+
+                                            compiling = true;
+                                            try {
+                                                compiler.setTailwindConfig(window.tailwind.config || {});
+                                                style.textContent = await compiler.generateStylesFromContent(
+                                                    '@tailwind base;\\\\n@tailwind components;\\\\n@tailwind utilities;',
+                                                    [document.documentElement.outerHTML]
+                                                );
+                                            } catch (error) {
+                                                console.error('Failed to compile preview Tailwind styles:', error);
+                                            } finally {
+                                                compiling = false;
+                                                if (rerun) {
+                                                    rerun = false;
+                                                    scheduleCompile();
+                                                }
+                                            }
+                                        }
+
+                                        function scheduleCompile() {
+                                            if (timer !== null) clearTimeout(timer);
+                                            timer = setTimeout(function () {
+                                                timer = null;
+                                                compilePreviewStyles();
+                                            }, 0);
+                                        }
+
+                                        var observer = new MutationObserver(function (mutations) {
+                                            var needsCompile = mutations.some(function (mutation) {
+                                                if (mutation.type === 'attributes') return true;
+                                                return Array.prototype.some.call(mutation.addedNodes, function (node) {
+                                                    return node.nodeType === Node.ELEMENT_NODE
+                                                        && node.id !== 'rp-hub-preview-tailwind';
+                                                });
+                                            });
+                                            if (needsCompile) scheduleCompile();
+                                        });
+
+                                        observer.observe(document.documentElement, {
+                                            attributes: true,
+                                            attributeFilter: ['class'],
+                                            childList: true,
+                                            subtree: true
+                                        });
+                                        scheduleCompile();
+                                    }
+
+                                    if (document.readyState === 'loading') {
+                                        document.addEventListener('DOMContentLoaded', startTailwindRuntime, { once: true });
+                                    } else {
+                                        startTailwindRuntime();
+                                    }
+                                })();
+                            <\\/script>
+                        \`;
+                        uiHTML = \`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">\${tailwindRuntime}</head><body class="bg-base-100 p-4"></body></html>\`;`;
+  source = replaceOnce(
+    source,
+    '                        uiHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><script src="https://cdn.tailwindcss.com"></` + `script></head><body class="bg-base-100 p-4"></body></html>`;',
+    previewFallback,
+    'character local Tailwind preview runtime'
+  );
   const requirements = [
+    '../assets/vendor/fonts/fonts.css',
     '../assets/generated/character.css',
     '../assets/vendor/vue/vue.global.prod.js',
     '../assets/vendor/localforage/localforage.min.js'
   ];
-  for (const anchor of requirements) requireContains(source, anchor, `character/index.html offline asset ${anchor}`);
+  requirements.push('../assets/vendor/tailwind-preview/tailwind-runtime.min.js');
+  for (const anchor of requirements) {
+    const count = countOccurrences(source, anchor);
+    if (count !== 1) throw new Error(`Expected exactly one character/index.html offline asset ${anchor}, found ${count}`);
+  }
   if (/https?:\/\/(?:cdn\.tailwindcss\.com|unpkg\.com\/vue|cdn\.jsdelivr\.net\/npm\/daisyui)/i.test(source)) {
     throw new Error('Remote runtime dependency returned in character/index.html; update patch-offline-assets.mjs');
   }

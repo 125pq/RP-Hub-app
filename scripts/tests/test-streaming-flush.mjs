@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
+import { projectRoot } from '../upstream-sync/lib.mjs';
+import { patchApiUtilsOverlay } from '../upstream-sync/patches/patch-api-utils.mjs';
 
-const runtimeSource = await readFile(new URL('../../assets/js/runtime-services.js', import.meta.url), 'utf8');
-const apiSource = runtimeSource.slice(0, runtimeSource.indexOf('// --- Message renderer ---'));
+const stable192 = 'a83d907497106e401f0988b29b653422159e4c7f';
+const upstreamApiSource = execFileSync('git', ['cat-file', 'blob', `${stable192}:assets/js/api-utils.js`], {
+  cwd: projectRoot,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe']
+});
+const apiSource = patchApiUtilsOverlay(upstreamApiSource.replace(/\r\n/g, '\n'));
 const flushes = [];
 let maxLatencyMs = 50;
 let nextResponse = null;
@@ -36,17 +43,21 @@ const windowObject = {
     },
     getApiUsagePayload: () => null,
   },
-  RPHubCardUtils: { extractNativeReasoning: value => value?.reasoning || '' },
+  RPHubCardUtils: {
+    extractNativeReasoning: value => value?.reasoning || '',
+    isNativeReasoningPart: () => false,
+  },
 };
 
 vm.runInContext(apiSource, vm.createContext({
   window: windowObject,
   TextDecoder,
+  AbortController,
   performance,
   setTimeout,
   clearTimeout,
   console,
-}), { filename: 'runtime-services-api.js' });
+}), { filename: 'generated-1.9.2-api-utils.js' });
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const encodeEvent = event => {
@@ -174,5 +185,5 @@ for (const [name, error] of [
   assert.equal(flushes.length, countAfterCompletion, 'completion clears stale timers');
 }
 
-console.log('Paragraph-aware streaming flush: PASS');
+console.log('Generated stable 1.9.2 API paragraph-aware streaming flush: PASS');
 console.log('Covered: LF/CRLF paragraph, burst coalescing, final, max latency, split fence, think, cot, abort, error, reasoning, timer cleanup');

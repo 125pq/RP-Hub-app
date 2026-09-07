@@ -28,7 +28,16 @@ function patchViewportMeta(source, file, includeInteractiveWidget) {
 }
 
 function patchStylesheet(source, href, file) {
-  return ensureBefore(source, '</head>', `    <link href="${href}" rel="stylesheet">\n`, `${file} safe-area stylesheet`);
+  const insertion = `    <link href="${href}" rel="stylesheet">\n`;
+  const insertionCount = source.split(insertion).length - 1;
+  if (insertionCount === 1) return source;
+  if (insertionCount > 1) throw new Error(`Duplicate hook detected: ${file} safe-area stylesheet`);
+  const bodyStart = source.indexOf('<body');
+  const headRegion = bodyStart < 0 ? source : source.slice(0, bodyStart);
+  const headEndCount = headRegion.split('</head>').length - 1;
+  if (headEndCount !== 1) throw new Error(`Expected one anchor for ${file} safe-area stylesheet, found ${headEndCount}`);
+  const headEnd = headRegion.indexOf('</head>');
+  return `${source.slice(0, headEnd)}${insertion}${source.slice(headEnd)}`;
 }
 
 function patchInsetFallback(source, file) {
@@ -128,7 +137,24 @@ export function patchSquareHostSafeArea(source) {
 export function patchSafeAreaCharacter(source) {
   source = patchViewportMeta(source, 'character/index.html', false);
   source = patchStylesheet(source, '../assets/css/safe-area.css', 'character/index.html');
-  return patchInsetFallback(source, 'character/index.html');
+  source = replaceOnce(
+    source,
+    '                    padding-bottom: calc(7rem + env(safe-area-inset-bottom));',
+    '                    padding-bottom: calc(7rem + var(--safe-bottom-effective));',
+    'character workshop scroll safe area'
+  );
+  source = replaceOnce(
+    source,
+    '                    padding-bottom: max(1rem, env(safe-area-inset-bottom));',
+    '                    padding-bottom: calc(1rem + var(--safe-bottom-effective));',
+    'character workshop input safe area'
+  );
+  return replaceOnce(
+    source,
+    'pb-[max(1rem,env(safe-area-inset-bottom))]',
+    'pb-[max(1rem,var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))]',
+    'character workshop input utility safe area'
+  );
 }
 
 export async function applySafeAreaHooks() {
