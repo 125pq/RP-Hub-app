@@ -156,7 +156,7 @@
             if (!options.replyInTool) return result;
             if (result.finishReason === 'content_filter') throw new Error('API 已停止工具输出');
             if (replyCall.name !== replyTool.function.name) {
-                throw new Error('API 未返回 output_reply，可能触发了空回或站点不支持，请重新尝试');
+                throw new Error('API 未返回抗截断输出，可能触发了空回或站点不支持，请重新尝试。');
             }
             let payload;
             try { payload = JSON.parse(replyCall.arguments); }

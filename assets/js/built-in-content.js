@@ -95,6 +95,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         const analysisTag = useThinkingTag ? 'thinking' : 'cot';
         return [
             '<next_response>',
+            replyInTool ? replyToolInstruction : '',
             '完整承接最新用户输入中已经发生的言行，结合当前场景继续剧情。',
             cotEnabled
                 ? buildAnalysisTagInstruction(
@@ -112,7 +113,6 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
                 ? '正文结束后，按系统提供的当前变量JSON检查并输出本轮需要更新的变量。'
                 : '',
             storyPanelsEnabled ? '在有展示价值时按要求积极生成UI面板。' : '',
-            replyInTool ? replyToolInstruction : '',
             '</next_response>'
         ].filter(Boolean).join('\n');
     };
@@ -753,7 +753,7 @@ ${closingInstruction}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10204,
+    id: 10205,
     title: '网站公告',
     content: `
 ### RP-Hub 1.9.2
@@ -765,6 +765,6 @@ window.RPHubLatestUpdate = Object.freeze({
 - 修复了正则渲染嵌套重复渲染的问题
 - 修复了UI生成状态下正文异常阻断的问题
 
-#### 更新时间：09/07/14:52
+#### 更新时间：09/07/19:35
     `
 });
