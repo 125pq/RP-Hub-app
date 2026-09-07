@@ -2061,10 +2061,10 @@ opacity: 0;
         .character-deck__navigation button:disabled { opacity: 0.45; cursor: default; }
 
         @media (max-width: 767px) {
-            .character-deck { --deck-card-width: min(78cqw, 360px, max(220px, calc((100dvh - 238px) / 1.5))); --deck-spread: 44%; }
+            .character-deck { --deck-card-width: min(84cqw, 380px, max(220px, calc((100dvh - 250px) / 1.5))); --deck-spread: 44%; }
             .character-deck__stage { margin-inline: -1rem; }
             .character-deck__backdrop img { filter: blur(25px) saturate(1.05); }
-            .character-deck__navigation { gap: 16px; max-width: 340px; }
+            .character-deck__navigation { gap: 16px; max-width: 340px; margin-top: 12px; }
             .character-card--deck > .absolute.bottom-0 { padding: 18px 14px; }
         }
 
