@@ -2709,11 +2709,14 @@
             });
             const move = direction => {
                 if (busy.value || props.items.length < 2) return;
+                opening.value = false;
                 const index = (focusedIndex.value + direction + props.items.length) % props.items.length;
                 focusedId.value = props.items[index].char.uuid;
             };
             const focusCard = item => {
-                if (!busy.value) focusedId.value = item.char.uuid;
+                if (busy.value) return;
+                opening.value = false;
+                focusedId.value = item.char.uuid;
             };
             const onKeydown = event => {
                 if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || event.target.closest('input, textarea, select')) return;
