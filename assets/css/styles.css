@@ -2024,12 +2024,13 @@ opacity: 0;
             height: 100%;
             content-visibility: visible;
             border-radius: 22px;
+            border: 1px solid rgba(255, 255, 255, 0.65);
             background: #1e293b;
-            box-shadow: 0 18px 38px -16px rgba(15, 23, 42, 0.45);
+            box-shadow: 0 18px 38px -16px rgba(15, 23, 42, 0.45), 0 0 0 1px rgba(148, 163, 184, 0.14);
             transition: box-shadow 0.7s var(--deck-easing);
         }
 
-        .is-focused > .character-card--deck { box-shadow: 0 24px 48px -20px rgba(15, 23, 42, 0.5); }
+        .is-focused > .character-card--deck { box-shadow: 0 24px 48px -20px rgba(15, 23, 42, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.65); }
         .character-deck__placeholder {
             position: absolute;
             inset: 0;
