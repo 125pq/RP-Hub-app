@@ -76,7 +76,6 @@ const {
     buildContextViewerState,
     buildConversationTurnSnapshot: createConversationTurnSnapshot,
     escapeXmlAttribute,
-    escapeXmlText,
     getConversationTurnAtIndexFromSnapshot,
     getPostprocessedChatMessages: postprocessChatHistory,
     indentXmlText,
@@ -305,8 +304,8 @@ const app = createApp({
         const showActiveToolEditor = ref(false);
         const showUserSetupModal = ref(false);
         const showAutoImageGenModal = ref(false);
-        const pendingActiveToolContext = ref('');
-        const activeToolResultContexts = ref([]);
+        // 仅保存本轮原生 assistant/tool 消息，不写入用户消息或长期记忆。
+        const activeToolMessages = [];
         const tempUserSetup = reactive({ name: '', description: '', person: 'second' });
         const characterDisplayLimit = ref(8);
         const hasOpenedCharacterManager = ref(false);
@@ -4328,8 +4327,7 @@ const app = createApp({
                 const content = String(message?.content || '');
                 return message?.role === 'user'
                     && content.trim()
-                    && !isRoleMemoryContextContent(content)
-                    && !content.includes('<active_tool_results>');
+                    && !isRoleMemoryContextContent(content);
             });
             if (!latestUserMessage) return msgArray;
 
@@ -4342,32 +4340,31 @@ const app = createApp({
             return msgArray;
         };
 
-        const getActiveToolCallLabels = (tool) => {
-            const baseCallName = normalizeActiveToolBaseCallName(tool?.callName || 'tool_grep');
-            return {
-                add: `${baseCallName}_add`,
-                cover: `${baseCallName}_cover`
-            };
-        };
+        const buildActiveToolDefinitions = (tools) => tools.map(tool => ({
+            type: 'function',
+            function: {
+                name: tool.callName,
+                description: `${tool.description} 每次最多返回 ${tool.resultCount} 条。`,
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        query: { type: 'string', description: isWebActiveTool(tool) ? '具体搜索词，或需要读取的真实网页 URL。' : '前文原文中可能出现的关键词。' },
+                        mode: { type: 'string', enum: ['add', 'cover'], description: '默认 add 保留已有结果；cover 用新结果替换本轮此前所有检索结果。' },
+                        reason: { type: 'string', description: '可选，一句话说明检索用途。' }
+                    },
+                    required: ['query'],
+                    additionalProperties: false
+                }
+            }
+        }));
 
-        const buildActiveToolSystemPrompt = () => {
-            const tools = getEnabledActiveTools();
+        const buildActiveToolSystemPrompt = (tools) => {
             if (tools.length === 0) return '';
             return BUILTIN_PROMPTS.buildActiveToolSystemPrompt({
-                tools: tools.map(tool => {
-                    const labels = getActiveToolCallLabels(tool);
-                    return {
-                        name: tool.name,
-                        description: tool.description,
-                        resultCount: tool.resultCount,
-                        addCallName: labels.add,
-                        coverCallName: labels.cover,
-                        kind: isWebActiveTool(tool) ? 'web' : 'keyword'
-                    };
-                }),
+                tools,
                 reminder: getActiveToolLatestUserReminder(),
                 aggressivenessLabel: getActiveToolAggressivenessLabel(),
-                defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
+                maxRounds: ACTIVE_TOOL_MAX_AUTO_CONTINUE
             });
         };
         const usesThinkingCotTag = (model) => /(?:deepseek|glm|kimi)/i.test(String(model || ''));
@@ -4407,6 +4404,7 @@ const app = createApp({
             const continueAssistantMessageId = options.continueAssistantMessageId || null;
             const continuationToolCallId = options.continuationToolCallId || null;
             const requestModel = settings.model;
+            const requestTools = activeToolDepth < ACTIVE_TOOL_MAX_AUTO_CONTINUE ? getEnabledActiveTools() : [];
 
             if (!currentCharacter.value) {
                 showToast('请先选择一个角色', 'error');
@@ -4446,7 +4444,10 @@ const app = createApp({
 
             // --- Advanced World Info Processing ---
 
-            const postprocessedChatHistory = getPostprocessedChatMessages(chatHistory.value, { includeSystem: false });
+            // 中途检索的 assistant 已由原生调用消息携带，不能再作为普通聊天重复注入。
+            const postprocessedChatHistory = getPostprocessedChatMessages(chatHistory.value.map(message => (
+                message === continuationTargetMessage ? null : message
+            )), { includeSystem: false });
             const {
                 entries: budgetedEntries,
                 groups: wiGroups,
@@ -4512,8 +4513,9 @@ const app = createApp({
             // 6. User Info (Moved to end)
             systemPromptParts.push(userPrompt);
 
-            const activeToolPrompt = buildActiveToolSystemPrompt();
+            const activeToolPrompt = buildActiveToolSystemPrompt(requestTools);
             if (activeToolPrompt) systemPromptParts.push(activeToolPrompt);
+            else if (activeToolDepth > 0) systemPromptParts.push('本轮检索已结束，请依据已有结果完成回复，不再调用检索工具；无法确认的信息明确说明。');
 
             const uiTemplateContextPrompt = buildUiTemplateContextSystemPrompt();
             if (uiTemplateContextPrompt) systemPromptParts.push(uiTemplateContextPrompt);
@@ -4597,7 +4599,7 @@ const app = createApp({
             if (cotPresets.length > 0) {
                 for (let index = chatHistory.value.length - 1; index >= 0 && recentThinkingByMessage.size < 2; index--) {
                     const source = chatHistory.value[index];
-                    if (source?.role !== 'assistant' || source === openingSourceMessage) continue;
+                    if (source?.role !== 'assistant' || source === openingSourceMessage || source === continuationTargetMessage) continue;
                     const thinking = getMessageThinkingText(source, useThinkingTag);
                     if (thinking) recentThinkingByMessage.set(source, thinking);
                 }
@@ -4805,15 +4807,7 @@ const app = createApp({
                 vectorDepth: MEMORY_VECTOR_DEFAULT_DEPTH,
                 safeTargetLimit
             });
-            messages = appendActiveToolReminderToLatestUserMessage(messages);
-            const activeToolContextPayload = pendingActiveToolContext.value || (activeToolDepth > 0 ? buildActiveToolResultPayload() : '');
-            if (activeToolContextPayload) {
-                messages.push({
-                    role: 'user',
-                    content: activeToolContextPayload
-                });
-                pendingActiveToolContext.value = '';
-            }
+            if (activeToolDepth === 0) messages = appendActiveToolReminderToLatestUserMessage(messages);
             messages = postprocessContextMessages(messages).map((message, index, array) => ({
                 ...message,
                 content: processRegex(message.content || '', {
@@ -4823,6 +4817,8 @@ const app = createApp({
                 })
             }));
 
+            // 必须在正则、角色合并和记忆处理之后追加，保留 tool_call_id 及服务端签名。
+            messages.push(...activeToolMessages);
             const contextViewerState = buildContextViewerState({
                 messages,
                 budgetedEntries,
@@ -4833,10 +4829,16 @@ const app = createApp({
             lastContextMessages.value = contextViewerState.contextMessages;
             lastTriggeredWorldInfos.value = contextViewerState.triggeredWorldInfos;
 
-            const apiMessages = messages.map(({ role, name, content }) => ({
+            const apiMessages = messages.map(({ role, name, content, tool_calls, tool_call_id, reasoning_content, reasoning, reasoning_details, extra_content }) => ({
                 role,
                 name,
-                content
+                content,
+                ...(tool_calls ? { tool_calls } : {}),
+                ...(tool_call_id ? { tool_call_id } : {}),
+                ...(reasoning_content ? { reasoning_content } : {}),
+                ...(reasoning ? { reasoning } : {}),
+                ...(reasoning_details ? { reasoning_details } : {}),
+                ...(extra_content ? { extra_content } : {})
             }));
             let generatedAssistantMessageId = null;
             let assistantMessage = null;
@@ -4846,6 +4848,9 @@ const app = createApp({
             let continuationReasoningStarted = false;
             let generationFailed = false;
             let wasCancelled = false;
+            let toolResponse = null;
+            const requestToolUis = new Map();
+            const requestSignal = abortController.value.signal;
 
             if (continuingAssistantMessage && continuationToolCallId && Array.isArray(continuingAssistantMessage.toolCalls)) {
                 continuationToolCall = continuingAssistantMessage.toolCalls.find(call => call && call.id === continuationToolCallId) || null;
@@ -4872,16 +4877,6 @@ const app = createApp({
                 const startedKey = field === 'reasoning' ? 'continuationReasoningStarted' : 'continuationContentStarted';
                 const hasStarted = field === 'reasoning' ? continuationReasoningStarted : continuationContentStarted;
 
-                if (field === 'content' && message._activeToolCaptureActive) {
-                    message._activeToolPendingText = `${message._activeToolPendingText || ''}${text}`;
-                    promoteActiveToolCallsFromAssistant(message);
-                    if (isContinuation) {
-                        if (!hasStarted) continuationContentStarted = true;
-                        activeToolContinuationHasResponse.value = true;
-                    }
-                    return;
-                }
-
                 const existing = String(message[field] || '');
                 const appendValue = isContinuation && field === 'content' && !hasStarted
                     ? String(text).replace(/^\s+/, '')
@@ -4889,9 +4884,7 @@ const app = createApp({
                 if (!appendValue) return;
 
                 if (isContinuation && !hasStarted && existing.trim()) {
-                    message[field] = field === 'content'
-                        ? existing.replace(/\s+$/, '') + appendValue
-                        : existing.replace(/\s+$/, '') + '\n\n' + appendValue;
+                    message[field] = existing.replace(/\s+$/, '') + '\n\n' + appendValue;
                 } else {
                     message[field] = existing + appendValue;
                 }
@@ -4899,9 +4892,6 @@ const app = createApp({
                 if (isContinuation && !hasStarted) {
                     if (startedKey === 'continuationReasoningStarted') continuationReasoningStarted = true;
                     else continuationContentStarted = true;
-                }
-                if (field === 'content') {
-                    promoteActiveToolCallsFromAssistant(message);
                 }
                 if (isContinuation) activeToolContinuationHasResponse.value = true;
             };
@@ -4930,7 +4920,6 @@ const app = createApp({
                 }
 
                 assistantMessage = createAssistantMessage(content, reasoning);
-                promoteActiveToolCallsFromAssistant(assistantMessage);
                 chatHistory.value.push(assistantMessage);
                 isReceiving.value = true;
                 return assistantMessage;
@@ -4941,13 +4930,15 @@ const app = createApp({
                     model: requestModel,
                     messages: apiMessages,
                     replyInTool: isTruncationEnabled.value,
+                    tools: buildActiveToolDefinitions(requestTools),
+                    requireTool: activeToolDepth === 0 && requestTools.length > 0 && getActiveToolAggressiveness() === 'force',
                     temperature: settings.temperature,
                     reasoningEffort: settings.reasoningEffort,
                     stream: settings.stream,
-                    signal: abortController.value.signal,
-                    onDelta: async ({ content: rawContent, reasoning }) => {
+                    signal: requestSignal,
+                    onDelta: async ({ content: rawContent, reasoning, toolCalls }) => {
                         const content = (!assistantMessage && !String(rawContent).trim()) ? '' : rawContent;
-                        if (!content && !reasoning) return;
+                        if (!content && !reasoning && !toolCalls?.length) return;
 
                         let seededContent = false;
                         let seededReasoning = false;
@@ -4974,8 +4965,13 @@ const app = createApp({
                             isThinking.value = false;
                             collapseNativeReasoning(assistantMessage);
                         }
+                        if (toolCalls?.length) syncNativeActiveToolUis(assistantMessage, toolCalls, requestToolUis, requestTools);
                     }
                 }, activeToolDepth > 0 ? 'tool_continuation' : 'chat');
+                if (requestSignal.aborted) throw createAbortReason();
+                if (activeToolDepth > 0 && !responseResult.toolCalls.length && !responseResult.content.trim()) {
+                    throw new Error('检索完成，但 API 未返回正文，请重新尝试。');
+                }
                 if (!responseResult.isStream) {
                     const { content, reasoning } = responseResult;
                     isThinking.value = !!(reasoning && !content);
@@ -4993,11 +4989,17 @@ const app = createApp({
                         }
                     }
                 }
+                if (responseResult.toolCalls.length) {
+                    assistantMessage = ensureAssistantMessage();
+                    syncNativeActiveToolUis(assistantMessage, responseResult.toolCalls, requestToolUis, requestTools, true);
+                    toolResponse = responseResult;
+                    activeToolHandoffPending.value = true;
+                }
                 const duration = Date.now() - generationStartTime;
 
                 if (assistantMessage) {
                     generatedAssistantMessageId = assistantMessage.id;
-                    if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis) {
+                    if (!toolResponse && settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis) {
                         applyMainModelUiTemplateUpdates(assistantMessage, requestModel);
                     }
 
@@ -5006,6 +5008,10 @@ const app = createApp({
                 }
             } catch (error) {
                 generationFailed = true;
+                for (const toolUi of requestToolUis.values()) {
+                    toolUi.status = 'error';
+                    toolUi.error = error.name === 'AbortError' ? '生成已中止' : (error.message || '工具调用未完整返回');
+                }
                 const cancelled = error.name === 'AbortError';
                 const errorMessage = cancelled ? '生成已中止' : (error.message || '生成失败');
                 const targetMessage = assistantMessage || continuingAssistantMessage;
@@ -5057,13 +5063,16 @@ const app = createApp({
                     waitTimer = null;
                 }
 
-                const activeToolContinued = !wasCancelled && !generationFailed && assistantMessage
-                    ? await handleActiveToolCallFromAssistant(assistantMessage, activeToolDepth)
+                wasCancelled ||= requestSignal.aborted;
+                const activeToolContinued = !wasCancelled && !generationFailed && toolResponse
+                    ? await handleActiveToolCallFromAssistant(assistantMessage, toolResponse, requestToolUis, requestTools, activeToolDepth)
                     : false;
                 if (!activeToolContinued) {
                     resetActiveToolResultContext();
+                    activeToolHandoffPending.value = false;
                 }
                 const needsPostGenerationTurns = !wasCancelled && !generationFailed
+                    && !toolResponse
                     && ((settings.uiTemplateEnabled && generatedAssistantMessageId)
                         || memorySettings.enabled);
                 const hasCompletedTurns = !activeToolContinued && needsPostGenerationTurns && buildConversationTurnSnapshot().turns.length > 0;
@@ -6184,7 +6193,7 @@ const app = createApp({
                 if (!message || message.role === 'system') return;
                 if (options.excludeMessageId && message.id === options.excludeMessageId) return;
                 const text = getKeywordToolMessageText(message);
-                if (!text || isRoleMemoryContextContent(text) || text.includes('<active_tool_results>')) return;
+                if (!text || isRoleMemoryContextContent(text)) return;
 
                 const lowerText = text.toLowerCase();
                 const matchedTerms = terms.filter((term, termIndex) => lowerText.includes(lowerTerms[termIndex]));
@@ -6375,328 +6384,75 @@ const app = createApp({
         };
 
         const resetActiveToolResultContext = () => {
-            activeToolResultContexts.value = [];
-            pendingActiveToolContext.value = '';
+            activeToolMessages.length = 0;
         };
 
-        const buildActiveToolResultPayload = () => {
-            const blocks = activeToolResultContexts.value.filter(Boolean);
-            if (blocks.length === 0) return '';
-            return [
-                '<active_tool_results>',
-                '  <description>以下是本轮正文工具调用返回的记录，可能包含有效结果、空结果或错误。本段内容由系统插入最后一条用户消息结尾。追加调用会保留并追加旧记录，覆盖调用会替换旧记录；只有包含实际片段、网页等证据的记录才算检索成功。请把有效证据作为参考继续回答，不要复述工具调用标签。</description>',
-                blocks.join('\n\n'),
-                '</active_tool_results>'
-            ].join('\n');
-        };
-
-        const updateActiveToolResultContext = (resultContext, mode = 'add') => {
-            if (!resultContext) {
-                pendingActiveToolContext.value = buildActiveToolResultPayload();
-                return;
+        const appendActiveToolResult = (callId, payload) => {
+            if (payload.mode === 'cover' && payload.status === 'ok') {
+                // 保留调用/结果配对，只清掉被新结果取代的资料，避免产生悬空 tool_call_id。
+                activeToolMessages.forEach(message => {
+                    if (message.role === 'tool') message.content = JSON.stringify({ status: 'superseded', replaced_by: callId });
+                });
             }
-            if (mode === 'cover') {
-                activeToolResultContexts.value = [resultContext];
-            } else {
-                activeToolResultContexts.value = [...activeToolResultContexts.value, resultContext];
-            }
-            pendingActiveToolContext.value = buildActiveToolResultPayload();
+            activeToolMessages.push({ role: 'tool', tool_call_id: callId, content: JSON.stringify(payload) });
         };
 
-        const formatActiveToolNoticeContext = (tool, query, mode = 'add', status = 'empty', message = '') => {
-            const title = escapeXmlAttribute(tool?.name || '工具');
-            const modeValue = mode === 'cover' ? 'cover' : 'add';
-            const labels = getActiveToolCallLabels(tool);
-            const callName = escapeXmlAttribute(modeValue === 'cover' ? labels.cover : labels.add);
-            const cleanQuery = trimMemoryText(query, 800);
-            const statusValue = escapeXmlAttribute(status || 'notice');
-            const messageText = escapeXmlText(message || '工具没有返回可用内容。');
-            const bodyTag = status === 'error' ? 'error' : 'description';
-            return [
-                `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="${statusValue}">`,
-                `  <${bodyTag}>`,
-                indentXmlText(messageText, 4),
-                `  </${bodyTag}>`,
-                '</active_tool_result>'
-            ].join('\n');
-        };
-
-        const normalizeActiveToolResultContext = (resultContext, tool, query, mode = 'add') => {
-            const text = String(resultContext || '').trim();
-            const hasResultBody = /<(?:description|error|dialogue_fragment|web_source|web_page|failed_page)\b/i.test(text);
-            if (!text || text === '</active_tool_result>' || !text.includes('<active_tool_result') || !hasResultBody) {
-                return formatActiveToolNoticeContext(
-                    tool,
-                    query,
-                    mode,
-                    'empty',
-                    '工具调用已经完成，但没有返回可用内容。请先判断当前上下文是否足够；如果仍不够，请换更具体的检索内容继续调用工具。'
-                );
-            }
-            return text;
-        };
-
-        const formatActiveToolErrorContext = (tool, query, err, mode = 'add') => {
-            const message = err?.message || String(err || '') || '工具调用失败';
-            return formatActiveToolNoticeContext(
-                tool,
-                query,
-                mode,
-                'error',
-                `工具调用出错：${message}\n这不是用户要求的最终答案。请不要停止生成；先基于当前上下文和已有工具结果继续回答。若信息仍不足，可以换更具体的检索内容再次调用工具。`
-            );
-        };
-
-        const formatWebResultItems = (items, tagName, getExtraAttributes = () => []) => items.map(item => {
-            const attributes = [
-                `index="${escapeXmlAttribute(item.index || '')}"`,
-                `title="${escapeXmlAttribute(item.title || '')}"`,
-                `url="${escapeXmlAttribute(item.url || '')}"`,
-                ...getExtraAttributes(item)
-            ];
-            const contentText = indentXmlText(item.content || '', 4);
-            return [
-                `  <${tagName} ${attributes.join(' ')}>`,
-                contentText ? `    <content>\n${contentText}\n    </content>` : '',
-                `  </${tagName}>`
-            ].filter(Boolean).join('\n');
-        }).join('\n\n');
-
-        const formatActiveToolResultContext = (tool, query, results, mode = 'add') => {
-            const title = escapeXmlAttribute(tool.name || '工具');
-            const modeValue = mode === 'cover' ? 'cover' : 'add';
-            const labels = getActiveToolCallLabels(tool);
-            const callName = escapeXmlAttribute(modeValue === 'cover' ? labels.cover : labels.add);
-            const cleanQuery = trimMemoryText(query, 800);
-            const modeDescription = modeValue === 'cover'
-                ? '本次调用模式为覆盖：系统会用本次结果替换本轮此前已检索的工具结果。'
-                : '本次调用模式为追加：系统会把本次结果追加到本轮此前已检索的工具结果后。';
-            if (isWebActiveTool(tool)) {
-                const responseTime = results?.tavilyResponseTime
-                    ? ` response_time="${escapeXmlAttribute(results.tavilyResponseTime)}"`
-                    : '';
-                const webMode = results?.tavilyMode === 'extract' ? 'extract' : 'search';
-
-                if (!Array.isArray(results) || results.length === 0) {
-                    const emptyDescription = webMode === 'extract'
-                        ? `本次网页读取没有检索成功，没有抽取到可用正文，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请先判断当前搜索摘要和上下文是否已经足够；如果仍不够，请换另一个更可靠的来源链接或重新搜索，不要编造网页正文没有支持的信息。`
-                        : `本次联网搜索没有检索成功，没有找到可用网页结果，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请先判断当前上下文是否已经足够；如果仍不够，请换更具体的作品名、角色名、站点名、别名或语言关键词再次调用，不要编造搜索结果没有支持的信息。`;
-                    return [
-                        `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="empty" web_mode="${webMode}"${responseTime}>`,
-                        `  <description>${emptyDescription}</description>`,
-                        '</active_tool_result>'
-                    ].join('\n');
+        const parseNativeActiveToolCall = (call, tools) => {
+            const tool = tools.find(item => item.callName === call.function.name);
+            const parsed = { tool, callLabel: call.function.name, query: '', reason: '', mode: 'add', raw: call.function.arguments };
+            try {
+                if (!tool) throw new Error('该工具未开启或不存在');
+                const args = JSON.parse(call.function.arguments);
+                if (!args || typeof args !== 'object' || Array.isArray(args)
+                    || Object.keys(args).some(key => !['query', 'mode', 'reason'].includes(key))
+                    || typeof args.query !== 'string' || !args.query.trim()
+                    || (args.mode !== undefined && !['add', 'cover'].includes(args.mode))
+                    || (args.reason !== undefined && typeof args.reason !== 'string')) {
+                    throw new Error('工具参数应为包含非空 query 字符串的 JSON 对象；mode 只能是 add 或 cover，reason 为可选字符串');
                 }
+                Object.assign(parsed, { query: args.query.trim(), reason: (args.reason || '').trim(), mode: args.mode || 'add' });
+            } catch (error) {
+                parsed.error = error instanceof SyntaxError ? '工具参数不是完整有效的 JSON 对象' : error.message;
+            }
+            return parsed;
+        };
 
-                if (webMode === 'extract') {
-                    const formattedPages = formatWebResultItems(results, 'web_page');
-
-                    const failedPages = (Array.isArray(results.tavilyFailedResults) ? results.tavilyFailedResults : [])
-                        .filter(item => item.url || item.error)
-                        .map(item => `  <failed_page url="${escapeXmlAttribute(item.url || '')}" error="${escapeXmlAttribute(item.error || '网页读取失败')}"></failed_page>`)
-                        .join('\n');
-
-                    return [
-                        `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" web_mode="extract"${responseTime}>`,
-                        `  <description>以下是系统进入网页链接后通过 Tavily Extract 读取到的网页正文。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据网页正文继续回答；不要把正文没有支持的内容说成事实。如果正文仍不足以确认，请回到搜索结果选择另一个可靠来源链接，或换更具体的关键词继续搜索。</description>`,
-                        formattedPages,
-                        failedPages,
-                        '</active_tool_result>'
-                    ].filter(Boolean).join('\n');
+        const syncNativeActiveToolUis = (message, calls, requestUis, tools, complete = false) => {
+            if (!Array.isArray(message.toolCalls)) message.toolCalls = [];
+            calls.forEach((call, position) => {
+                const key = call.index ?? position;
+                const parsed = parseNativeActiveToolCall(call, tools);
+                let ui = requestUis.get(key);
+                if (!ui) {
+                    ui = reactive(createActiveToolUi(parsed, 'receiving'));
+                    requestUis.set(key, ui);
+                    message.toolCalls.push(ui);
                 }
-
-                const formattedResults = formatWebResultItems(results, 'web_source', item => [
-                    Number.isFinite(item.score) ? `score="${escapeXmlAttribute(item.score.toFixed(4))}"` : '',
-                    item.publishedDate ? `published_date="${escapeXmlAttribute(item.publishedDate)}"` : ''
-                ].filter(Boolean));
-
-                return [
-                    `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" web_mode="search"${responseTime}>`,
-                    `  <description>以下是系统通过 Tavily 联网搜索得到的网页资料。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据这些标题、链接和摘要继续回答；不要把搜索结果没有支持的内容说成事实。如果摘要仍不足以明确回答，请从结果中选择一个或多个最相关的真实 URL，追加调用 <${callName}:该URL> 进入网页读取正文，或换更具体的关键词继续搜索。可以多行调用多个 URL，系统会按顺序追加结果。</description>`,
-                    formattedResults,
-                    '</active_tool_result>'
-                ].filter(Boolean).join('\n');
-            }
-            if (!Array.isArray(results) || results.length === 0) {
-                return [
-                    `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="empty">`,
-                    `  <description>本次关键词检索没有检索成功，没有找到包含该关键词的对话片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请换更贴近原文的关键词再次调用，不要编造未出现过的对话内容。</description>`,
-                    '</active_tool_result>'
-                ].join('\n');
-            }
-
-            const formattedResults = results.map(item => {
-                const turnValue = escapeXmlAttribute(item.turn || '?');
-                const roleValue = escapeXmlAttribute(item.role || 'unknown');
-                const speakerValue = escapeXmlAttribute(item.speaker || '');
-                const matchedValue = escapeXmlAttribute((item.matchedTerms || []).join(', '));
-                const fragmentText = indentXmlText(item.dialogueText || '', 4);
-                return [
-                    `  <dialogue_fragment turn="${turnValue}" role="${roleValue}" speaker="${speakerValue}" matched="${matchedValue}">`,
-                    fragmentText,
-                    '  </dialogue_fragment>'
-                ].join('\n');
-            }).join('\n\n');
-
-            return [
-                `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}">`,
-                `  <description>以下是系统根据关键词从当前对话历史中精确抓取到的原文片段。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据这些原文片段继续回答，不要把没有出现过的内容说成事实；如果仍不足以明确回答，请换更贴近原文的关键词继续调用工具。</description>`,
-                formattedResults,
-                '</active_tool_result>'
-            ].join('\n');
-        };
-
-        const stripCodeBlocksForToolDetection = (text) => String(text || '')
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/~~~[\s\S]*?~~~/g, '');
-
-        const escapeRegexText = (value) => String(value || '').replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-
-        const cleanActiveToolCallReason = (value) => String(value || '')
-            .replace(/<\/\s*reason\s*>?\s*$/i, '')
-            .trim();
-
-        const getActiveToolCallReasonMeta = (content, callIndex) => {
-            const beforeCall = String(content || '').slice(0, Math.max(0, callIndex));
-            const match = beforeCall.match(/<\s*reason\s*[:：]\s*([\s\S]*?)(?:>\s*|<\/\s*reason\s*>?\s*)$/i)
-                || beforeCall.match(/<\s*reason\s*>\s*([\s\S]*?)<\/\s*reason\s*>\s*$/i);
-            const reason = cleanActiveToolCallReason(match?.[1]);
-            if (!match || !reason) return { reason: '', rawPrefix: '', mainIndex: callIndex };
-            return {
-                reason,
-                rawPrefix: match[0],
-                mainIndex: callIndex - match[0].length
-            };
-        };
-
-        const buildActiveToolCallMeta = (originalContent, mainContent, toolRaw, callIndex) => {
-            const reasonMeta = getActiveToolCallReasonMeta(mainContent, callIndex);
-            const raw = `${reasonMeta.rawPrefix}${toolRaw}`;
-            const originalIndex = originalContent.indexOf(raw, Math.max(0, reasonMeta.mainIndex));
-            const toolIndex = originalContent.indexOf(toolRaw, callIndex);
-            return {
-                reason: reasonMeta.reason,
-                raw: originalIndex >= 0 ? raw : toolRaw,
-                toolRaw,
-                index: originalIndex >= 0 ? originalIndex : (toolIndex >= 0 ? toolIndex : callIndex),
-                mainIndex: reasonMeta.mainIndex
-            };
-        };
-
-        const findActiveToolCallsInText = (text) => {
-            const originalContent = String(text || '');
-            if (!originalContent) return [];
-            const mainContent = stripCodeBlocksForToolDetection(parseCot(originalContent).main);
-            const tools = getEnabledActiveTools();
-            const calls = [];
-            const seen = new Set();
-
-            for (const tool of tools) {
-                const labels = getActiveToolCallLabels(tool);
-                const callForms = [
-                    { label: labels.add, mode: 'add' },
-                    { label: labels.cover, mode: 'cover' }
-                ];
-                for (const form of callForms) {
-                    const escapedName = escapeRegexText(form.label);
-                    const regex = new RegExp(`<\\s*${escapedName}\\s*:\\s*([\\s\\S]{1,30000}?)\\s*>`, 'gi');
-                    let match;
-                    while ((match = regex.exec(mainContent)) !== null) {
-                        const query = String(match[1] || '').trim();
-                        if (!query) continue;
-
-                        const meta = buildActiveToolCallMeta(originalContent, mainContent, match[0], match.index);
-                        const raw = meta.raw;
-                        const index = meta.index;
-                        const key = `${index}:${match.index}:${form.label}:${raw}`;
-                        if (seen.has(key)) continue;
-                        seen.add(key);
-
-                        calls.push({
-                            tool,
-                            mode: form.mode,
-                            callLabel: form.label,
-                            query,
-                            raw,
-                            toolRaw: meta.toolRaw,
-                            reason: meta.reason,
-                            index,
-                            mainIndex: meta.mainIndex
-                        });
-                    }
-                }
-            }
-
-            return calls.sort((a, b) => {
-                const indexDiff = (a.index ?? 0) - (b.index ?? 0);
-                if (indexDiff !== 0) return indexDiff;
-                return (a.mainIndex ?? 0) - (b.mainIndex ?? 0);
+                Object.assign(ui, {
+                    toolId: parsed.tool?.id || '',
+                    toolType: parsed.tool?.type || '',
+                    name: parsed.tool?.name || call.function.name || '工具调用',
+                    callName: call.function.name,
+                    baseCallName: call.function.name,
+                    query: parsed.query || (complete ? '无有效查询' : '正在接收工具参数…'),
+                    raw: parsed.raw,
+                    reason: parsed.reason,
+                    mode: parsed.mode,
+                    status: complete ? 'queued' : 'receiving'
+                });
             });
         };
 
-        const getActiveToolDetectionText = (message) => [
-            String(message?.content || ''),
-            String(message?._activeToolPendingText || '')
-        ].filter(Boolean).join('\n');
-
-        const findActiveToolCallsInAssistantMessage = (message) => findActiveToolCallsInText(getActiveToolDetectionText(message));
-
-        const findPendingActiveToolCallInText = (text) => {
-            const originalContent = String(text || '');
-            if (!originalContent) return null;
-            const mainContent = stripCodeBlocksForToolDetection(parseCot(originalContent).main);
-            const tools = getEnabledActiveTools();
-            const candidates = [];
-
-            for (const tool of tools) {
-                const labels = getActiveToolCallLabels(tool);
-                [
-                    { label: labels.add, mode: 'add' },
-                    { label: labels.cover, mode: 'cover' }
-                ].forEach(form => {
-                    const escapedName = escapeRegexText(form.label);
-                    const regex = new RegExp(`<\\s*${escapedName}\\s*:\\s*([\\s\\S]*)$`, 'i');
-                    const match = mainContent.match(regex);
-                    if (!match) return;
-
-                    const meta = buildActiveToolCallMeta(originalContent, mainContent, match[0], mainContent.length - match[0].length);
-                    const raw = meta.raw;
-                    candidates.push({
-                        tool,
-                        mode: form.mode,
-                        callLabel: form.label,
-                        query: String(match[1] || '').trim(),
-                        raw,
-                        toolRaw: meta.toolRaw,
-                        reason: meta.reason,
-                        index: meta.index,
-                        mainIndex: meta.mainIndex,
-                        pending: true
-                    });
-                });
-            }
-
-            return candidates.sort((a, b) => {
-                const indexDiff = (a.index ?? 0) - (b.index ?? 0);
-                if (indexDiff !== 0) return indexDiff;
-                return (a.mainIndex ?? 0) - (b.mainIndex ?? 0);
-            })[0] || null;
-        };
-
-        const getPendingToolCallQueryPreview = (toolCall) => {
-            const query = String(toolCall?.query || '').trim();
-            if (!query) return '正在接收工具参数...';
-            return trimMemoryText(query, 160);
-        };
+        const cleanActiveToolCallReason = (value) => String(value || '').trim();
 
         const createActiveToolUi = (toolCall, initialStatus = 'queued') => ({
             id: generateUUID(),
             toolId: toolCall.tool?.id || '',
-            toolType: toolCall.tool?.type || ACTIVE_TOOL_KEYWORD_TYPE,
+            toolType: toolCall.tool?.type || '',
             toolResultCount: toolCall.tool?.resultCount || ACTIVE_TOOL_DEFAULT_RESULT_COUNT,
-            name: toolCall.tool?.name || '关键词检索',
-            callName: toolCall.callLabel || toolCall.tool?.callName || 'tool_grep_add',
-            baseCallName: toolCall.tool?.callName || 'tool_grep',
+            name: toolCall.tool?.name || '工具调用',
+            callName: toolCall.callLabel || toolCall.tool?.callName || '',
+            baseCallName: toolCall.tool?.callName || toolCall.callLabel || '',
             mode: toolCall.mode || 'add',
             query: toolCall.query || '',
             raw: toolCall.raw,
@@ -6895,381 +6651,81 @@ const app = createApp({
             return steps;
         };
 
-        const stripActiveToolCallsFromAssistant = (message, toolCalls) => {
-            if (!message || !Array.isArray(toolCalls) || toolCalls.length === 0) return;
-            const originalContent = String(message.content || '');
-            const firstToolCallIndex = toolCalls
-                .map(toolCall => Number.isFinite(toolCall.index) ? toolCall.index : originalContent.indexOf(toolCall.raw))
-                .filter(index => index >= 0)
-                .sort((a, b) => a - b)[0];
-            const nextContent = (Number.isFinite(firstToolCallIndex)
-                ? originalContent.slice(0, firstToolCallIndex)
-                : toolCalls.reduce((content, toolCall) => content.replace(toolCall.raw, ''), originalContent))
-                .replace(/\n{3,}/g, '\n\n')
-                .trim();
-
-            message.content = nextContent;
-            message.skipReveal = true;
-        };
-
-        const appendActiveToolCallsToAssistant = (message, toolCalls) => {
-            if (!message || !Array.isArray(toolCalls) || toolCalls.length === 0) return [];
-            if (!Array.isArray(message.toolCalls)) message.toolCalls = [];
-
-            const toolUis = [];
-            toolCalls.forEach((toolCall, index) => {
-                const pendingUiId = message._activeToolPendingUiId;
-                const pendingIndex = index === 0 && pendingUiId
-                    ? message.toolCalls.findIndex(item => item?.id === pendingUiId && item.status === 'receiving')
-                    : -1;
-                const nextUi = createActiveToolUi(toolCall);
-                if (pendingIndex >= 0) {
-                    const previousUi = message.toolCalls[pendingIndex];
-                    nextUi.id = previousUi.id;
-                    nextUi.isOpen = previousUi.isOpen;
-                    nextUi.reason = nextUi.reason || previousUi.reason || '';
-                    nextUi.reasoning = previousUi.reasoning || nextUi.reasoning;
-                    nextUi.isReasoningOpen = previousUi.isReasoningOpen;
-                    message.toolCalls.splice(pendingIndex, 1, nextUi);
-                    delete message._activeToolPendingUiId;
-                } else {
-                    message.toolCalls.push(nextUi);
-                }
-                toolUis.push(nextUi);
-            });
-            message.skipReveal = true;
-            return toolUis;
-        };
-
-        const upsertPendingActiveToolCallToAssistant = (message, toolCall) => {
-            if (!message || !toolCall) return null;
-            if (!Array.isArray(message.toolCalls)) message.toolCalls = [];
-            let toolUi = message._activeToolPendingUiId
-                ? message.toolCalls.find(item => item?.id === message._activeToolPendingUiId && item.status === 'receiving')
-                : null;
-            if (!toolUi) {
-                toolUi = createActiveToolUi(toolCall, 'receiving');
-                message.toolCalls.push(toolUi);
-                message._activeToolPendingUiId = toolUi.id;
-            }
-            toolUi.toolId = toolCall.tool?.id || toolUi.toolId || '';
-            toolUi.toolType = toolCall.tool?.type || toolUi.toolType || ACTIVE_TOOL_KEYWORD_TYPE;
-            toolUi.name = toolCall.tool?.name || toolUi.name || '工具';
-            toolUi.callName = toolCall.callLabel || toolUi.callName || 'tool_grep_add';
-            toolUi.baseCallName = toolCall.tool?.callName || toolUi.baseCallName || 'tool_grep';
-            toolUi.mode = toolCall.mode || toolUi.mode || 'add';
-            toolUi.query = getPendingToolCallQueryPreview(toolCall);
-            toolUi.reason = cleanActiveToolCallReason(toolCall.reason || toolUi.reason || '');
-            toolUi.raw = toolCall.raw || toolUi.raw || '';
-            toolUi.status = 'receiving';
-            message.skipReveal = true;
-            return toolUi;
-        };
-
-        const attachActiveToolCallsToAssistant = (message, toolCalls, options = {}) => {
-            const toolUis = appendActiveToolCallsToAssistant(message, toolCalls, options);
-            if (toolUis.length === 0) return [];
-            stripActiveToolCallsFromAssistant(message, toolCalls);
-            return toolUis;
-        };
-
-        const removeActiveToolCallRawsFromText = (text, toolCalls) => {
-            let nextText = String(text || '');
-            [...toolCalls]
-                .sort((a, b) => (b.index ?? b.mainIndex ?? 0) - (a.index ?? a.mainIndex ?? 0))
-                .forEach(toolCall => {
-                    const index = Number.isFinite(toolCall.index) ? toolCall.index : nextText.indexOf(toolCall.raw);
-                    if (index < 0) return;
-                    nextText = `${nextText.slice(0, index)}${nextText.slice(index + String(toolCall.raw || '').length)}`;
-                });
-            return nextText;
-        };
-
-        const promoteActiveToolCallsFromAssistant = (message, options = {}) => {
-            if (!message || typeof message.content !== 'string') return [];
-            const scanText = message._activeToolCaptureActive
-                ? String(message._activeToolPendingText || '')
-                : String(message.content || '');
-            const detectedCalls = findActiveToolCallsInText(scanText);
-            if (detectedCalls.length === 0) {
-                const pendingCall = findPendingActiveToolCallInText(scanText);
-                if (!pendingCall) return [];
-
-                let toolBuffer = scanText;
-                if (!message._activeToolCaptureActive) {
-                    const firstIndex = Math.max(0, pendingCall.index ?? pendingCall.mainIndex ?? scanText.indexOf(pendingCall.raw));
-                    message.content = scanText.slice(0, firstIndex)
-                        .replace(/\n{3,}/g, '\n\n')
-                        .trim();
-                    toolBuffer = scanText.slice(firstIndex);
-                    message._activeToolCaptureActive = true;
-                }
-                upsertPendingActiveToolCallToAssistant(message, {
-                    ...pendingCall,
-                    raw: toolBuffer,
-                    query: String(pendingCall.toolRaw || toolBuffer || '').replace(new RegExp(`^\\s*<\\s*${escapeRegexText(pendingCall.callLabel)}\\s*:\\s*`, 'i'), '')
-                });
-                message._activeToolPendingText = toolBuffer;
-                message.skipReveal = true;
-                activeToolHandoffPending.value = true;
-                return [];
-            }
-
-            let toolBuffer = scanText;
-            let callsForUi = detectedCalls;
-            if (!message._activeToolCaptureActive) {
-                const firstIndex = Math.max(0, detectedCalls[0].index ?? detectedCalls[0].mainIndex ?? scanText.indexOf(detectedCalls[0].raw));
-                message.content = scanText.slice(0, firstIndex)
-                    .replace(/\n{3,}/g, '\n\n')
-                    .trim();
-                message.skipReveal = true;
-                toolBuffer = scanText.slice(firstIndex);
-                callsForUi = findActiveToolCallsInText(toolBuffer);
-                message._activeToolCaptureActive = true;
-            }
-
-            const toolUis = appendActiveToolCallsToAssistant(message, callsForUi, options);
-            if (toolUis.length > 0) {
-                activeToolHandoffPending.value = true;
-            }
-            message._activeToolPendingText = removeActiveToolCallRawsFromText(toolBuffer, callsForUi);
-            return toolUis;
-        };
-
-        const cleanupActiveToolCaptureState = (message) => {
-            if (!message) return;
-            delete message._activeToolCaptureActive;
-            delete message._activeToolPendingText;
-            delete message._activeToolPendingUiId;
-        };
-
-        const resolveActiveToolForUi = (toolUi) => {
-            const baseCallName = normalizeActiveToolBaseCallName(
-                toolUi?.baseCallName
-                || toolUi?.callName
-                || 'tool_grep'
-            );
-            const enabledMatch = getEnabledActiveTools().find(tool => (
-                tool.id === toolUi?.toolId
-                || normalizeActiveToolBaseCallName(tool.callName) === baseCallName
-            ));
-            if (enabledMatch) return enabledMatch;
-            return getDefaultActiveToolDefinitions().find(tool => (
-                tool.id === toolUi?.toolId
-                || normalizeActiveToolBaseCallName(tool.callName) === baseCallName
-            )) || null;
-        };
-
-        const buildActiveToolCallFromUi = (toolUi) => {
-            const tool = resolveActiveToolForUi(toolUi);
-            if (!tool) return null;
-            return {
-                tool,
-                mode: toolUi?.mode || 'add',
-                callLabel: toolUi?.callName || getActiveToolCallLabels(tool).add,
-                query: String(toolUi?.query || '').trim(),
-                raw: toolUi?.raw || '',
-                reason: cleanActiveToolCallReason(toolUi?.reason)
-            };
-        };
-
-        const handleActiveToolCallFromAssistant = async (assistantMessage, activeToolDepth = 0) => {
-            promoteActiveToolCallsFromAssistant(assistantMessage);
-            let toolUis = Array.isArray(assistantMessage?.toolCalls)
-                ? assistantMessage.toolCalls.filter(toolCall => ['queued', 'running'].includes(toolCall?.status))
-                : [];
-            let toolCalls = toolUis.map(buildActiveToolCallFromUi).filter(toolCall => toolCall?.query);
-
-            if (toolCalls.length === 0) {
-                toolCalls = findActiveToolCallsInAssistantMessage(assistantMessage);
-            }
-            if (toolCalls.length === 0) {
-                const receivingToolUis = Array.isArray(assistantMessage?.toolCalls)
-                    ? assistantMessage.toolCalls.filter(toolCall => toolCall?.status === 'receiving')
-                    : [];
-                if (receivingToolUis.length > 0) {
-                    receivingToolUis.forEach(toolUi => {
-                        toolUi.status = 'error';
-                        toolUi.error = '工具调用没有完整输出，请重试。';
-                        toolUi.resultText = toolUi.error;
-                    });
-                    await saveChatHistoryNow();
-                }
-                cleanupActiveToolCaptureState(assistantMessage);
-                activeToolHandoffPending.value = false;
-                return false;
-            }
-
-            if (activeToolDepth >= ACTIVE_TOOL_MAX_AUTO_CONTINUE) {
-                if (toolUis.length === 0) {
-                    stripActiveToolCallsFromAssistant(assistantMessage, toolCalls);
-                } else {
-                    toolUis.forEach(toolUi => {
-                        toolUi.status = 'error';
-                    });
-                }
-                cleanupActiveToolCaptureState(assistantMessage);
-                activeToolHandoffPending.value = false;
-                await saveChatHistoryNow();
-                return false;
-            }
-
-            if (toolUis.length === 0) {
-                toolUis = attachActiveToolCallsToAssistant(assistantMessage, toolCalls);
-            }
-            if (toolUis.length === 0) {
-                cleanupActiveToolCaptureState(assistantMessage);
-                activeToolHandoffPending.value = false;
-                return false;
-            }
-            await saveChatHistoryNow();
-
+        const handleActiveToolCallFromAssistant = async (assistantMessage, response, requestUis, requestTools, activeToolDepth) => {
             const toolAbort = new AbortController();
+            activeToolQueueAbortController = toolAbort;
             activeToolQueueRunning.value = true;
             activeToolHandoffPending.value = false;
-            activeToolQueueAbortController = toolAbort;
-            let continuationToolUi = null;
-            let hasToolResult = false;
-
-            const applyActiveToolSuccessRecord = (record) => {
-                if (!record?.ok) return;
-                updateActiveToolResultContext(record.resultContext, record.toolCall.mode);
-                continuationToolUi = record.toolUi;
-                hasToolResult = true;
-            };
-
-            const runActiveToolCallSafely = async (toolCall, toolUi, options = {}) => {
-                try {
-                    if (toolAbort.signal.aborted) throw createAbortReason('Generation cancelled by user');
-                    if (options.markRunning !== false) {
-                        toolUi.status = 'running';
-                        await saveChatHistoryNow();
-                    }
-
-                    const results = isWebActiveTool(toolCall.tool)
-                        ? await searchWebByTavilyForTool(
-                            toolCall.query,
-                            toolCall.tool,
-                            toolAbort.signal
-                        )
-                        : searchDialogueByKeywordForTool(toolCall.query, toolCall.tool.resultCount, {
-                            excludeMessageId: assistantMessage.id
-                        });
-                    if (toolAbort.signal.aborted) throw createAbortReason('Generation cancelled by user');
-
-                    const resultContext = normalizeActiveToolResultContext(
-                        formatActiveToolResultContext(toolCall.tool, toolCall.query, results, toolCall.mode),
-                        toolCall.tool,
-                        toolCall.query,
-                        toolCall.mode
-                    );
-                    toolUi.status = 'done';
-                    toolUi.resultCount = Array.isArray(results) ? results.length : 0;
-                    toolUi.resultText = resultContext;
-                    await saveChatHistoryNow();
-                    return {
-                        ok: true,
-                        toolCall,
-                        toolUi,
-                        resultContext
-                    };
-                } catch (err) {
-                    if (err.name === 'AbortError') {
-                        return { aborted: true, toolCall, toolUi };
-                    }
-                    const resultContext = formatActiveToolErrorContext(toolCall.tool, toolCall.query, err, toolCall.mode);
-                    toolUi.status = 'error';
-                    toolUi.error = err.message || '工具检索失败';
-                    toolUi.resultCount = 0;
-                    toolUi.resultText = resultContext;
-                    await saveChatHistoryNow();
-                    return { ok: true, toolCall, toolUi, resultContext, error: err };
-                }
-            };
-
-            const flushWebToolBatch = async (webBatch) => {
-                if (!webBatch.length) return;
-                webBatch.forEach(({ toolUi }) => {
-                    toolUi.status = 'running';
-                });
-                await saveChatHistoryNow();
-
-                const records = await Promise.all(webBatch.map(({ toolCall, toolUi }) => (
-                    runActiveToolCallSafely(toolCall, toolUi, { markRunning: false })
-                )));
-                if (records.some(record => record?.aborted)) {
-                    throw createAbortReason('Generation cancelled by user');
-                }
-                records.forEach(applyActiveToolSuccessRecord);
-                webBatch.length = 0;
-            };
-
+            const toolUis = [...requestUis.values()];
             try {
-                const webBatch = [];
-                for (let index = 0; index < toolCalls.length; index += 1) {
-                    const toolCall = toolCalls[index];
-                    const toolUi = toolUis[index];
-                    if (isWebActiveTool(toolCall.tool)) {
-                        webBatch.push({ toolCall, toolUi });
-                        continue;
+                if (activeToolDepth >= ACTIVE_TOOL_MAX_AUTO_CONTINUE) throw new Error('已达到本轮检索次数上限');
+                activeToolMessages.push(response.assistantMessage);
+                // 即使接口一次返回多个调用，也逐一配对结果；并发查询，按原始调用顺序应用 add/cover。
+                const records = await Promise.all(response.toolCalls.map(async (call, position) => {
+                    const toolUi = requestUis.get(call.index ?? position);
+                    const toolCall = parseNativeActiveToolCall(call, requestTools);
+                    let payload;
+                    try {
+                        if (toolAbort.signal.aborted) throw createAbortReason();
+                        if (position >= 5) throw new Error('单次最多执行 5 项检索，请缩小查询范围');
+                        if (toolCall.error) throw new Error(toolCall.error);
+                        if (!getEnabledActiveTools().some(tool => tool.callName === call.function.name)) throw new Error('该工具已关闭');
+                        toolUi.status = 'running';
+                        const results = isWebActiveTool(toolCall.tool)
+                            ? await searchWebByTavilyForTool(toolCall.query, toolCall.tool, toolAbort.signal)
+                            : searchDialogueByKeywordForTool(toolCall.query, toolCall.tool.resultCount, { excludeMessageId: assistantMessage.id });
+                        if (toolAbort.signal.aborted) throw createAbortReason();
+                        payload = {
+                            status: results.length ? 'ok' : 'empty',
+                            query: toolCall.query,
+                            mode: toolCall.mode,
+                            results,
+                            ...(results.tavilyMode ? { operation: results.tavilyMode } : {}),
+                            ...(results.tavilyFailedResults?.length ? { failed_sources: results.tavilyFailedResults } : {})
+                        };
+                        toolUi.status = 'done';
+                        toolUi.resultCount = results.length;
+                    } catch (error) {
+                        if (error.name === 'AbortError') throw error;
+                        payload = { status: 'error', query: toolCall.query, mode: toolCall.mode, error: error.message || '工具检索失败' };
+                        toolUi.status = 'error';
+                        toolUi.error = payload.error;
                     }
-
-                    await flushWebToolBatch(webBatch);
-                    const record = await runActiveToolCallSafely(toolCall, toolUi);
-                    if (record?.aborted) {
-                        markActiveToolInlineWorkCancelled();
-                        await saveChatHistoryNow();
-                        return false;
-                    }
-                    applyActiveToolSuccessRecord(record);
-                }
-                await flushWebToolBatch(webBatch);
-
-                if (!hasToolResult || !continuationToolUi) return false;
-                if (toolAbort.signal.aborted) {
-                    markActiveToolInlineWorkCancelled();
-                    await saveChatHistoryNow();
-                    return false;
-                }
-
-                if (continuationToolUi.status !== 'error') {
-                    continuationToolUi.status = 'continuing';
-                }
-                cleanupActiveToolCaptureState(assistantMessage);
+                    toolUi.resultText = JSON.stringify(payload, null, 2);
+                    console.info('[检索工具]', { 工具: call.function.name, 状态: payload.status, 条数: toolUi.resultCount, ...(payload.error ? { 错误: payload.error } : {}) });
+                    return { callId: call.id, payload };
+                }));
+                if (toolAbort.signal.aborted) throw createAbortReason();
+                records.forEach(record => appendActiveToolResult(record.callId, record.payload));
+                const continuationToolUi = toolUis[toolUis.length - 1];
+                if (continuationToolUi.status !== 'error') continuationToolUi.status = 'continuing';
                 activeToolQueueRunning.value = false;
                 activeToolContinuationPending.value = true;
                 await saveChatHistoryNow();
+                if (toolAbort.signal.aborted) throw createAbortReason();
                 await generateResponse(Date.now(), {
                     activeToolDepth: activeToolDepth + 1,
                     continueAssistantMessageId: assistantMessage.id,
                     continuationToolCallId: continuationToolUi.id
                 });
-                if (continuationToolUi.status === 'continuing') {
-                    continuationToolUi.status = 'done';
-                }
-                await saveChatHistoryNow();
+                if (continuationToolUi.status === 'continuing') continuationToolUi.status = 'done';
                 return true;
-            } catch (err) {
-                if (err.name === 'AbortError') {
+            } catch (error) {
+                if (error.name === 'AbortError') {
                     markActiveToolInlineWorkCancelled();
-                    await saveChatHistoryNow();
-                    return false;
-                }
-                if (assistantMessage) {
-                    const errorMessage = err.message || '生成失败';
-                    appendAssistantResponseError(assistantMessage, errorMessage);
-                    activeToolContinuationHasResponse.value = true;
-                    await saveChatHistoryNow();
+                } else {
+                    toolUis.filter(ui => TOOL_CALL_RUNNING_STATUSES.includes(ui.status)).forEach(ui => {
+                        ui.status = 'error';
+                        ui.error = error.message || '工具处理失败';
+                    });
+                    appendAssistantResponseError(assistantMessage, error.message || '工具处理失败');
                 }
                 return false;
             } finally {
-                if (activeToolQueueAbortController === toolAbort) {
-                    activeToolQueueAbortController = null;
-                }
+                if (activeToolQueueAbortController === toolAbort) activeToolQueueAbortController = null;
                 activeToolHandoffPending.value = false;
                 activeToolQueueRunning.value = false;
                 activeToolContinuationPending.value = false;
-                cleanupActiveToolCaptureState(assistantMessage);
                 await saveChatHistoryNow();
             }
         };

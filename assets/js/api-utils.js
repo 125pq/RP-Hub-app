@@ -76,11 +76,17 @@
 
     const requestChatCompletionOnce = async (options, attempt) => {
         const startedAt = Date.now();
-        const result = { content: '', reasoning: '', usage: null, finishReason: null, isStream: false };
+        const result = { content: '', reasoning: '', toolCalls: [], assistantMessage: null, usage: null, finishReason: null, isStream: false };
         let receivedPayload = false;
         let pendingContent = '';
         let pendingReasoning = '';
-        const replyCall = { id: '', name: '', arguments: '' };
+        const calls = new Map();
+        const assistantMetadata = {};
+        let toolsChanged = false;
+        const toolSnapshot = () => [...calls.entries()].sort(([a], [b]) => a - b).map(([index, call]) => ({
+            ...call, index, function: { ...call.function }
+        }));
+        const getReplyCall = () => [...calls.values()].find(call => call.function.name === replyTool.function.name);
         let plainContent = '';
         let refusal = '';
         let failure = null;
@@ -89,8 +95,9 @@
         const invalidReply = () => new Error('输出正文工具的参数格式错误，应为仅含 content 字符串的 JSON 对象');
         // 只解码已经收齐的字符串字符，JSON 外壳和未收齐的转义不会进入正文。
         const readReplyDelta = () => {
-            if (replyCall.name !== replyTool.function.name || replyClosed) return '';
-            const source = replyCall.arguments;
+            const replyCall = getReplyCall();
+            if (!replyCall || replyClosed) return '';
+            const source = replyCall.function.arguments;
             if (replyPosition === null) {
                 const header = /^\s*\{\s*"content"\s*:\s*"/.exec(source);
                 if (!header) return '';
@@ -127,13 +134,33 @@
             return text;
         };
         const finish = () => {
+            const nativeCalls = toolSnapshot();
+            const replyCalls = nativeCalls.filter(call => call.function.name === replyTool.function.name);
+            result.toolCalls = nativeCalls.filter(call => !options.replyInTool || call.function.name !== replyTool.function.name);
+            if (nativeCalls.length && (result.finishReason === 'content_filter' || refusal.trim())) throw new Error('API 已停止工具输出');
+            if (result.toolCalls.length) {
+                // 工具调用必须保留服务端 ID；伪造 ID 会破坏下一轮的调用/结果配对。
+                if (replyCalls.length || result.toolCalls.some(call => !call.id || call.type !== 'function' || !call.function.name)
+                    || new Set(result.toolCalls.map(call => call.id)).size !== result.toolCalls.length) {
+                    throw new Error('API 返回的工具调用不完整或混用了回复工具，请重新尝试');
+                }
+                result.assistantMessage = { role: 'assistant', content: plainContent || null, ...assistantMetadata,
+                    tool_calls: result.toolCalls.map(({ index, ...call }) => call) };
+                if (options.replyInTool) {
+                    pendingContent += plainContent;
+                    result.content = plainContent;
+                }
+                return result;
+            }
             if (!options.replyInTool) return result;
             if (result.finishReason === 'content_filter' || refusal.trim()) throw new Error('API 已停止工具输出');
-            if (replyCall.name === replyTool.function.name && replyCall.arguments.trim()) {
+            if (replyCalls.length > 1) throw invalidReply();
+            const replyArguments = getReplyCall()?.function.arguments || '';
+            if (replyArguments.trim()) {
                 let payload;
-                try { payload = JSON.parse(replyCall.arguments); }
+                try { payload = JSON.parse(replyArguments); }
                 catch (_) {
-                    if (replyPosition === null || (replyClosed && replyCall.arguments.slice(replyPosition).trim())) throw invalidReply();
+                    if (replyPosition === null || (replyClosed && replyArguments.slice(replyPosition).trim())) throw invalidReply();
                     // 容忍末尾缺失的 JSON 闭合符号，保留已经解码的正文。
                 }
                 if (payload !== undefined) {
@@ -148,8 +175,7 @@
                 if (!plainContent.trim()) {
                     throw Object.assign(new Error('API 未返回抗截断输出，可能触发了空回或站点不支持，请重新尝试。'), {
                         // 已有思考或工具调用时不算真正空回，也不重试。
-                        retryableEmptyToolReply: !replyCall.id && !replyCall.name
-                            && !replyCall.arguments && !result.reasoning.trim()
+                        retryableEmptyToolReply: !calls.size && !result.reasoning.trim()
                     });
                 }
                 pendingContent += plainContent;
@@ -164,18 +190,34 @@
             const message = choice.delta || choice.message || {};
             let content = readTextContent(message.content ?? choice.text);
             const reasoning = extractNativeReasoning(message) || extractNativeReasoning(choice) || '';
-            if (options.replyInTool) {
-                plainContent += content;
-                refusal += readTextContent(message.refusal);
-                for (const call of message.tool_calls || []) {
-                    if ((call.index ?? 0) !== 0 || (call.type && call.type !== 'function')
-                        || (call.id && replyCall.id && call.id !== replyCall.id)) throw invalidReply();
-                    replyCall.id = call.id || replyCall.id;
-                    replyCall.name += call.function?.name || '';
-                    replyCall.arguments += call.function?.arguments || '';
-                }
-                content = readReplyDelta();
+            plainContent += content;
+            refusal += readTextContent(message.refusal);
+            // 保留转接接口返回的签名和推理字段，原样用于本轮工具结果回传，不混进聊天正文。
+            for (const key of ['reasoning_content', 'reasoning', 'reasoning_details', 'extra_content']) {
+                if (message[key] == null) continue;
+                assistantMetadata[key] = typeof message[key] === 'string'
+                    ? (assistantMetadata[key] || '') + message[key]
+                    : message[key];
             }
+            for (const [position, part] of (message.tool_calls || []).entries()) {
+                const index = part.index ?? position;
+                if (!Number.isInteger(index) || index < 0 || (part.type && part.type !== 'function')) throw new Error('API 返回了无效的工具调用');
+                let call = calls.get(index);
+                if (!call) {
+                    call = { id: '', type: 'function', function: { name: '', arguments: '' } };
+                    calls.set(index, call);
+                }
+                if (part.id && call.id && part.id !== call.id) throw new Error('API 返回了冲突的工具调用 ID');
+                call.id = part.id || call.id;
+                for (const key of ['name', 'arguments']) {
+                    if (part.function?.[key] == null) continue;
+                    if (typeof part.function[key] !== 'string') throw new Error('API 工具参数应为 JSON 字符串');
+                    call.function[key] += part.function[key];
+                }
+                if (part.extra_content) call.extra_content = { ...call.extra_content, ...part.extra_content };
+                toolsChanged = true;
+            }
+            if (options.replyInTool) content = readReplyDelta();
             result.content += content;
             result.reasoning += reasoning;
             result.finishReason = choice.finish_reason ?? result.finishReason;
@@ -183,12 +225,14 @@
             pendingReasoning += reasoning;
         };
         try {
+            const tools = [...(options.tools || []), ...(options.replyInTool && !options.requireTool ? [replyTool] : [])];
             return await withApiResponse({ ...options, body: {
                 model: options.model, messages: options.messages, temperature: options.temperature,
                 ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
-                ...(options.replyInTool ? {
-                    tools: [replyTool],
-                    tool_choice: { type: 'function', function: { name: replyTool.function.name } },
+                ...(tools.length ? {
+                    tools,
+                    tool_choice: options.requireTool || (options.replyInTool && options.tools?.length) ? 'required'
+                        : options.replyInTool ? { type: 'function', function: { name: replyTool.function.name } } : 'auto',
                     parallel_tool_calls: false
                 } : {}),
                 stream: !!options.stream,
@@ -209,9 +253,12 @@
                 let done = false;
                 let flushPromise = Promise.resolve();
                 const flush = () => {
-                    if (!result.isStream || (!pendingContent && !pendingReasoning)) return;
-                    const delta = { content: pendingContent, reasoning: pendingReasoning };
+                    if (!result.isStream || (!pendingContent && !pendingReasoning && !toolsChanged)) return;
+                    const delta = { content: pendingContent, reasoning: pendingReasoning,
+                        ...(toolsChanged ? { toolCalls: toolSnapshot().filter(call => call.function.name
+                            && !(options.replyInTool && replyTool.function.name.startsWith(call.function.name))) } : {}) };
                     pendingContent = pendingReasoning = '';
+                    toolsChanged = false;
                     flushPromise = flushPromise.then(() => options.onDelta?.(delta));
                     // 立即挂上处理器，最终仍由 await 抛出回调错误。
                     flushPromise.catch(() => {});
@@ -281,7 +328,7 @@
             // 在业务层 JSON/模板校验之前记账；部分流式响应后中止也不会漏掉已返回的用量。
             if (receivedPayload) options.onUsage?.(result.usage, {
                 isStream: result.isStream, durationMs: Date.now() - startedAt,
-                outputCharacters: (options.replyInTool ? replyCall.arguments.length + plainContent.length : result.content.length) + result.reasoning.length
+                outputCharacters: [...calls.values()].reduce((sum, call) => sum + call.function.arguments.length, 0) + plainContent.length + result.reasoning.length
             });
         }
     };

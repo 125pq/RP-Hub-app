@@ -937,7 +937,10 @@
                 }
             }
 
-            let renderedContent = escapeHtml(message.content);
+            const content = message.tool_calls
+                ? JSON.stringify({ content: message.content, tool_calls: message.tool_calls }, null, 2)
+                : String(message.content || '');
+            let renderedContent = escapeHtml(content);
             Array.from(floorInfo.keys()).sort((a, b) => b.length - a.length).forEach(key => {
                 if (!key) return;
                 const escapedKey = key.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -961,7 +964,7 @@
             return {
                 role: message.role,
                 name: message.name,
-                content: message.content,
+                content,
                 renderedContent,
                 floor: Number.isFinite(message._contextFloor) ? ++displayedFloor : null,
                 isMemory,

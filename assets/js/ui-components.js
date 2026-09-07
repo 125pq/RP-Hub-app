@@ -1916,7 +1916,8 @@
                                                         'bg-green-100 text-green-700 border border-green-200 shadow-sm': message.isMemory,
                                                         'bg-red-100 text-red-700 border border-red-200 shadow-sm': message.role === 'system' && !message.isMemory,
                                                         'bg-green-100 text-green-700 border border-green-200 shadow-sm': message.role === 'user',
-                                                        'bg-purple-100 text-purple-700 border border-purple-200 shadow-sm': message.role === 'assistant'
+                                                        'bg-purple-100 text-purple-700 border border-purple-200 shadow-sm': message.role === 'assistant',
+                                                        'bg-blue-100 text-blue-700 border border-blue-200 shadow-sm': message.role === 'tool'
                                                     }" class="px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wider flex items-center justify-center min-w-[70px] whitespace-nowrap">
                                                         <span v-if="message.floor" class="opacity-70 mr-1 font-bold">F{{ message.floor }}</span> {{ message.isMemory ? '记忆' : message.role }}
                                                     </span>
