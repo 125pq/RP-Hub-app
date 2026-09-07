@@ -2024,13 +2024,23 @@ opacity: 0;
             height: 100%;
             content-visibility: visible;
             border-radius: 22px;
-            border: 1px solid rgba(255, 255, 255, 0.65);
+            border: 0;
             background: #1e293b;
-            box-shadow: 0 18px 38px -16px rgba(15, 23, 42, 0.45), 0 0 0 1px rgba(148, 163, 184, 0.14);
+            box-shadow: 0 18px 38px -16px rgba(15, 23, 42, 0.45);
             transition: box-shadow 0.7s var(--deck-easing);
         }
 
-        .is-focused > .character-card--deck { box-shadow: 0 24px 48px -20px rgba(15, 23, 42, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.65); }
+        .is-focused > .character-card--deck { box-shadow: 0 24px 48px -20px rgba(15, 23, 42, 0.5); }
+        .character-card--deck::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 30;
+            border-radius: inherit;
+            border: 1px solid rgba(15, 23, 42, 0.4);
+            box-shadow: inset 0 1px rgba(255, 255, 255, 0.38), inset 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px rgba(15, 23, 42, 0.24);
+            pointer-events: none;
+        }
         .character-deck__placeholder {
             position: absolute;
             inset: 0;

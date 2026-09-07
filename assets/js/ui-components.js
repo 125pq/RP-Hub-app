@@ -2498,7 +2498,7 @@
         template: `
             <div class="char-grid-item relative rounded-2xl overflow-hidden transition-[transform,shadow,border-color] duration-300"
                 :class="mobile
-                    ? ['aspect-[2/3] shadow-md border border-gray-100', deck ? 'character-card--deck' : '', active && !batchMode && !deck ? 'ring-4 ring-primary-500 ring-offset-2' : '']
+                    ? ['aspect-[2/3] shadow-md', deck ? 'character-card--deck' : 'border border-gray-100', active && !batchMode && !deck ? 'ring-4 ring-primary-500 ring-offset-2' : '']
                     : ['bg-white border border-gray-200 hover:border-primary-400 hover:shadow-xl cursor-pointer group shadow-sm flex flex-col', active && !batchMode ? 'ring-4 ring-primary-500 ring-offset-2' : '', batchMode && selected ? 'ring-2 ring-red-500 border-red-500' : '']"
                 :aria-busy="loading"
                 @pointerenter="!deck && beginCoverZoom($event)" @pointerdown="!deck && beginPress($event)" @pointerup="endPress"
