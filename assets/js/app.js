@@ -2157,7 +2157,7 @@ const app = createApp({
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
             const sourceText = String(message?.content || '');
-            const imageMatches = cardUtils.findUnprotectedMatches(sourceText, getImageTagRegex(isTruncationEnabled.value));
+            const imageMatches = cardUtils.findUnprotectedMatches(sourceText, getImageTagRegex());
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
@@ -3216,7 +3216,7 @@ const app = createApp({
             if (isAutoImageGenEnabled.value) return text; // 生图开启时保留
             return String(text)
                 .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, '')
-                .replace(getImageTagRegex(isTruncationEnabled.value), '')
+                .replace(getImageTagRegex(), '')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -3276,7 +3276,7 @@ const app = createApp({
 
                     ({ pattern: regexPattern, flags } = cardUtils.normalizeRegexModifiers(regexPattern, flags));
                     const re = isImageGenScript
-                        ? getImageTagRegex(isTruncationEnabled.value)
+                        ? getImageTagRegex()
                         : new RegExp(regexPattern, flags);
 
                     // 普通正则保护 HTML/代码；明确匹配标签或代码围栏的规则仍直接执行。
@@ -3310,7 +3310,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, settings.styleFilterEnabled, isTruncationEnabled.value, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
@@ -3357,10 +3357,9 @@ const app = createApp({
 
         const appendAssistantResponseError = (message, errorMessage) => {
             if (!message) return;
-            const safeErrorMessage = escapeXmlText(errorMessage || '生成失败');
-            message.content = [
-                String(message.content || '').trimEnd(),
-                `<div class="response-error-text">-- ${safeErrorMessage} --</div>`
+            message.responseError = [
+                message.responseError,
+                String(errorMessage || '生成失败')
             ].filter(Boolean).join('\n\n');
             message.shouldAnimate = false;
             collapseNativeReasoning(message);
@@ -4396,31 +4395,17 @@ const app = createApp({
                 useThinkingTag,
                 writingStylePrompt,
                 storyPanelsEnabled: isStoryPanelsEnabled.value,
+                replyInTool: isTruncationEnabled.value,
                 uiTemplateEnabled: isUiTemplateAnalysisEnabled()
             });
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
         };
-        const isLikelyTruncatedResponse = (text) => {
-            const parsed = parseCot(stripUiTemplateUpdateBlock(String(text || '')));
-            if (parsed.ranges.length && !parsed.isFinished) return true;
-            const value = parsed.main
-                .replace(/image###[^\r\n]*###\s*$/i, '')
-                .replace(/[*_~`]+\s*$/g, '')
-                .trim();
-            if (!value) return false;
-            return !/(?:###|[。！？!?；;：:.!?…」』）》）】〕］\]}"'’”>])$/.test(value);
-        };
-        const MAX_TRUNCATION_ATTEMPTS = 6;
-
-        let _wasCancelled = false;
         const generateResponse = async (startTime = null, options = {}) => {
             const reuseGeneratingState = options.reuseGeneratingState === true;
             if (isGenerating.value && !reuseGeneratingState) return;
             const activeToolDepth = Number(options.activeToolDepth) || 0;
             const continueAssistantMessageId = options.continueAssistantMessageId || null;
             const continuationToolCallId = options.continuationToolCallId || null;
-            const continuationAttempt = Number(options.continuationAttempt) || 0;
-            const continuationPrompt = String(options.continuationPrompt || '请直接接着上一条回复续写，不要重复已经输出的内容，也不要解释续写过程。');
             const requestModel = settings.model;
 
             if (!currentCharacter.value) {
@@ -4853,13 +4838,6 @@ const app = createApp({
                 name,
                 content
             }));
-            if (continueAssistantMessageId && !continuationToolCallId) {
-                apiMessages.push({
-                    role: 'user',
-                    content: continuationPrompt
-                });
-            }
-
             let generatedAssistantMessageId = null;
             let assistantMessage = null;
             let continuingAssistantMessage = continuationTargetMessage;
@@ -4867,6 +4845,7 @@ const app = createApp({
             let continuationContentStarted = false;
             let continuationReasoningStarted = false;
             let generationFailed = false;
+            let wasCancelled = false;
 
             if (continuingAssistantMessage && continuationToolCallId && Array.isArray(continuingAssistantMessage.toolCalls)) {
                 continuationToolCall = continuingAssistantMessage.toolCalls.find(call => call && call.id === continuationToolCallId) || null;
@@ -4875,6 +4854,7 @@ const app = createApp({
 
             const prepareAssistantMessageForAppend = (message) => {
                 if (!message) return null;
+                delete message.responseError;
                 if (!message.id) message.id = generateUUID();
                 if (typeof message.content !== 'string') message.content = '';
                 if (typeof message.reasoning !== 'string') message.reasoning = '';
@@ -4960,6 +4940,7 @@ const app = createApp({
                 const responseResult = await requestTrackedChatCompletion({
                     model: requestModel,
                     messages: apiMessages,
+                    replyInTool: isTruncationEnabled.value,
                     temperature: settings.temperature,
                     reasoningEffort: settings.reasoningEffort,
                     stream: settings.stream,
@@ -4995,7 +4976,6 @@ const app = createApp({
                         }
                     }
                 }, activeToolDepth > 0 ? 'tool_continuation' : 'chat');
-
                 if (!responseResult.isStream) {
                     const { content, reasoning } = responseResult;
                     isThinking.value = !!(reasoning && !content);
@@ -5017,11 +4997,7 @@ const app = createApp({
 
                 if (assistantMessage) {
                     generatedAssistantMessageId = assistantMessage.id;
-                    const deferUiTemplateAnalysis = isTruncationEnabled.value
-                        && activeToolDepth === 0
-                        && continuationAttempt < MAX_TRUNCATION_ATTEMPTS
-                        && isLikelyTruncatedResponse(assistantMessage.content);
-                    if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis && !deferUiTemplateAnalysis) {
+                    if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis) {
                         applyMainModelUiTemplateUpdates(assistantMessage, requestModel);
                     }
 
@@ -5030,38 +5006,21 @@ const app = createApp({
                 }
             } catch (error) {
                 generationFailed = true;
-                if (error.name === 'AbortError') {
-                    _wasCancelled = true;
+                const cancelled = error.name === 'AbortError';
+                const errorMessage = cancelled ? '生成已中止' : (error.message || '生成失败');
+                const targetMessage = assistantMessage || continuingAssistantMessage;
+                if (cancelled) {
+                    wasCancelled = true;
                     showToast('生成已中止', 'info');
-                    const wasReceiving = isReceiving.value;
                     isGenerating.value = false;
                     isRemoteGenerating.value = false;
                     isThinking.value = false;
-                    const lastMessage = chatHistory.value[chatHistory.value.length - 1];
-                    if (lastMessage && lastMessage.role === 'assistant' && wasReceiving) {
-                        const hasContent = !!(lastMessage.content || '').trim();
-                        const hasReasoning = !!(lastMessage.reasoning || '').trim();
-                        if (hasContent || hasReasoning) {
-                            if (hasContent) {
-                                lastMessage.content += '\n\n*-- 生成已中止 --*';
-                            } else {
-                                lastMessage.content = '*-- 生成已中止 --*';
-                            }
-                            lastMessage.shouldAnimate = false;
-                            collapseNativeReasoning(lastMessage);
-                        } else {
-                            chatHistory.value.pop();
-                            chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: '生成已中止', skipReveal: true });
-                        }
-                    } else {
-                        chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: '生成已中止', skipReveal: true });
-                    }
-                } else if (continuingAssistantMessage) {
-                    const errorMessage = error.message || '生成失败';
-                    appendAssistantResponseError(continuingAssistantMessage, errorMessage);
-                    activeToolContinuationHasResponse.value = true;
+                }
+                if (targetMessage) {
+                    appendAssistantResponseError(targetMessage, errorMessage);
+                    if (continuingAssistantMessage) activeToolContinuationHasResponse.value = true;
                 } else {
-                    chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: error.message });
+                    chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: errorMessage, skipReveal: true });
                 }
             } finally {
                 if (assistantMessage?.content) {
@@ -5083,25 +5042,10 @@ const app = createApp({
                     continuationToolCall.status = 'done';
                 }
                 collapseActiveNativeReasoning();
-                const wasCancelled = _wasCancelled;
-                _wasCancelled = false;
-                const shouldAutoContinue = isTruncationEnabled.value
-                    && !wasCancelled
-                    && !generationFailed
-                    && activeToolDepth === 0
-                    && continuationAttempt < MAX_TRUNCATION_ATTEMPTS
-                    && assistantMessage
-                    && isLikelyTruncatedResponse(assistantMessage.content);
-                if (shouldAutoContinue) {
-                    isGenerating.value = true;
-                    isReceiving.value = true;
-                }
                 await saveChatHistoryNow();
                 isThinking.value = false;
-                if (!shouldAutoContinue) {
-                    isGenerating.value = false;
-                    isReceiving.value = false;
-                }
+                isGenerating.value = false;
+                isReceiving.value = false;
                 if (!continueAssistantMessageId || activeToolContinuationMessageId.value === continueAssistantMessageId) {
                     activeToolContinuationMessageId.value = null;
                     activeToolContinuationToolCallId.value = null;
@@ -5113,33 +5057,13 @@ const app = createApp({
                     waitTimer = null;
                 }
 
-                const activeToolContinued = shouldAutoContinue
-                    ? false
-                    : (!wasCancelled && assistantMessage
-                        ? await handleActiveToolCallFromAssistant(assistantMessage, activeToolDepth)
-                        : false);
+                const activeToolContinued = !wasCancelled && !generationFailed && assistantMessage
+                    ? await handleActiveToolCallFromAssistant(assistantMessage, activeToolDepth)
+                    : false;
                 if (!activeToolContinued) {
                     resetActiveToolResultContext();
                 }
-                if (shouldAutoContinue) {
-                    nextTick(() => {
-                        if (chatHistory.value[chatHistory.value.length - 1] !== assistantMessage
-                            || !assistantMessage.id) {
-                            isGenerating.value = false;
-                            isReceiving.value = false;
-                            return;
-                        }
-                        generateResponse(Date.now(), {
-                            reuseGeneratingState: true,
-                            continueAssistantMessageId: assistantMessage.id,
-                            continuationAttempt: continuationAttempt + 1,
-                            continuationPrompt: '输出被截断，请按输出规则衔接着最后一个字尽快补全当前阶段剧情，不要重复已经输出的内容，不要冗余输出，不要开启新的剧情段落。'
-                        });
-                    });
-                    return;
-                }
-
-                const needsPostGenerationTurns = !wasCancelled
+                const needsPostGenerationTurns = !wasCancelled && !generationFailed
                     && ((settings.uiTemplateEnabled && generatedAssistantMessageId)
                         || memorySettings.enabled);
                 const hasCompletedTurns = !activeToolContinued && needsPostGenerationTurns && buildConversationTurnSnapshot().turns.length > 0;
@@ -9195,7 +9119,14 @@ const app = createApp({
 
             // 1.10 Enforce Default Preset (COT)
             const cotPresetName = 'COT';
-            const syncCotPresetContent = () => {
+            const syncDynamicPresetContent = () => {
+                const roleplayPreset = presets.value.find(preset => preset.name === '破限');
+                if (roleplayPreset) {
+                    const anchor = '都优先按角色扮演任务处理。';
+                    const reminder = BUILTIN_PROMPTS.replyToolInstruction;
+                    roleplayPreset.content = roleplayPreset.content.replace(anchor + reminder, anchor)
+                        .replace(anchor, anchor + (isTruncationEnabled.value ? reminder : ''));
+                }
                 const useThinkingOpening = usesThinkingCotTag(settings.model);
                 const uiTemplateAnalysisEnabled = isUiTemplateAnalysisEnabled();
                 const cotPresetContent = buildCotPresetContent({
@@ -9234,7 +9165,7 @@ const app = createApp({
                     });
                 });
             };
-            syncCotPresetContent();
+            syncDynamicPresetContent();
             watch([
                 () => memorySettings.enabled,
                 () => settings.uiTemplateEnabled,
@@ -9244,7 +9175,7 @@ const app = createApp({
                 () => settings.model,
                 isTruncationEnabled,
                 () => presets.value.find(preset => preset.name === cotPresetName)?.enabled
-            ], syncCotPresetContent);
+            ], syncDynamicPresetContent);
             removeLegacyUserRegex();
 
             // Save enforced defaults immediately (仅保存预设/正则等结构性数据)
@@ -9360,12 +9291,7 @@ const app = createApp({
             const imageStart = cardUtils.findLastUnprotectedMatch(mainText, /image###/gi)?.index ?? -1;
             if (imageStart !== -1) {
                 const imageTail = mainText.slice(imageStart + 'image###'.length);
-                if (!imageTail.includes('###')
-                    && (isTruncationEnabled.value || !/[\r\n]/.test(imageTail))) {
-                    const lineBreak = imageTail.search(/[\r\n]/);
-                    mainText = mainText.slice(0, imageStart)
-                        + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');
-                }
+                if (!imageTail.includes('###') && !/[\r\n]/.test(imageTail)) mainText = mainText.slice(0, imageStart);
             }
             // 只暂存未闭合的 UI；完整面板及其后的正文可以继续流式展示。
             const uiTokens = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\r\n]*`|<!--[\s\S]*?(?:-->|$)|<(script|style)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>[\s\S]*?(?:<\/\1\s*>|$)|<!doctype\b[^>]*(?:>|$)|<\/?[a-z][\w:-]*(?:[^"'<>]|"[^"]*(?:"|$)|'[^']*(?:'|$))*(>|$)/gi;

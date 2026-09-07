@@ -1658,7 +1658,7 @@
             }
         }
 
-        .markdown-body .response-error-text {
+        .response-error-text {
             color: #dc2626;
             font-weight: 700;
             white-space: pre-wrap;

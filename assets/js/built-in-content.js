@@ -90,7 +90,8 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '[最终检查]\n检查人物、时间线和因果连续，完成分析并闭合标签后直接输出正文，不泄露分析过程。'
     ].filter(Boolean).join('\n\n');
 
-    const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, memoryEnabled = false, uiTemplateEnabled = false, storyPanelsEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
+    const replyToolInstruction = '需通过 `output_reply` 工具提交回复，不要用普通正文代替工具调用。';
+    const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, memoryEnabled = false, uiTemplateEnabled = false, storyPanelsEnabled = false, useThinkingTag = false, writingStylePrompt = '', replyInTool = false } = {}) => {
         const analysisTag = useThinkingTag ? 'thinking' : 'cot';
         return [
             '<next_response>',
@@ -111,6 +112,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
                 ? '正文结束后，按系统提供的当前变量JSON检查并输出本轮需要更新的变量。'
                 : '',
             storyPanelsEnabled ? '在有展示价值时按要求积极生成UI面板。' : '',
+            replyInTool ? replyToolInstruction : '',
             '</next_response>'
         ].filter(Boolean).join('\n');
     };
@@ -337,6 +339,7 @@ image###英文Tag###
         buildNextResponsePrompt,
         buildUiTemplateAnalysisSystemPrompt,
         buildUserInfoPrompt,
+        replyToolInstruction,
         uiTemplateContextDescription: '以下内容是给你参考当前剧情状态的 UI 模板变量快照，不是正文，也不要复述、改写或输出这些变量。请只用它理解角色状态、关系、地点和其他模板变量。',
         vectorMemoryRecallDescription
     });

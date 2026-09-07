@@ -615,6 +615,9 @@
                                                 class="ui-template-message-block ui-template-message-block-bottom">
                                                 <ui-template-pending></ui-template-pending>
                                             </div>
+                                            <div v-if="msg.responseError" class="response-error-text px-4 py-3"
+                                                :style="settings.fontSize ? { fontSize: settings.fontSize + 'px' } : {}"
+                                                role="alert">{{ msg.responseError }}</div>
                                         </div>
                                     </div>
 

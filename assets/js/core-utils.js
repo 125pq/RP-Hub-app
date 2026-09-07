@@ -68,12 +68,8 @@ const parseCot = (text) => {
     return result;
 };
 
-// 后一个 image### 不能作为前一个标签的结尾；抗截断时必须显式闭合。
-const getImageTagRegex = (requireClosing = false) => new RegExp(
-    'image###((?:(?!image###|###)' + (requireClosing ? '[\\s\\S]' : '[^\\r\\n]') + ')*?)'
-        + (requireClosing ? '###' : '(?:###|(?=\\r?\\n)|$)'),
-    'gi'
-);
+// 后一个 image### 不能作为前一个标签的结尾。
+const getImageTagRegex = () => /image###((?:(?!image###|###)[^\r\n])*?)(?:###|(?=\r?\n)|$)/gi;
 
 const compressImage = (source, maxWidth = 300, quality = 0.7) => new Promise((resolve) => {
     const image = new Image();
