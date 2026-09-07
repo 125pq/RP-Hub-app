@@ -2498,7 +2498,7 @@
         template: `
             <div class="char-grid-item relative rounded-2xl overflow-hidden transition-[transform,shadow,border-color] duration-300"
                 :class="mobile
-                    ? ['aspect-[2/3] shadow-md border border-gray-100', deck ? 'character-card--deck' : '', active && !batchMode && !deck ? 'ring-4 ring-primary-500 ring-offset-2' : '']
+                    ? ['aspect-[2/3] shadow-md', deck ? 'character-card--deck' : 'border border-gray-100', active && !batchMode && !deck ? 'ring-4 ring-primary-500 ring-offset-2' : '']
                     : ['bg-white border border-gray-200 hover:border-primary-400 hover:shadow-xl cursor-pointer group shadow-sm flex flex-col', active && !batchMode ? 'ring-4 ring-primary-500 ring-offset-2' : '', batchMode && selected ? 'ring-2 ring-red-500 border-red-500' : '']"
                 :aria-busy="loading"
                 @pointerenter="!deck && beginCoverZoom($event)" @pointerdown="!deck && beginPress($event)" @pointerup="endPress"
@@ -2681,7 +2681,7 @@
                     const color = rgb.map(value => Math.round(value / weight));
                     const linear = color.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
                     const luminance = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
-                    buttonColors.value = { '--deck-button-bg': `rgba(${color.join(',')},0.85)`, '--deck-button-text': luminance > 0.45 ? '#000' : '#fff' };
+                    buttonColors.value = { '--deck-button-bg': `rgb(${color.join(',')})`, '--deck-button-text': luminance > 0.45 ? '#000' : '#fff' };
                 } catch {
                     // 跨域封面无法取色时使用默认配色，不影响封面显示或切换。
                 }

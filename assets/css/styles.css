@@ -99,7 +99,7 @@
 
         .entry-logo-rp {
             position: relative;
-            font-size: clamp(2.25rem, 7.2vw, 2.9rem);
+            font-size: clamp(2rem, 6.5vw, 2.6rem);
             font-weight: 600;
             letter-spacing: 0.04em;
         }
@@ -126,7 +126,7 @@
         }
 
         .entry-logo-hub {
-            font-size: clamp(1.5rem, 5vw, 1.95rem);
+            font-size: clamp(1.35rem, 4.5vw, 1.75rem);
             font-weight: 500;
             color: #5c7eae;
             letter-spacing: 0.12em;
@@ -1978,7 +1978,7 @@ opacity: 0;
 
         .character-deck:focus-visible { outline: 2px solid #93c5fd; outline-offset: -3px; }
         .character-deck__backdrop { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: #dde4ee; }
-        .character-deck__backdrop img { position: absolute; width: 100%; height: 100%; object-fit: cover; filter: blur(38px) saturate(1.05); opacity: 0.85; transform: scale(1.12); will-change: opacity; }
+        .character-deck__backdrop img { position: absolute; width: 100%; height: 100%; object-fit: cover; filter: blur(38px) saturate(1.05); opacity: 1; transform: scale(1.12); will-change: opacity; }
         .character-deck__backdrop::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(248, 250, 252, 0.65), rgba(248, 250, 252, 0.04) 45%, rgba(248, 250, 252, 0.28)); }
         .character-backdrop-enter-active, .character-backdrop-leave-active { transition: opacity 0.85s var(--deck-easing); }
         .character-backdrop-enter-from, .character-backdrop-leave-to { opacity: 0 !important; }
@@ -2024,13 +2024,12 @@ opacity: 0;
             height: 100%;
             content-visibility: visible;
             border-radius: 22px;
-            border: 1px solid rgba(255, 255, 255, 0.65);
             background: #1e293b;
-            box-shadow: 0 18px 38px -16px rgba(15, 23, 42, 0.45), 0 0 0 1px rgba(148, 163, 184, 0.14);
+            box-shadow: 0 18px 38px -16px rgba(15, 23, 42, 0.45);
             transition: box-shadow 0.7s var(--deck-easing);
         }
 
-        .is-focused > .character-card--deck { box-shadow: 0 24px 48px -20px rgba(15, 23, 42, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.65); }
+        .is-focused > .character-card--deck { box-shadow: 0 24px 48px -20px rgba(15, 23, 42, 0.5); }
         .character-deck__placeholder {
             position: absolute;
             inset: 0;
@@ -2056,7 +2055,7 @@ opacity: 0;
         .character-deck__arrow { border-radius: 50%; color: #64748b; background: rgba(255, 255, 255, 0.8); box-shadow: 0 4px 12px -6px rgba(15, 23, 42, 0.18); }
         .character-deck__arrow svg { width: 21px; height: 21px; }
         .character-deck__arrow:hover:not(:disabled) { color: #2563eb; background: #eff6ff; transform: translateY(-2px); }
-        .character-deck__enter { gap: 18px; border-radius: 16px; border-color: rgba(255, 255, 255, 0.25); background: var(--deck-button-bg, rgba(100, 116, 139, 0.85)); color: var(--deck-button-text, #fff); font-size: 14px; font-weight: 600; letter-spacing: 0.06em; box-shadow: 0 8px 20px -10px rgba(15, 23, 42, 0.35), inset 0 1px rgba(255, 255, 255, 0.15); transition: transform 0.2s ease, filter 0.2s ease, background-color 0.7s var(--deck-easing), color 0.7s var(--deck-easing); }
+        .character-deck__enter { gap: 18px; border-radius: 16px; border-color: rgba(255, 255, 255, 0.25); background: var(--deck-button-bg, rgb(100, 116, 139)); color: var(--deck-button-text, #fff); font-size: 14px; font-weight: 600; letter-spacing: 0.06em; box-shadow: 0 8px 20px -10px rgba(15, 23, 42, 0.35), inset 0 1px rgba(255, 255, 255, 0.15); transition: transform 0.2s ease, filter 0.2s ease, background-color 0.7s var(--deck-easing), color 0.7s var(--deck-easing); }
         .character-deck__enter svg { width: 18px; height: 18px; }
         .character-deck__enter:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-2px); }
         .character-deck__navigation button:disabled { opacity: 0.45; cursor: default; }
