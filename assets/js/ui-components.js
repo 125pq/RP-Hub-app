@@ -468,7 +468,7 @@
 
 // --- Reusable views and modals ---
 (function () {
-    const { onBeforeUnmount, ref, computed, watch } = Vue;
+    const { onBeforeUnmount, ref, computed, watch, nextTick } = Vue;
     const CustomSelect = window.RPHubCustomSelect;
 
     const UiTemplatePending = {
@@ -2644,15 +2644,17 @@
             regexCount: { type: Function, required: true }
         },
         emits: ['select', 'edit', 'export-card', 'toggle-favorite', 'delete-card'],
-        setup(props) {
+        setup(props, { expose }) {
             const focusedId = ref(props.activeId || '');
             const opening = ref(false);
-            watch(() => props.visible, visible => { opening.value = visible; }, { immediate: true });
+            const importing = ref(false);
+            const stageRef = ref(null);
+            let importAnimation = null;
             const dragOffset = ref(0);
             const dragging = ref(false);
             let gesture = null;
             let suppressClickUntil = 0;
-            const busy = computed(() => props.loadingIndex !== null && props.loadingIndex >= 0);
+            const busy = computed(() => importing.value || (props.loadingIndex !== null && props.loadingIndex >= 0));
             const focusedIndex = computed(() => Math.max(0, props.items.findIndex(item => item.char.uuid === focusedId.value)));
             const focused = computed(() => props.items[focusedIndex.value]);
             const buttonColors = ref(null);
@@ -2719,44 +2721,94 @@
                 move(event.key === 'ArrowLeft' ? -1 : 1);
             };
             const beginDrag = event => {
-                if (busy.value || props.items.length < 2 || !event.isPrimary || event.button !== 0
+                if (gesture || busy.value || props.items.length < 2 || !event.isPrimary
+                    || (event.pointerType === 'mouse' && event.button !== 0)
                     || event.target.closest('button:not(.character-deck__peek)')) return;
                 const stage = event.currentTarget;
                 const cardWidth = stage.querySelector('.character-deck__item')?.offsetWidth || stage.clientWidth;
                 const spread = parseFloat(getComputedStyle(stage).getPropertyValue('--deck-spread')) || 50;
-                gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, width: stage.clientWidth, step: Math.max(1, cardWidth * spread / 100) };
+                gesture = { id: event.pointerId, container: stage, x: event.clientX, y: event.clientY, time: event.timeStamp, step: Math.max(1, cardWidth * spread / 100) };
+                // 和分支拖拽一样提前接住手势；侧卡按钮保留轻点切换。
+                if (!event.target.closest('button')) stage.setPointerCapture(event.pointerId);
+            };
+            const resetDrag = () => {
+                const state = gesture;
+                gesture = null;
+                dragOffset.value = 0;
+                dragging.value = false;
+                if (state?.container.hasPointerCapture(state.id)) state.container.releasePointerCapture(state.id);
             };
             const updateDrag = event => {
                 if (!gesture || gesture.id !== event.pointerId) return;
                 const dx = event.clientX - gesture.x;
                 const dy = event.clientY - gesture.y;
                 if (!dragging.value) {
-                    if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) { gesture = null; return; }
-                    if (Math.abs(dx) < 8) return;
+                    if (Math.hypot(dx, dy) < 4) return;
+                    if (Math.abs(dy) > Math.abs(dx) * 1.25 && Math.abs(dy) > 8) { resetDrag(); return; }
+                    if (Math.abs(dx) < 4 || Math.abs(dx) < Math.abs(dy)) return;
                     opening.value = false;
                     dragging.value = true;
-                    event.currentTarget.setPointerCapture(event.pointerId);
+                    gesture.container.setPointerCapture(event.pointerId);
                 }
                 dragOffset.value = Math.max(-1, Math.min(1, dx / gesture.step));
+                event.preventDefault();
             };
             const endDrag = event => {
                 if (!gesture || gesture.id !== event.pointerId) return;
+                if (event.type === 'pointerup') updateDrag(event);
+                if (!gesture) return;
                 const completed = event.type === 'pointerup' && dragging.value;
-                const distance = dragOffset.value * gesture.step;
-                const threshold = Math.min(64, gesture.width * 0.14);
-                gesture = null;
-                dragOffset.value = 0;
-                dragging.value = false;
-                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                const distance = event.clientX - gesture.x;
+                const threshold = Math.max(20, Math.min(40, gesture.step * 0.25));
+                const quickSwipe = Math.abs(distance) >= 12 && Math.abs(distance) / Math.max(1, event.timeStamp - gesture.time) >= 0.4;
+                resetDrag();
                 if (completed) {
                     suppressClickUntil = performance.now() + 250;
-                    if (Math.abs(distance) >= threshold) move(distance < 0 ? 1 : -1);
+                    if (Math.abs(distance) >= threshold || quickSwipe) move(distance < 0 ? 1 : -1);
                 }
             };
+            const cancelImportAnimation = () => {
+                importAnimation?.cancel();
+                importAnimation = null;
+                importing.value = false;
+            };
+            const revealImportedCard = async id => {
+                if (!props.visible || !props.items.some(item => item.char.uuid === id)) return;
+                resetDrag();
+                cancelImportAnimation();
+                opening.value = false;
+                importing.value = true;
+                focusedId.value = id;
+                await nextTick();
+                const card = stageRef.value?.querySelector('.character-deck__item.is-focused');
+                if (!props.visible || !card?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    importing.value = false;
+                    return;
+                }
+                let animation = null;
+                try {
+                    animation = card.animate([
+                        { transform: 'translateX(-50%) translateY(-65%) scale(0.94)', opacity: 0 },
+                        { transform: 'translateX(-50%) translateY(0) scale(1)', opacity: 1 }
+                    ], { duration: 650, easing: 'cubic-bezier(0.22, 0.72, 0.18, 1)' });
+                    importAnimation = animation;
+                    await animation.finished;
+                } catch {
+                    // 离开页面或动画不受支持时，不阻断角色卡导入。
+                } finally {
+                    if (importAnimation === animation) cancelImportAnimation();
+                }
+            };
+            expose({ revealImportedCard });
+            watch(() => props.visible, visible => {
+                opening.value = visible;
+                if (!visible) { resetDrag(); cancelImportAnimation(); }
+            }, { immediate: true });
+            onBeforeUnmount(() => { resetDrag(); cancelImportAnimation(); });
             const guardClick = event => {
                 if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
             };
-            return { focused, visibleItems, busy, opening, dragging, buttonColors, syncButtonColors, move, focusCard, onKeydown, beginDrag, updateDrag, endDrag, guardClick };
+            return { focused, visibleItems, busy, opening, importing, stageRef, dragging, buttonColors, syncButtonColors, move, focusCard, onKeydown, beginDrag, updateDrag, endDrag, guardClick };
         },
         template: `
             <section class="character-deck" role="region" aria-roledescription="轮播" aria-label="角色卡浏览"
@@ -2768,7 +2820,7 @@
                             @load="syncButtonColors" @error="syncButtonColors">
                     </transition>
                 </div>
-                <div class="character-deck__stage" :class="{ 'is-dragging': dragging }"
+                <div ref="stageRef" class="character-deck__stage" :class="{ 'is-dragging': dragging, 'is-importing': importing }" :inert="importing"
                     @pointerdown="beginDrag" @pointermove="updateDrag" @pointerup="endDrag"
                     @pointercancel="endDrag" @lostpointercapture="endDrag" @click.capture="guardClick" @dragstart.prevent>
                     <transition-group name="character-deck">

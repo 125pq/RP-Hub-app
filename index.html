@@ -1169,7 +1169,7 @@
                     </div>
                 </div>
 
-                <character-deck v-if="filteredCharacters.length" v-show="useCharacterDeck"
+                <character-deck ref="characterDeck" v-if="filteredCharacters.length" v-show="useCharacterDeck"
                     :visible="currentView === 'characters' && useCharacterDeck"
                     :items="filteredCharacters" :active-id="currentCharacter?.uuid" :loading-index="switchingCharacterIndex"
                     :world-info-count="getCharacterWICount" :regex-count="getCharacterRegexCount"

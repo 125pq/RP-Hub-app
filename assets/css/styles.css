@@ -2004,6 +2004,7 @@ opacity: 0;
                 translateY(calc(var(--deck-depth) * 10px)) rotateY(calc(var(--deck-offset) * -10deg))
                 rotateZ(calc(var(--deck-offset) * 3deg)) scale(calc(1 - var(--deck-depth) * 0.1));
             opacity: calc(1 - var(--deck-depth) * 0.18);
+            filter: blur(calc(var(--deck-depth) * 1.6px)) saturate(calc(1 - var(--deck-depth) * 0.12));
             /* 层级立即跟随选中卡片，不能参与渐变，否则退到侧面的卡片会短暂盖住主卡。 */
             transition: transform 0.7s var(--deck-easing), opacity 0.7s var(--deck-easing), filter 0.7s var(--deck-easing);
             will-change: transform, opacity, filter;
@@ -2015,6 +2016,8 @@ opacity: 0;
         }
         .character-deck__stage.is-dragging { cursor: grabbing; }
         .character-deck__stage.is-dragging .character-deck__item { transition: none; }
+        .character-deck__stage.is-importing { overflow: hidden; }
+        .character-deck__stage.is-importing .character-deck__item.is-focused { transition: none; }
         .character-deck-enter-from, .character-deck-leave-to { opacity: 0; }
         .character-deck-leave-active { pointer-events: none; }
         .character-card--deck {
@@ -2057,10 +2060,6 @@ opacity: 0;
         .character-deck__enter svg { width: 18px; height: 18px; }
         .character-deck__enter:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-2px); }
         .character-deck__navigation button:disabled { opacity: 0.45; cursor: default; }
-
-        @media (min-width: 1024px) and (orientation: landscape) {
-            .character-deck__item { filter: blur(calc(var(--deck-depth) * 1.6px)) saturate(calc(1 - var(--deck-depth) * 0.12)); }
-        }
 
         @media (max-width: 767px) {
             .character-deck { --deck-card-width: min(78cqw, 360px, max(220px, calc((100dvh - 238px) / 1.5))); --deck-spread: 44%; }

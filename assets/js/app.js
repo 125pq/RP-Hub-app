@@ -1389,6 +1389,7 @@ const app = createApp({
         const editorTab = ref('basic'); // 'basic', 'description', 'personality', 'first_mes'
         const isBatchDeleteMode = ref(false);
         const characterGridView = ref(false);
+        const characterDeck = ref(null);
         const useCharacterDeck = computed(() => !isBatchDeleteMode.value && !characterGridView.value);
         const selectedCharacterIndices = ref(new Set());
         const editingPreset = reactive({ id: undefined, data: {} });
@@ -8200,9 +8201,13 @@ const app = createApp({
                 throw error;
             }
 
-            // Auto-select the new character and enter chat immediately.
-            const newCharacterIndex = characters.value.findIndex(item => item.uuid === char.uuid);
             showAddCharacterMenu.value = false;
+            if (currentView.value === 'characters' && useCharacterDeck.value) {
+                characterSearchQuery.value = '';
+                await nextTick();
+                await characterDeck.value?.revealImportedCard(char.uuid);
+            }
+            const newCharacterIndex = characters.value.findIndex(item => item.uuid === char.uuid);
             await selectCharacter(newCharacterIndex, askImageGeneration);
             return char;
         };
@@ -9014,7 +9019,7 @@ const app = createApp({
             isGeneratorLoading, generatorUrl, onGeneratorLoad, // Generator exports
             isSquareLoading, squareUrl, onSquareLoad, // Square exports
             isNovelLoading, novelUrl, onNovelLoad, // Novel exports
-            editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, characterGridView, useCharacterDeck, displayedCharacters, loadMoreCharacters, getCharacterWICount, getCharacterRegexCount,
+            editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, characterGridView, characterDeck, useCharacterDeck, displayedCharacters, loadMoreCharacters, getCharacterWICount, getCharacterRegexCount,
             isAutoImageGenEnabled,
             apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
             toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll,
