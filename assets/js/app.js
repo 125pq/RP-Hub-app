@@ -617,7 +617,6 @@ const app = createApp({
             immersiveMode: false,
             showLatestUsageBar: false,
             preventTruncation: false,
-            truncationMaxAttempts: 5,
             styleFilterEnabled: true,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
@@ -851,10 +850,10 @@ const app = createApp({
         });
         const reasoningEffortOptions = [
             { value: 'none', label: '关闭' },
-            { value: 'low', label: '低（low）' },
-            { value: 'medium', label: '中（medium）' },
-            { value: 'high', label: '高（high）' },
-            { value: 'max', label: '最高（max）' },
+            { value: 'low', label: '低（Low）' },
+            { value: 'medium', label: '中（Medium）' },
+            { value: 'high', label: '高（High）' },
+            { value: 'max', label: '最高（Max）' },
             { value: '', label: '默认' }
         ];
         const reasoningEffortSlider = computed({
@@ -905,6 +904,11 @@ const app = createApp({
         const isConversationBusy = computed(() => isGenerating.value || isRemoteGenerating.value || hasActiveToolInlineWork.value);
 
         const presets = ref([]);
+        // 抗截断只临时停用 COT，不改写用户保存的开关状态。
+        const isPresetEnabled = preset => preset.enabled !== false
+            && (preset.name !== 'COT' || !isTruncationEnabled.value);
+        const isStoryPanelsEnabled = computed(() => presets.value.some(preset => preset.name === BUILTIN_PRESETS.storyPanels.name
+            && preset.enabled !== false && String(preset.content || '').trim()));
         const normalizePresetRole = (role) => (
             ['system', 'user', 'assistant'].includes(role) ? role : 'system'
         );
@@ -3275,21 +3279,19 @@ const app = createApp({
                         ? getImageTagRegex(isTruncationEnabled.value)
                         : new RegExp(regexPattern, flags);
 
-                    // --- Protection Logic Start ---
-                    // 只有当正则不包含 < 或 > 且不包含 markdown 代码块标记 (```) 时，才启用 HTML/代码块保护
-                    // 如果正则本身就在匹配代码块（如用户提供的 ```json ...```），则不应进行保护
-                    // 增强保护：防止普通正则（通常带g）破坏 iframe 渲染内容（HTML文档、Script/Style块）
+                    // 普通正则保护 HTML/代码；明确匹配标签或代码围栏的规则仍直接执行。
                     if (!/[<>]/.test(regexPattern) && !regexPattern.includes('```')) {
-                        // 匹配完整的 HTML、脚本、代码块、标签以及 thinking/COT 块
-                        result = cardUtils.transformUnprotectedText(
-                            result,
-                            part => part.replace(re, replacement)
-                        );
+                        const wholeMatch = re.exec(result);
+                        re.lastIndex = 0;
+                        const wrapped = wholeMatch?.[0] === result ? result.replace(re, replacement) : null;
+                        re.lastIndex = 0;
+                        // 完整保留原文的整条包裹只执行一次，避免给面板内每段文字重复套壳。
+                        result = wrapped !== null && wrapped.includes(result)
+                            ? wrapped
+                            : cardUtils.transformUnprotectedText(result, part => part.replace(re, replacement));
                     } else {
-                        // 如果正则明确包含 <, > 或 ```，说明用户意图直接操作 HTML 或 Markdown 代码块，因此跳过保护直接替换
                         result = result.replace(re, replacement);
                     }
-                    // --- Protection Logic End ---
 
                 } catch (e) {
                     console.error(`Regex error in script "${script.name || 'Unnamed'}":`, e.message);
@@ -4393,6 +4395,7 @@ const app = createApp({
                 memoryEnabled: memorySettings.enabled,
                 useThinkingTag,
                 writingStylePrompt,
+                storyPanelsEnabled: isStoryPanelsEnabled.value,
                 uiTemplateEnabled: isUiTemplateAnalysisEnabled()
             });
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
@@ -4407,7 +4410,7 @@ const app = createApp({
             if (!value) return false;
             return !/(?:###|[。！？!?；;：:.!?…」』）》）】〕］\]}"'’”>])$/.test(value);
         };
-        const getTruncationMaxAttempts = () => Math.min(10, Math.max(5, Number(settings.truncationMaxAttempts) || 5));
+        const MAX_TRUNCATION_ATTEMPTS = 6;
 
         let _wasCancelled = false;
         const generateResponse = async (startTime = null, options = {}) => {
@@ -4468,7 +4471,7 @@ const app = createApp({
             // Construct Prompt Parts
             const enabledPresets = presets.value
                 .map(normalizePreset)
-                .filter(p => p.enabled && p.content.trim());
+                .filter(p => isPresetEnabled(p) && p.content.trim());
             const writingStylePresets = enabledPresets.filter(p => p.name === BUILTIN_PRESETS.writingStyle.name);
             const cotPresets = enabledPresets.filter(p => p.name === 'COT');
             const systemPresets = enabledPresets.filter(p => p.name !== 'COT'
@@ -5016,7 +5019,7 @@ const app = createApp({
                     generatedAssistantMessageId = assistantMessage.id;
                     const deferUiTemplateAnalysis = isTruncationEnabled.value
                         && activeToolDepth === 0
-                        && continuationAttempt < getTruncationMaxAttempts()
+                        && continuationAttempt < MAX_TRUNCATION_ATTEMPTS
                         && isLikelyTruncatedResponse(assistantMessage.content);
                     if (settings.uiTemplateEnabled && settings.uiTemplateMainModelAnalysis && !deferUiTemplateAnalysis) {
                         applyMainModelUiTemplateUpdates(assistantMessage, requestModel);
@@ -5086,7 +5089,7 @@ const app = createApp({
                     && !wasCancelled
                     && !generationFailed
                     && activeToolDepth === 0
-                    && continuationAttempt < getTruncationMaxAttempts()
+                    && continuationAttempt < MAX_TRUNCATION_ATTEMPTS
                     && assistantMessage
                     && isLikelyTruncatedResponse(assistantMessage.content);
                 if (shouldAutoContinue) {
@@ -9165,6 +9168,7 @@ const app = createApp({
 
             // 1.7.5 Enforce Default Preset (文风（抗八股）)
             syncBuiltinPreset(BUILTIN_PRESETS.writingStyle);
+            syncBuiltinPreset(BUILTIN_PRESETS.storyPanels);
 
             // 1.7.5.1 固定 NSFW增强在文风预设之后
             syncBuiltinPreset(BUILTIN_PRESETS.nsfw);
@@ -9197,6 +9201,7 @@ const app = createApp({
                 const cotPresetContent = buildCotPresetContent({
                     memoryEnabled: memorySettings.enabled,
                     uiTemplateAnalysisEnabled,
+                    storyPanelsEnabled: isStoryPanelsEnabled.value,
                     useThinkingOpening
                 });
                 let existingCotPreset = presets.value.find(p => p.name === cotPresetName);
@@ -9211,7 +9216,7 @@ const app = createApp({
                     existingCotPreset.content = cotPresetContent;
                 }
 
-                const prefillEnabled = existingCotPreset?.enabled !== false;
+                const prefillEnabled = isPresetEnabled(existingCotPreset);
                 BUILTIN_CORE_PRESETS.forEach(preset => {
                     const prefillPhase = preset.name === '破限预注入 · AI 1' ? 1
                         : preset.name === '破限预注入 · AI 2' ? 2
@@ -9235,7 +9240,9 @@ const app = createApp({
                 () => settings.uiTemplateEnabled,
                 () => settings.uiTemplateMainModelAnalysis,
                 () => activeUiTemplates.value.length,
+                isStoryPanelsEnabled,
                 () => settings.model,
+                isTruncationEnabled,
                 () => presets.value.find(preset => preset.name === cotPresetName)?.enabled
             ], syncCotPresetContent);
             removeLegacyUserRegex();
@@ -9360,18 +9367,43 @@ const app = createApp({
                         + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');
                 }
             }
-            const patterns = ['```html', '```vue', '<!DOCTYPE', '<div', '<style'];
-            let earliestIndex = -1;
-            for (const p of patterns) {
-                const idx = mainText.toLowerCase().indexOf(p);
-                if (idx !== -1 && (earliestIndex === -1 || idx < earliestIndex)) {
-                    earliestIndex = idx;
+            // 只暂存未闭合的 UI；完整面板及其后的正文可以继续流式展示。
+            const uiTokens = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\r\n]*`|<!--[\s\S]*?(?:-->|$)|<(script|style)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>[\s\S]*?(?:<\/\1\s*>|$)|<!doctype\b[^>]*(?:>|$)|<\/?[a-z][\w:-]*(?:[^"'<>]|"[^"]*(?:"|$)|'[^']*(?:'|$))*(>|$)/gi;
+            const openTags = [];
+            let pendingStart = -1;
+            const waitForUi = index => ({ text: mainText.slice(0, pendingStart < 0 ? index : pendingStart), showSpinner: true });
+            for (const match of mainText.matchAll(uiTokens)) {
+                const token = match[0];
+                const fence = token.startsWith('```') ? '```' : token.startsWith('~~~') ? '~~~' : '';
+                if (fence) {
+                    const isHtml = /^(?:```|~~~)[ \t]*(?:html|xml|vue)\b|^(?:```|~~~)[^\n]*\n\s*<(?:!doctype|html|head|body|div|span|style|script|table|img)\b/i.test(token);
+                    if (isHtml && (token.length < 6 || !token.endsWith(fence))) return waitForUi(match.index);
+                    continue;
+                }
+                if (token.startsWith('`') || token.startsWith('<!--')) continue;
+                if (match[1]) {
+                    if (!/<\/(?:script|style)\s*>$/i.test(token)) return waitForUi(match.index);
+                    continue;
+                }
+                if (/^<!doctype\b/i.test(token)) {
+                    if (pendingStart < 0) pendingStart = match.index;
+                    continue;
+                }
+                const tag = token.match(/^<(\/?)(html|div|script|style)(?=[\s/>]|$)/i);
+                if (!tag) continue;
+                if (match[2] !== '>') return waitForUi(match.index);
+                const name = tag[2].toLowerCase();
+                if (!tag[1]) {
+                    if (pendingStart < 0) pendingStart = match.index;
+                    openTags.push(name);
+                } else {
+                    const openIndex = openTags.lastIndexOf(name);
+                    if (openIndex < 0) continue;
+                    openTags.splice(openIndex);
+                    if (!openTags.length) pendingStart = -1;
                 }
             }
-            if (earliestIndex !== -1) {
-                return { text: mainText.substring(0, earliestIndex), showSpinner: true };
-            }
-            return { text: mainText, showSpinner: false };
+            return pendingStart < 0 ? { text: mainText, showSpinner: false } : waitForUi(pendingStart);
         };
 
         const switchProfile = (id) => {
@@ -9556,7 +9588,7 @@ const app = createApp({
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
             updateModalRef, latestUpdateConfig,
-            showConfirmModal, confirmMessage, modelMode, isGeminiModel, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
+            showConfirmModal, confirmMessage, modelMode, isGeminiModel, isTruncationEnabled, isPresetEnabled, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingCardInteraction, clearPendingCardInteraction, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
             user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,

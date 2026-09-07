@@ -90,7 +90,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '[最终检查]\n检查人物、时间线和因果连续，完成分析并闭合标签后直接输出正文，不泄露分析过程。'
     ].filter(Boolean).join('\n\n');
 
-    const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, memoryEnabled = false, uiTemplateEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
+    const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, memoryEnabled = false, uiTemplateEnabled = false, storyPanelsEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
         const analysisTag = useThinkingTag ? 'thinking' : 'cot';
         return [
             '<next_response>',
@@ -110,6 +110,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             uiTemplateEnabled
                 ? '正文结束后，按系统提供的当前变量JSON检查并输出本轮需要更新的变量。'
                 : '',
+            storyPanelsEnabled ? '在有展示价值时按要求积极生成UI面板。' : '',
             '</next_response>'
         ].filter(Boolean).join('\n');
     };
@@ -609,6 +610,20 @@ image###英文Tag###
 {{user}} 已经说过和做过的内容视为事实；未给出的台词、决定、动作和心理保持空白。其他人物和世界照常行动，剧情在需要 {{user}} 作出关键回应时自然停下。
 </writing_style>`
         }),
+        storyPanels: Object.freeze({
+            name: '剧情面板',
+            after: '文风（抗八股）',
+            content: `<story_panels>
+随剧情主动插入有设计感的HTML/div面板，有展示价值就生成，不等用户提醒。
+
+- 时机：角色阅读消息、查看清单，或线索、目标、局势有新变化时，紧跟相关段落插入，再继续正文；不把普通对白做成状态播报，也不集中堆在结尾。
+- 衔接：面板应由前文自然引出，后文接住其中的信息、人物反应或事件变化，与上下剧情连贯，不突兀插入或打断叙事。
+- 内容：只呈现有剧情依据的信息，突出新增与变化；不复述正文、不照搬上轮面板，不为凑面板编造事实。
+- 设计：UI要有设计感，也要贴近现实与剧情，符合故事的时代、场景、使用者和实际用途。参考对应界面或物件的真实布局、材质、配色与排版，突出信息层次和情境细节，不为好看堆砌无关装饰或套用出戏的风格。例如收到消息用通信界面、读信用笺纸、查看线索用档案、点餐用菜单、结账用票据、出行用车票或路线图、日程变更用公告、任务推进用阶段记录、获得物品用物品卡；这些只是方向，按剧情自行设计，不固定套版。
+- 格式：每个面板用完整闭合的div包住，直接输出HTML片段，前后空一行，不用代码围栏或整页HTML。面板独占一行，在聊天区域内水平居中；根容器使用内联style设置display:block、margin:16px auto、max-width:100%和box-sizing:border-box，不使用浮动或负外边距。宽度自适应、文字自然换行；根节点设置文字颜色、字号、行高与white-space:normal，减少外层美化样式干扰。
+- 边界：不使用脚本、事件属性、外部资源、全局样式或固定定位，不遮挡正文；面板只补充剧情，不代替UI模板或改变其变量更新格式。
+</story_panels>`
+        }),
         timestamp: Object.freeze({
             name: '时间戳',
             role: 'system',
@@ -649,6 +664,7 @@ image###英文Tag###
     const buildCotPresetContent = ({
         memoryEnabled,
         uiTemplateAnalysisEnabled,
+        storyPanelsEnabled = false,
         useThinkingOpening = false,
         prefillPhase = 0,
         prefillEnabled = false,
@@ -717,7 +733,7 @@ ${uiTemplateAnalysisSection}
 分别确认各角色此刻掌握的信息及其来源，区分亲历、被告知、合理推断与未知。未在场事件、他人内心、旁白信息、隐藏设定及仅向其他角色展示的内容，未经观察或传递不得知晓；推断只能作为人物判断，不得写成已确认事实，角色之间不得自动共享认知。
 
 [剧情规划]
-设置具体有意义的剧情焦点，思考围绕什么角色、群体或事件自然展开；通过何种内容的对白、选择、行动结果或关系反应推进。
+设置具体有意义的剧情焦点，思考围绕什么角色、群体或事件自然展开；通过何种内容的对白、选择、行动结果或关系反应推进。${storyPanelsEnabled ? '\n判断本轮哪些信息值得通过剧情UI面板展示，明确面板内容、插入位置及设计样式；有展示价值时积极安排，不复述正文或照搬上轮面板。' : ''}
 
 [最终检查]
 确认人物没有失真或越过认知边界，剧情因果成立。先判断是否应用<nsfw_rules>：当前剧情已经进入或正在明确推进NSFW内容时应用；否则忽略。随后按<writing_style>做最终检查。
@@ -734,17 +750,18 @@ ${closingInstruction}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10202,
+    id: 10204,
     title: '网站公告',
     content: `
-### RP-Hub 1.9.1
+### RP-Hub 1.9.2
 
-- 新增抗Gemini截断模式
-- 新增UI模板协议检查功能
-- 优化了记忆系统的效果
-- 修复了部分问题
-- 去除了废弃功能
+- 新增UI实时生成，可根据剧情随时生成符合剧情的UI面板，如手机界面/便签/信件等
+- 优化了快捷面板的样式和密度
+- 优化了抗截断模式的效果
+- 修复了新手引导界面高度自适应异常的问题
+- 修复了正则渲染嵌套重复渲染的问题
+- 修复了UI生成状态下正文异常阻断的问题
 
-#### 更新时间：09/05/05:50
+#### 更新时间：09/07/14:52
     `
 });

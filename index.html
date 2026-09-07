@@ -621,7 +621,7 @@
                                     <!-- Message Actions -->
                                     <div v-if="!msg.isEditing_Message && !isMessageThinkingOrRunning(msg) && !(index === chatHistory.length - 1 && !msg.isSelf && (isGenerating || isRemoteGenerating)) && !(msg.isSelf && isConversationBusy && !chatHistory.slice(index + 1).some(m => m.isSelf))"
                                         :class="['message-action-bar absolute bottom-0 -mb-9 md:-mb-10 flex items-center transition-opacity duration-200', msg.isSelf ? 'right-0' : 'left-0', isStyleFilterDetailsOpen(msg, index) ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100']">
-                                        <button v-if="index === chatHistory.length - 1"
+                                        <button v-if="index === chatHistory.length - 1 && (msg.role === 'user' || chatHistory.slice(0, index).some(m => m.role === 'user'))"
                                             @click="regenerateMessage(index)"
                                             class="message-action-button"
                                             title="重新生成">
@@ -878,68 +878,79 @@
                                         leave-from-class="opacity-100 translate-y-0 scale-100"
                                         leave-to-class="opacity-0 translate-y-2 scale-95">
                                         <div v-if="showChatModelSelector"
-                                            class="absolute bottom-full right-0 mb-3 md:mb-4 z-50 pointer-events-auto w-[min(22rem,calc(100vw-3rem))] md:w-[min(24rem,calc(100vw-2rem))] max-h-[calc(100dvh-10rem)] md:max-h-none transform-gpu origin-bottom-right">
-                                            <div @click.stop
-                                                class="bg-white/95 backdrop-blur-xl border border-gray-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.12)] rounded-2xl p-3 flex flex-col gap-3 ring-1 ring-black/5 max-w-full max-h-[inherit] overflow-x-hidden overflow-y-auto overscroll-contain">
-                                                <div class="flex flex-col gap-1.5">
-                                                    <button v-for="(slot, slotIndex) in chatModelSlots" :key="slot.mode"
-                                                        type="button" @click="selectChatModelSlot(slot)"
-                                                        :disabled="!slot.model"
-                                                        :class="['flex min-w-0 items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all', modelMode === slot.mode && slot.model ? 'border-primary-300 bg-primary-50 text-primary-700 shadow-sm' : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50', !slot.model ? 'cursor-not-allowed opacity-45' : 'active:scale-[0.98]']">
-                                                        <span class="flex-none text-xs font-bold">槽位 {{ slotIndex + 1 }}</span>
-                                                        <span class="min-w-0 flex-1 truncate text-right text-xs font-mono" :title="slot.model">{{ slot.model || '未配置' }}</span>
+                                            class="absolute bottom-full right-0 mb-3 z-50 pointer-events-auto w-[min(22rem,calc(100vw-3rem))] max-h-[calc(100dvh-12rem)] transform-gpu origin-bottom-right">
+                                            <div id="chat-quick-panel" @click.stop @keydown.esc.stop="showChatModelSelector = false"
+                                                role="dialog" aria-label="快捷面板"
+                                                class="chat-quick-panel bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_12px_40px_rgba(30,64,110,0.14)] rounded-2xl p-3 flex flex-col gap-3 ring-1 ring-gray-200/80 max-w-full max-h-[inherit] overflow-x-hidden overflow-y-auto overscroll-contain">
+                                                <div class="flex items-center justify-between pl-1">
+                                                    <h3 class="text-sm font-bold text-gray-700">快捷面板</h3>
+                                                    <button type="button" @click="showChatModelSelector = false" aria-label="关闭快捷面板"
+                                                        class="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                            <path stroke-linecap="round" stroke-width="2" d="m6 6 12 12M18 6 6 18"></path>
+                                                        </svg>
                                                     </button>
                                                 </div>
-                                                <div class="border-t border-gray-100 pt-4 space-y-5">
-                                                    <div class="rounded-xl border border-gray-200 bg-white px-3 py-2.5">
-                                                        <div class="mb-2 flex items-center justify-between">
-                                                            <span class="text-xs font-bold text-gray-500">推理强度</span>
-                                                            <span class="text-xs font-semibold text-gray-500">{{ reasoningEffortLabel }}</span>
+                                                <div class="chat-model-slots relative grid auto-rows-fr gap-1.5 rounded-xl bg-gray-100/70 p-1">
+                                                    <div class="segmented-switch__indicator flex items-center justify-end px-2.5 text-primary-600" aria-hidden="true"
+                                                        v-show="chatModelSlots.some(slot => slot.mode === modelMode && slot.model)"
+                                                        :style="{ '--slot-index': chatModelSlots.findIndex(slot => slot.mode === modelMode) }">
+                                                        <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m5 12 4 4L19 6"></path>
+                                                        </svg>
+                                                    </div>
+                                                    <button v-for="(slot, slotIndex) in chatModelSlots" :key="slot.mode"
+                                                        type="button" @click="selectChatModelSlot(slot)"
+                                                        :disabled="!slot.model" :aria-pressed="modelMode === slot.mode && !!slot.model"
+                                                        :class="['relative z-10 flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors', modelMode === slot.mode && slot.model ? 'text-primary-600' : 'text-gray-500', !slot.model ? 'cursor-not-allowed opacity-45' : 'hover:text-primary-600']">
+                                                        <span class="flex-none text-xs font-semibold">槽位 {{ slotIndex + 1 }}</span>
+                                                        <span class="min-w-0 flex-1 truncate text-[13px] font-medium" :title="slot.model">{{ slot.model || '未配置' }}</span>
+                                                        <span class="w-4 flex-none" aria-hidden="true"></span>
+                                                    </button>
+                                                </div>
+                                                <div class="flex flex-col gap-2 rounded-xl bg-gray-50 px-3 py-2.5">
+                                                    <div class="min-w-0">
+                                                        <div class="mb-1 flex flex-wrap items-center justify-between gap-x-1 text-xs">
+                                                            <span class="font-bold text-gray-500">推理强度</span>
+                                                            <span class="font-semibold text-gray-500">{{ reasoningEffortLabel }}</span>
                                                         </div>
                                                         <input v-model.number="reasoningEffortSlider" type="range" min="0" max="5" step="1"
-                                                            class="compact-range block w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                                                            class="compact-range block w-full appearance-none cursor-pointer accent-primary-500"
                                                             aria-label="推理强度">
                                                     </div>
-                                                    <div class="rounded-xl border border-gray-200 bg-white px-3 py-2.5">
-                                                        <div class="mb-2 flex items-center justify-between">
-                                                            <span class="text-xs font-bold text-gray-500">温度</span>
-                                                            <span class="text-xs font-mono font-semibold text-gray-500 tabular-nums">{{ Number(settings.temperature).toFixed(2) }}</span>
+                                                    <div class="min-w-0 border-t border-gray-200/70 pt-2">
+                                                        <div class="mb-1 flex flex-wrap items-center justify-between gap-x-1 text-xs">
+                                                            <span class="font-bold text-gray-500">温度</span>
+                                                            <span class="font-mono font-semibold text-gray-500 tabular-nums">{{ Number(settings.temperature).toFixed(2) }}</span>
                                                         </div>
                                                         <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.01"
-                                                            class="compact-range block w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500">
+                                                            class="compact-range block w-full appearance-none cursor-pointer accent-primary-500" aria-label="温度">
                                                     </div>
-                                                    <div class="flex flex-col gap-2 border-t border-gray-100 pt-3">
-                                                        <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50">
-                                                            <span>流式输出</span>
-                                                            <span class="relative inline-flex flex-none items-center">
-                                                                <input v-model="settings.stream" type="checkbox" class="settings-toggle-input sr-only">
-                                                                <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
-                                                            </span>
-                                                        </label>
-                                                        <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50">
-                                                            <span>沉浸模式</span>
-                                                            <span class="relative inline-flex flex-none items-center">
-                                                                <input v-model="settings.immersiveMode" type="checkbox" class="settings-toggle-input sr-only">
-                                                                <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
-                                                            </span>
-                                                        </label>
-                                                        <label v-if="isGeminiModel" class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50">
-                                                            <span>抗Gemini截断</span>
-                                                            <span class="relative inline-flex flex-none items-center">
-                                                                <input v-model="settings.preventTruncation" type="checkbox" class="settings-toggle-input sr-only">
-                                                                <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
-                                                            </span>
-                                                        </label>
-                                                        <div v-if="isGeminiModel && settings.preventTruncation" class="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
-                                                            <div class="mb-2 flex items-center justify-between">
-                                                                <span class="text-xs font-bold text-gray-500">抗截断尝试次数</span>
-                                                                <span class="text-xs font-semibold text-gray-500">{{ Math.min(10, Math.max(5, Number(settings.truncationMaxAttempts) || 5)) }} 次</span>
-                                                            </div>
-                                                            <input v-model.number="settings.truncationMaxAttempts" type="range" min="5" max="10" step="1"
-                                                                class="compact-range block w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                                                                aria-label="抗截断尝试次数">
-                                                        </div>
                                                 </div>
+                                                <div class="flex flex-col gap-1 rounded-xl bg-gray-50">
+                                                    <label class="flex cursor-pointer items-center justify-between gap-1.5 rounded-xl bg-gray-50 px-2.5 py-2.5 text-xs font-semibold text-gray-600 whitespace-nowrap transition-colors hover:bg-gray-100">
+                                                        <span>流式输出</span>
+                                                        <span class="relative inline-flex flex-none items-center">
+                                                            <input v-model="settings.stream" type="checkbox" class="settings-toggle-input sr-only">
+                                                            <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
+                                                        </span>
+                                                    </label>
+                                                    <label class="flex cursor-pointer items-center justify-between gap-1.5 rounded-xl bg-gray-50 px-2.5 py-2.5 text-xs font-semibold text-gray-600 whitespace-nowrap transition-colors hover:bg-gray-100">
+                                                        <span>沉浸模式</span>
+                                                        <span class="relative inline-flex flex-none items-center">
+                                                            <input v-model="settings.immersiveMode" type="checkbox" class="settings-toggle-input sr-only">
+                                                            <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                                <div v-if="isGeminiModel" class="rounded-xl bg-gray-50">
+                                                    <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100">
+                                                        <span>抗Gemini截断</span>
+                                                        <span class="relative inline-flex flex-none items-center">
+                                                            <input v-model="settings.preventTruncation" type="checkbox" class="settings-toggle-input sr-only">
+                                                            <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
+                                                        </span>
+                                                    </label>
                                                 </div>
                                             </div>
                                         </div>
@@ -948,7 +959,7 @@
                                     <!-- Current Model Toggle Button -->
                                     <button @click.stop="showChatModelSelector = !showChatModelSelector"
                                         class="w-8 h-8 rounded-full transition-all duration-300 flex items-center justify-center bg-white text-gray-500 hover:text-gray-700 hover:bg-gray-50 border border-gray-200 shadow-sm active:scale-95"
-                                        title="切换模型">
+                                        title="快捷面板" aria-label="快捷面板" aria-controls="chat-quick-panel" :aria-expanded="showChatModelSelector">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
                                             aria-hidden="true">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1791,41 +1802,41 @@
                             <!-- Settings Toggles Grid -->
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <label
-                                    class="flex items-center p-3 rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
-                                    <div class="relative inline-flex items-center mr-2.5">
+                                    class="flex items-center justify-between gap-3 p-3 text-left rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
+                                    <span
+                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">使用封面背景</span>
+                                    <div class="relative inline-flex flex-none items-center">
                                         <input type="checkbox" v-model="settings.useCharacterBackground"
                                             class="settings-toggle-input sr-only">
                                         <div class="settings-toggle settings-toggle--indigo"></div>
                                     </div>
-                                    <span
-                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">使用封面背景</span>
                                 </label>
                                 <label
-                                    class="flex items-center p-3 rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
-                                    <div class="relative inline-flex items-center mr-2.5">
+                                    class="flex items-center justify-between gap-3 p-3 text-left rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
+                                    <span
+                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">沉浸模式</span>
+                                    <div class="relative inline-flex flex-none items-center">
                                         <input type="checkbox" v-model="settings.immersiveMode" class="settings-toggle-input sr-only">
                                         <div class="settings-toggle settings-toggle--indigo"></div>
                                     </div>
-                                    <span
-                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">沉浸模式</span>
                                 </label>
                                 <label
-                                    class="flex items-center p-3 rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
-                                    <div class="relative inline-flex items-center mr-2.5">
+                                    class="flex items-center justify-between gap-3 p-3 text-left rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
+                                    <span
+                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">显示最新用量</span>
+                                    <div class="relative inline-flex flex-none items-center">
                                         <input type="checkbox" v-model="settings.showLatestUsageBar" class="settings-toggle-input sr-only">
                                         <div class="settings-toggle settings-toggle--indigo"></div>
                                     </div>
-                                    <span
-                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">显示最新用量</span>
                                 </label>
                                 <label
-                                    class="flex items-center p-3 rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
-                                    <div class="relative inline-flex items-center mr-2.5">
+                                    class="flex items-center justify-between gap-3 p-3 text-left rounded-xl border-2 border-transparent hover:border-gray-100 hover:bg-gray-50 transition-all cursor-pointer group">
+                                    <span
+                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">文风过滤</span>
+                                    <div class="relative inline-flex flex-none items-center">
                                         <input type="checkbox" v-model="settings.styleFilterEnabled" class="settings-toggle-input sr-only">
                                         <div class="settings-toggle settings-toggle--indigo"></div>
                                     </div>
-                                    <span
-                                        class="text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">文风过滤</span>
                                 </label>
                             </div>
 
@@ -1977,8 +1988,12 @@
                             </div>
                         </div>
                         <div class="flex items-center space-x-4 flex-shrink-0">
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" v-model="preset.enabled" class="settings-toggle-input sr-only">
+                            <label class="relative inline-flex items-center"
+                                :class="preset.name === 'COT' && isTruncationEnabled ? 'cursor-not-allowed' : 'cursor-pointer'"
+                                :title="preset.name === 'COT' && isTruncationEnabled ? '抗Gemini截断已临时关闭 COT，关闭抗截断或切换模型后恢复原设置' : null">
+                                <input type="checkbox" :checked="isPresetEnabled(preset)"
+                                    :disabled="preset.name === 'COT' && isTruncationEnabled"
+                                    @change="preset.enabled = $event.target.checked" class="settings-toggle-input sr-only">
                                 <div class="settings-toggle"></div>
                             </label>
                             <div class="flex space-x-1 border-l border-gray-200 pl-4">

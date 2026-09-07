@@ -779,8 +779,8 @@
         emits: ['update:name', 'update:description', 'update:person', 'save'],
         template: `
             <modal-shell v-if="show" overlay-class="z-[70] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
-                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-md flex flex-col shadow-2xl transform transition-all scale-100">
-                    <div class="p-6">
+                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-md max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden shadow-2xl transform transition-all scale-100">
+                    <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 custom-scrollbar">
                         <div class="flex items-center justify-center w-12 h-12 rounded-full bg-primary-100 text-primary-600 mb-4 mx-auto">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
@@ -812,7 +812,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="bg-gray-50 px-4 py-3 sm:px-6 flex flex-row-reverse rounded-b-xl">
+                    <div class="bg-gray-50 px-4 py-3 sm:px-6 flex flex-row-reverse shrink-0 rounded-b-xl">
                         <button @click="$emit('save')" :disabled="!name || name === '请前往设置自定义你的名称'" type="button"
                             class="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-primary-600 text-base font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:ml-3 sm:w-auto sm:text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">保存并开始</button>
                     </div>
