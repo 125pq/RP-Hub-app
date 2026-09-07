@@ -25,6 +25,7 @@
 - 失败后的 issue 报告步骤又因仓库禁用 Issues 返回错误；这是次生告警失败，不是同步、构建或发布失败的根因。
 - 失败发生在 prepare-only 合并阶段，依赖安装、测试、Android 构建、提交、GitHub Release 和 Gitee 镜像步骤均未执行。
 - 第二门禁失败工作流为 `33964536295`：三个冲突均已自动解析，resolver、重应用幂等和 adapter proof 全部通过；随后 `Verify adapter and upstream hooks` 在 `merge-regressions.mjs:138` 首次失败，旧测试向 1.9.1 的 `parseUiTemplateUpdates` 传入了 `路径=值`，触发 `JSON变量块格式错误`。后续构建与发布仍全部跳过，Issues 禁用报错仍只是次生失败。
+- 发布镜像门禁失败工作流为 `33964987140`：合并、完整测试、Android 构建、签名 APK 校验、`main` 推送、GitHub Release 和 GitHub `android-latest` 推送均成功；Gitee 拉取 POST 后第一次 `git ls-remote` 遇到 HTTP 429，并因 `bash -e -o pipefail` 以 128 退出，未执行预期的后续轮询。审计时 GitHub `main=3c29614`、`android-latest=572b93a`，Gitee 仍为 `main=8ffc80a`、`android-latest=d8a6ff4`。
 
 ### 根因
 
@@ -32,6 +33,7 @@
 - `app.js` 有两个真实冲突块：上游重新加入了支持 `preventTruncation` 的内联 `processMainContent`，而本地已将该处理器移到 data-services 的共享缓存；上游同时移除了记忆导入导出 UI 和 handler，并移除了 handler 使用的 `hasVectorEmbedding` 导入。
 - 直接选 ours 会留下无 UI 入口且引用已删除 helper 的记忆 handler，并丢失上游防截断语义；直接选 theirs 则会与本地导入的共享 `processMainContent` 重名，并丢失本地缓存路径。
 - 第二门禁不是 resolver 或运行时代码回归：1.9.1 有意保留 `parseUiTemplateUpdates` 名称并将其输入改为原始 JSON（含 fenced JSON 和多模板数组）；既有回归测试仅按导出函数名把它误判为 1.8.9 的简化 `路径=值` 合约。
+- 发布镜像门禁的重试循环没有把 `git ls-remote` 和 manifest HEAD 的暂时失败放在条件分支内；在 workflow 的 fail-fast shell 下，任一非零状态都会在循环体自行处理前终止整个步骤，因此声明的 30 次重试并不覆盖 429 或网络错误。
 
 ### 处理
 
@@ -40,6 +42,7 @@
 - 记忆导入导出 handler 随上游删除：上游 `index.html` 已移除对应按钮，且 `hasVectorEmbedding` 已删除；保留该块只会制造不可达代码和运行时引用错误。其他 Android 文件导出、完整备份和用户选择保存位置路径保持不变。
 - 输出按新的 upstream blob 重建 EOL，而不是继承 Git 冲突 marker 的 checkout 换行；真实合并的 EOL baseline 保持零新增噪声，没有扩大 allowance。
 - 第二门禁只修正测试契约，不改生产 parser：用真实解析结果辨识 1.8.9 `路径=值` 与 1.9.1 JSON 合约，并分别验证合法输入和对应的 SyntaxError；无法匹配任一完整已审查行为时继续 fail closed，不依赖源码字符串断言。
+- 发布镜像轮询提取为可单测的 Node helper：ref 查询或 manifest HEAD 的暂时失败只记录 warning 并进入下一次尝试；只有 ref 精确等于刚推送的 GitHub `android-latest` SHA 且 manifest 可读时才成功，次数耗尽仍 fail closed。失败 issue 报告先检查仓库是否启用 Issues，并设为 best-effort，避免次生报告错误覆盖原始镜像失败；镜像步骤获得独立 id 供报告准确标识。
 
 ### 验证
 
@@ -48,11 +51,13 @@
 - `node scripts/upstream-sync/tests/eol-baseline-guard.mjs`：以 `MERGE_HEAD=9c06119` 为基线通过；未增加 `app.js` 或其他文件的 EOL allowance。
 - 完整 `npm run test:upstream-sync`、`npm run test:platform` 和 `npm run test:performance` 均通过；Web 构建及 Android/发布链仍由审查后的正式 workflow 执行并核验。
 - 第二门禁修复后，当前 1.8.9 工作树真实执行 `路径=值` 成功/失败路径通过；`807d8a6 + 9c06119` 隔离合并结果真实执行 JSON、fenced JSON、多模板数组和 malformed JSON 路径也通过。
+- 发布镜像 helper 的回归测试注入真实失败形态 `HTTP 429`/exit 128，证明下一次查询可成功；同时验证 stale SHA 不会触发 manifest 检查、暂时的 manifest 失败会重试、最后一次失败后不再 sleep，并在耗尽后返回失败。
 
 ### 版本与发布影响
 
 - 修复补丁本身不改版本号、不创建同步 merge commit，也不发布 Release；失败的 `33951149392` 没有生成 APK 或更新 GitHub/Gitee 发布面。
 - 第二门禁失败的 `33964536295` 同样未进入构建、提交或发布步骤；本次测试修复也不改变版本元数据。
+- `33964987140` 已发布 canonical GitHub Release `v1.9.1-android`，APK SHA-256 为 `2dfcab414d7ca2c1eb9dbc5ebe353e773a06621563af564232295274d86a964c`；后续 workflow 应进入 `recover`，下载并复验既有 canonical APK、验证 Release target ancestry、跳过重复 GitHub Release，再重建 `android-latest` 并恢复 Gitee 镜像。
 - 审查通过后应由既有 workflow 重新合并 `1.9.1`、计算 Android 修订号并完成发布，随后分别核对远程 `main`、Release target/APK/SHA、`android-latest` 和 Gitee 镜像。
 
 ### 后续风险

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from '../lib.mjs';
+import { pollGiteeMirror } from '../poll-gitee-mirror.mjs';
 import { assertReleaseTargetAncestry, determineSyncMode } from '../sync-decision.mjs';
 
 const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
@@ -121,6 +122,11 @@ assert.match(workflow, /access_token=\$GITEE_TOKEN/);
 assert.match(workflow, /push --force origin HEAD:refs\/heads\/android-latest/);
 assert.doesNotMatch(workflow, /push --force origin HEAD:refs\/heads\/main/);
 assert.match(workflow, /timeout-minutes: 10/);
+assert.match(workflow, /id: mirror_publish/);
+assert.match(workflow, /node scripts\/upstream-sync\/poll-gitee-mirror\.mjs "\$mirror_sha"/);
+assert.match(workflow, /Open GitHub issue on sync failure[\s\S]*continue-on-error: true/);
+assert.match(workflow, /\.has_issues[\s\S]*Issues are disabled or unavailable[\s\S]*exit 0/);
+assert.match(workflow, /mirror_publish:\$\{\{ steps\.mirror_publish\.outcome \}\}/);
 assert.match(updater, /GITEE_UPDATE_MANIFEST/);
 assert.match(updater, /Update metadata source: GitHub API/);
 assert.match(updater, /Update metadata source: Gitee mirror fallback/);
@@ -131,5 +137,68 @@ assert.match(updater, /downloadAndVerifyFromParts/);
 for (const publicProxy of ['ghfast.top', 'gh-proxy.com', 'ghproxy.net', 'cdn.jsdelivr.net', 'cdn.staticdelivr.com']) {
   assert.doesNotMatch(updater, new RegExp(publicProxy.replace('.', '\\.')));
 }
+
+const expectedMirrorSha = '572b93a96b15f56dae930414a5eaf6489b89bf03';
+const transientWarnings = [];
+const transientWaits = [];
+let transientLookups = 0;
+await pollGiteeMirror({
+  expectedSha: expectedMirrorSha,
+  attempts: 3,
+  delayMs: 0,
+  lookup: async () => {
+    transientLookups += 1;
+    if (transientLookups === 1) {
+      const error = new Error('git ls-remote failed');
+      error.code = 128;
+      error.stderr = 'error: RPC failed; HTTP 429\nfatal: expected flush after ref listing';
+      throw error;
+    }
+    return expectedMirrorSha;
+  },
+  verify: async () => {},
+  wait: async delay => transientWaits.push(delay),
+  logger: { log() {}, warn: message => transientWarnings.push(message) }
+});
+assert.equal(transientLookups, 2, 'a transient Gitee ls-remote failure must be retried');
+assert.deepEqual(transientWaits, [0]);
+assert.match(transientWarnings.join('\n'), /1\/3 failed; retrying:.*HTTP 429/);
+
+let mismatchLookups = 0;
+let mismatchManifestChecks = 0;
+const mismatchWaits = [];
+await assert.rejects(
+  () => pollGiteeMirror({
+    expectedSha: expectedMirrorSha,
+    attempts: 2,
+    delayMs: 0,
+    lookup: async () => {
+      mismatchLookups += 1;
+      return 'd8a6ff450300a0d197632867a203a3ee88f371d1';
+    },
+    verify: async () => { mismatchManifestChecks += 1; },
+    wait: async delay => mismatchWaits.push(delay),
+    logger: { log() {}, warn() {} }
+  }),
+  /did not reach android-latest commit .* after 2 attempts/
+);
+assert.equal(mismatchLookups, 2, 'a stale mirror ref must be checked through the final attempt');
+assert.equal(mismatchManifestChecks, 0, 'a stale ref must never be accepted by a healthy manifest alone');
+assert.deepEqual(mismatchWaits, [0], 'polling must not sleep after the final failed attempt');
+
+let manifestChecks = 0;
+await pollGiteeMirror({
+  expectedSha: expectedMirrorSha,
+  attempts: 2,
+  delayMs: 0,
+  lookup: async () => expectedMirrorSha,
+  verify: async () => {
+    manifestChecks += 1;
+    if (manifestChecks === 1) throw new Error('HTTP 429');
+  },
+  wait: async () => {},
+  logger: { log() {}, warn() {} }
+});
+assert.equal(manifestChecks, 2, 'a transient manifest failure must not accept the matching ref prematurely');
 
 console.log('Automated signed Android Release and Gitee mirror workflow contract: PASS');

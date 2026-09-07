@@ -297,6 +297,7 @@ jobs:
             --latest
 
       - name: Publish APK branch and trigger Gitee mirror pull
+        id: mirror_publish
         if: steps.upstream_sync.outputs.has_updates == 'true'
         timeout-minutes: 10
         shell: bash
@@ -362,21 +363,11 @@ jobs:
             "https://gitee.com/api/v5/repos/pq125pq/rp-hub-app/remote_mirror/pull" \
             > "$RUNNER_TEMP/gitee-mirror-pull.json"
 
-          for attempt in $(seq 1 30); do
-            gitee_sha="$(git ls-remote https://gitee.com/pq125pq/rp-hub-app.git refs/heads/android-latest | cut -f1)"
-            if [ "$gitee_sha" = "$mirror_sha" ]; then
-              curl --silent --show-error --fail --location --head \
-                --connect-timeout 15 --max-time 30 \
-                "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/android-update.json" >/dev/null
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Gitee mirror did not reach android-latest commit $mirror_sha" >&2
-          exit 1
+          node scripts/upstream-sync/poll-gitee-mirror.mjs "$mirror_sha"
 
       - name: Open GitHub issue on sync failure
         if: failure()
+        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -384,6 +375,12 @@ jobs:
           UPSTREAM_SHA: ${{ steps.upstream_sync.outputs.upstream_sha }}
           UPSTREAM_RELEASE_TAG: ${{ steps.upstream_sync.outputs.release_tag }}
         run: |
+          issues_enabled="$(gh api "repos/${{ github.repository }}" --jq '.has_issues' 2>/dev/null || true)"
+          if [ "$issues_enabled" != "true" ]; then
+            echo "::warning::GitHub Issues are disabled or unavailable; preserving the original workflow failure without opening an issue."
+            exit 0
+          fi
+
           # Identify the first failed step by checking outcomes of steps with ids,
           # in workflow order. Steps without ids cannot report outcomes; fall back
           # to "unknown" and rely on run logs for those.
@@ -392,7 +389,8 @@ jobs:
             "upstream_sync:${{ steps.upstream_sync.outcome }}" \
             "android_release:${{ steps.android_release.outcome }}" \
             "apk:${{ steps.apk.outcome }}" \
-            "release_notes:${{ steps.release_notes.outcome }}"; do
+            "release_notes:${{ steps.release_notes.outcome }}" \
+            "mirror_publish:${{ steps.mirror_publish.outcome }}"; do
             step_id="${outcome%%:*}"
             step_outcome="${outcome#*:}"
             if [ "$step_outcome" = "failure" ]; then
