@@ -1293,7 +1293,7 @@
             Object.entries(log.changes || {}).forEach(([key, change]) => {
                 if (!initializedKeys.has(key) && change && Object.prototype.hasOwnProperty.call(change, 'from')) {
                     if (key === '$root') baseState = cloneUiValue(change.from) || {};
-                    else baseState[key] = change.from;
+                    else baseState = setUiTemplateValue(baseState, key, change.from);
                     initializedKeys.add(key);
                 }
             });
@@ -1688,7 +1688,6 @@ ${content}
         const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
         const isUnsafeKey = key => ['__proto__', 'prototype', 'constructor'].includes(String(key));
         const valueType = value => Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
-        const DYNAMIC_ANY = Symbol('dynamic-any');
         const issues = [];
         const updates = isRecord(parsed) && Array.isArray(parsed.updates) ? parsed.updates : [];
         if (!isRecord(parsed) || !Array.isArray(parsed.updates)) issues.push('变量块缺少有效的JSON更新内容');
@@ -1709,38 +1708,41 @@ ${content}
             if (!receivedById.has(id)) receivedById.set(id, []);
             receivedById.get(id).push({ variables: update.variables });
         });
-        const dynamicSampleFor = (expected, path, schemaText) => {
-            if (!isRecord(expected) || !path) return undefined;
-            const escaped = String(path).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+        const dynamicSamplesFor = (expected, path, schemaText) => {
+            if (!path) return undefined;
+            const escaped = String(path).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const hasIdMarker = String(schemaText || '').includes(path + '.{id}')
                 || String(schemaText || '').includes(path + '{id}');
             const allowsNewKey = new RegExp('新增(?:键|\\s*id)[^\\n]*' + escaped, 'i').test(schemaText);
             if (!hasIdMarker && !allowsNewKey) return undefined;
-            return Object.values(expected)[0] ?? DYNAMIC_ANY;
+            return expected.flatMap(Object.values);
         };
-        const validateValue = (expected, actual, path, schemaText, unknownNames, invalidNames) => {
-            if (isUnsafeKey(String(path).split('.').pop())) { unknownNames.push(path); return; }
+        const validateValue = (samples, actual, path, schemaText, unknownNames, invalidNames) => {
+            const typedSamples = samples.filter(sample => sample !== null && sample !== undefined);
+            if (actual === null && samples.includes(null)) return;
+            if (typedSamples.length && !typedSamples.some(sample => valueType(sample) === valueType(actual))) {
+                invalidNames.push(path || '$root');
+                return;
+            }
             if (Array.isArray(actual)) {
-                if (!Array.isArray(expected)) { invalidNames.push(path || '$root'); return; }
-                const sample = expected[0];
-                if (sample !== undefined) actual.forEach((item, index) => validateValue(sample, item, (path || '$root') + '[' + index + ']', schemaText, unknownNames, invalidNames));
+                // 所有原始成员共同定义合法字段；空数组不推断成员结构，但仍检查危险键。
+                const items = typedSamples.filter(Array.isArray).flat();
+                actual.forEach((item, index) => validateValue(items, item, (path || '$root') + '[' + index + ']', schemaText, unknownNames, invalidNames));
                 return;
             }
             if (isRecord(actual)) {
-                if (!isRecord(expected)) { invalidNames.push(path || '$root'); return; }
+                const objects = typedSamples.filter(isRecord);
                 Object.entries(actual).forEach(([key, value]) => {
                     if (isUnsafeKey(key)) { unknownNames.push(path ? path + '.' + key : key); return; }
                     const childPath = path ? path + '.' + key : key;
-                    if (Object.prototype.hasOwnProperty.call(expected, key)) validateValue(expected[key], value, childPath, schemaText, unknownNames, invalidNames);
-                    else {
-                        const dynamic = dynamicSampleFor(expected, path, schemaText);
-                        if (dynamic === undefined) unknownNames.push(childPath);
-                        else if (dynamic !== DYNAMIC_ANY) validateValue(dynamic, value, childPath, schemaText, unknownNames, invalidNames);
+                    let childSamples = objects.filter(object => Object.prototype.hasOwnProperty.call(object, key)).map(object => object[key]);
+                    if (!childSamples.length && objects.length) {
+                        childSamples = dynamicSamplesFor(objects, path, schemaText);
+                        if (childSamples === undefined) { unknownNames.push(childPath); return; }
                     }
+                    validateValue(childSamples, value, childPath, schemaText, unknownNames, invalidNames);
                 });
-                return;
             }
-            if (expected !== undefined && expected !== null && valueType(expected) !== valueType(actual)) invalidNames.push(path || '$root');
         };
         receivedById.forEach((received, id) => {
             const template = templatesById.get(id);
@@ -1748,7 +1750,8 @@ ${content}
             if (received.length > 1) issues.push('模板“' + label + '”重复输出了 ' + received.length + ' 次');
             const unknownNames = [];
             const invalidNames = [];
-            validateValue(template.variableState || {}, received[0].variables, '', stringifyUiSchema(template.variableSchema), unknownNames, invalidNames);
+            // 字段定义不随运行状态缩减；旧模板沿用已有的初始状态推断。
+            validateValue([inferInitialUiTemplateState(template)], received[0].variables, '', stringifyUiSchema(template.variableSchema), unknownNames, invalidNames);
             if (unknownNames.length) issues.push('模板“' + label + '”输出了未定义变量：' + unknownNames.join('、'));
             if (invalidNames.length) issues.push('模板“' + label + '”变量类型或结构错误：' + invalidNames.join('、'));
         });
