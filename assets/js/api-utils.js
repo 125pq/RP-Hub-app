@@ -321,7 +321,7 @@
             failure = error;
             throw error;
         } finally {
-            if (options.replyInTool) console.info('[抗Gemini截断]', {
+            if (options.replyInTool) console.info('[Gemini抗截断]', {
                 模型: options.model, 次数: attempt, 结果: failure ? failure.message : '成功',
                 结束原因: result.finishReason, 正文全文: result.content, 普通正文全文: plainContent
             });

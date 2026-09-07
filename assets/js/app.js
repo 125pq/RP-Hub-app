@@ -12,6 +12,7 @@ const {
     CharacterExportModal,
     CharacterEditorModal,
     CharacterCard,
+    CharacterDeck,
     ContextViewerModal,
     EmbeddedViewContent,
     GenerationTimer,
@@ -184,6 +185,7 @@ const app = createApp({
         CharacterExportModal,
         CharacterEditorModal,
         CharacterCard,
+        CharacterDeck,
         CustomSelect: window.RPHubCustomSelect,
         ContextViewerModal,
         EmbeddedViewContent,
@@ -1362,6 +1364,8 @@ const app = createApp({
         const editingCharacter = reactive({ id: undefined, data: {} });
         const editorTab = ref('basic'); // 'basic', 'description', 'personality', 'first_mes'
         const isBatchDeleteMode = ref(false);
+        const characterGridView = ref(false);
+        const useCharacterDeck = computed(() => !isBatchDeleteMode.value && !characterGridView.value);
         const selectedCharacterIndices = ref(new Set());
         const editingPreset = reactive({ id: undefined, data: {} });
         const editingUiTemplate = reactive({ id: undefined, data: {}, tab: 'history' });
@@ -1538,6 +1542,9 @@ const app = createApp({
         watch(currentView, (newView) => {
             settingsHelpTopic.value = '';
             if (newView === 'characters') {
+                characterGridView.value = false;
+                isBatchDeleteMode.value = false;
+                selectedCharacterIndices.value.clear();
                 hasOpenedCharacterManager.value = true;
             } else if (newView === 'generator') {
                 isGeneratorLoading.value = true;
@@ -8981,7 +8988,7 @@ const app = createApp({
             isGeneratorLoading, generatorUrl, onGeneratorLoad, // Generator exports
             isSquareLoading, squareUrl, onSquareLoad, // Square exports
             isNovelLoading, novelUrl, onNovelLoad, // Novel exports
-            editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, displayedCharacters, loadMoreCharacters,
+            editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, characterGridView, useCharacterDeck, displayedCharacters, loadMoreCharacters, getCharacterWICount, getCharacterRegexCount,
             isAutoImageGenEnabled,
             apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
             toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll,
