@@ -772,8 +772,44 @@ const app = createApp({
         };
 
         let workshopImportPending = false;
-        // Only the workshop frame can request settings sync or character import.
+        let squareImportPending = false;
+        const getSquareFrame = () => document.querySelector(`iframe[src="${squareUrl.value}"]`);
+        // Each embedded page may only use its own message bridge.
         window.addEventListener('message', async (event) => {
+            if (event.data?.type === 'RPH_FORUM_READY' || event.data?.type === 'RPH_FORUM_IMPORT_CARD') {
+                const iframe = getSquareFrame();
+                if (!iframe || event.source !== iframe.contentWindow || event.origin !== new URL(squareUrl.value).origin) return;
+                if (event.data.type === 'RPH_FORUM_READY') {
+                    event.source.postMessage({ type: 'RPHUB_IMPORT_READY' }, event.origin);
+                    return;
+                }
+                const { requestId, buffer } = event.data;
+                if (typeof requestId !== 'string' || !/^[\w-]{1,80}$/.test(requestId)) return;
+                const reply = (result) => event.source.postMessage({ type: 'RPHUB_IMPORT_RESULT', requestId, ...result }, event.origin);
+                if (squareImportPending) {
+                    reply({ error: '上一张角色卡仍在导入，请稍后再试' });
+                    return;
+                }
+                squareImportPending = true;
+                try {
+                    if (!(buffer instanceof ArrayBuffer) || !buffer.byteLength || buffer.byteLength > 100 * 1024 * 1024) {
+                        throw new Error('角色卡文件无效或超过 100 MB');
+                    }
+                    const { data } = cardUtils.parsePngCharacterData(buffer);
+                    const source = data?.data || data;
+                    if (!source || typeof source.name !== 'string' || !source.name.trim()) throw new Error('角色卡缺少有效名称');
+                    const avatar = await cardUtils.blobToDataUrl(new Blob([buffer], { type: 'image/png' }));
+                    const char = await importCharacterData(data, avatar, { activate: false });
+                    reply({ name: char.name });
+                } catch (error) {
+                    console.error('Square import failed:', error);
+                    reply({ error: error.message || '导入失败，请重试' });
+                } finally {
+                    squareImportPending = false;
+                }
+                return;
+            }
+
             if (event.data && event.data.type === 'WORKSHOP_READY') {
                 if (event.source !== document.querySelector('iframe[src*="character/index.html"]')?.contentWindow) return;
                 syncSettingsToGenerator();
@@ -787,7 +823,7 @@ const app = createApp({
                     if (!event.data.card?.data || typeof event.data.card.data.name !== 'string' || !event.data.card.data.name.trim()) {
                         throw new Error('角色卡缺少名称，请先完善角色卡');
                     }
-                    const char = await importCharacterData(event.data.card, event.data.avatar, false);
+                    const char = await importCharacterData(event.data.card, event.data.avatar, { askImageGeneration: false });
                     if (currentCharacter.value?.uuid !== char.uuid || currentView.value !== 'chat') {
                         throw new Error('角色卡已导入，暂时未能进入对话，请从角色卡管理中打开');
                     }
@@ -1532,6 +1568,7 @@ const app = createApp({
 
         const onSquareLoad = () => {
             isSquareLoading.value = false;
+            getSquareFrame()?.contentWindow.postMessage({ type: 'RPHUB_IMPORT_READY' }, new URL(squareUrl.value).origin);
         };
 
         // Novel State
@@ -8164,7 +8201,7 @@ const app = createApp({
             editingWorldInfo.data.keys = parseWorldInfoKeysText(worldInfoKeysText.value, editingWorldInfo.data.useRegex);
         };
 
-        const importCharacterData = async (rawData, avatarUrl, askImageGeneration = true) => {
+        const importCharacterData = async (rawData, avatarUrl, { askImageGeneration = true, activate = true } = {}) => {
             const imported = cardUtils.parseImportedCharacterCard(rawData);
             const char = {
                 name: imported.name,
@@ -8201,6 +8238,7 @@ const app = createApp({
                 throw error;
             }
 
+            if (!activate) return char;
             showAddCharacterMenu.value = false;
             if (currentView.value === 'characters' && useCharacterDeck.value) {
                 characterSearchQuery.value = '';
