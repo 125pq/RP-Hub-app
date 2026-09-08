@@ -1,4 +1,4 @@
-import { countOccurrences, editText, ensureAfter, replaceOnce, requireContains } from '../lib.mjs';
+import { countOccurrences, editText, replaceOnce, requireContains } from '../lib.mjs';
 import { patchIndexScriptOverlay } from './index-script-overlay.mjs';
 
 const category = 'performance-patches';
@@ -73,12 +73,7 @@ export const streamSchedulerSetup = `    const STREAM_MAX_VISIBLE_LATENCY_MS = 3
         return { scan };
     };
 
-    const getStreamMaxVisibleLatency = () => {
-        const benchmarkValue = Number(window.__RPH_PERF__?.getStreamMaxLatencyMs?.());
-        return Number.isFinite(benchmarkValue) && benchmarkValue >= 50
-            ? benchmarkValue
-            : STREAM_MAX_VISIBLE_LATENCY_MS;
-    };`;
+    const getStreamMaxVisibleLatency = () => STREAM_MAX_VISIBLE_LATENCY_MS;`;
 
 const legacyStreamStateAndFlush = `        let pendingContent = '';
         let pendingReasoning = '';
@@ -109,15 +104,7 @@ const legacyStreamStateAndFlush = `        let pendingContent = '';
             pendingSince = null;
             paragraphBoundaryPending = false;
             lastPublishAt = performance.now();
-            flushPromise = flushPromise.then(async () => {
-                const perf = window.__RPH_PERF__;
-                const token = perf?.active ? perf.beginFlush(delta, reason) : null;
-                try {
-                    await onDelta?.(delta);
-                } finally {
-                    if (token) perf.endFlush(token);
-                }
-            });
+            flushPromise = flushPromise.then(() => onDelta?.(delta));
         };
 
         const schedulePublish = () => {
@@ -149,7 +136,6 @@ const legacyStreamStateAndFlush = `        let pendingContent = '';
 
         const queueDelta = (chunk) => {
             if (!chunk.content && !chunk.reasoning) return;
-            window.__RPH_PERF__?.recordStreamDelta?.(chunk);
             if (pendingSince === null) pendingSince = performance.now();
             pendingContent += chunk.content;
             pendingReasoning += chunk.reasoning;
@@ -166,6 +152,35 @@ function patchLegacyRuntimeApi(source) {
     if (source.includes('window.RPHubApiClient')) throw new Error('Unexpected API client in split runtime module');
     return source;
   }
+  source = source.replace(
+    `    const getStreamMaxVisibleLatency = () => {
+        const benchmarkValue = Number(window.__RPH_PERF__?.getStreamMaxLatencyMs?.());
+        return Number.isFinite(benchmarkValue) && benchmarkValue >= 50
+            ? benchmarkValue
+            : STREAM_MAX_VISIBLE_LATENCY_MS;
+    };`,
+    '    const getStreamMaxVisibleLatency = () => STREAM_MAX_VISIBLE_LATENCY_MS;'
+  );
+  source = source.replace(
+    `            flushPromise = flushPromise.then(async () => {
+                const perf = window.__RPH_PERF__;
+                const token = perf?.active ? perf.beginFlush(delta, reason) : null;
+                try {
+                    await onDelta?.(delta);
+                } finally {
+                    if (token) perf.endFlush(token);
+                }
+            });`,
+    '            flushPromise = flushPromise.then(() => onDelta?.(delta));'
+  );
+  source = source.replace('            window.__RPH_PERF__?.recordStreamDelta?.(chunk);\n', '');
+  source = source.replace(
+    `    const requestChatCompletion = async (options) => {
+        const syntheticResponse = window.__RPH_PERF__?.takeSyntheticResponse?.(options);
+        const response = syntheticResponse || await fetch(options.url, {`,
+    `    const requestChatCompletion = async (options) => {
+        const response = await fetch(options.url, {`
+  );
   source = replaceOnce(source, '    const STREAM_RENDER_INTERVAL = 60;', streamSchedulerSetup, 'legacy stream scheduler');
   source = replaceOnce(
     source,
@@ -212,24 +227,16 @@ function patchLegacyRuntimeApi(source) {
         }`,
     'legacy stream completion flush'
   );
-  source = replaceOnce(
-    source,
-    `    const requestChatCompletion = async (options) => {
-        const response = await fetch(options.url, {`,
-    `    const requestChatCompletion = async (options) => {
-        const syntheticResponse = window.__RPH_PERF__?.takeSyntheticResponse?.(options);
-        const response = syntheticResponse || await fetch(options.url, {`,
-    'legacy synthetic response hook'
-  );
   requireSingle(source, 'const createStreamingBoundaryTracker = () => {', 'legacy paragraph boundary tracker');
   requireSingle(source, "flushPending('final');", 'legacy final stream flush');
-  requireSingle(source, 'takeSyntheticResponse?.(options)', 'legacy synthetic response hook');
   return source;
 }
 
 export function patchRuntimeServicesOverlay(source) {
   source = patchLegacyRuntimeApi(source);
-  const rendererCacheStats = `        const getCacheStats = (cache) => {
+  const cacheStats = `
+
+        const getCacheStats = (cache) => {
             let keyChars = 0;
             let valueChars = 0;
             cache.forEach((value, key) => {
@@ -237,17 +244,9 @@ export function patchRuntimeServicesOverlay(source) {
                 valueChars += typeof value === 'string' ? value.length : 0;
             });
             return { entries: cache.size, approxKeyChars: keyChars, approxValueChars: valueChars };
-        };
-`;
-  source = ensureAfter(
-    source,
-    '        const frameDetectionCache = new Map();',
-    `\n\n${rendererCacheStats.trimEnd()}`,
-    'message renderer cache statistics'
-  );
-  source = replaceOnce(
-    source,
-    '        const sanitizeMarkdown = (text) => DOMPurify.sanitize(marked.parse(text), cleanConfig);',
+        };`;
+  source = source.replace(cacheStats, '');
+  source = source.replace(
     `        const sanitizeMarkdown = (text) => {
             const perf = window.__RPH_PERF__;
             const parsed = perf?.active
@@ -257,17 +256,9 @@ export function patchRuntimeServicesOverlay(source) {
                 ? perf.measure('DOMPurify.sanitize', () => DOMPurify.sanitize(parsed, cleanConfig))
                 : DOMPurify.sanitize(parsed, cleanConfig);
         };`,
-    'message renderer sanitize measurements'
+    '        const sanitizeMarkdown = (text) => DOMPurify.sanitize(marked.parse(text), cleanConfig);'
   );
-  source = replaceOnce(
-    source,
-    '        const renderMarkdown = (text, role = \'assistant\', skipRegex = false) => {',
-    '        const renderMarkdownImpl = (text, role = \'assistant\', skipRegex = false) => {',
-    'message renderer implementation split'
-  );
-  source = replaceOnce(
-    source,
-    '        return { clearCaches, contentUsesHtmlFrame, renderMarkdown };',
+  source = source.replace(
     `        const renderMarkdown = (text, role = 'assistant', skipRegex = false) => {
             const perf = window.__RPH_PERF__;
             return perf?.active
@@ -278,25 +269,131 @@ export function patchRuntimeServicesOverlay(source) {
         window.__RPH_PERF__?.registerCacheReader?.('renderedCache', () => getCacheStats(renderedCache));
         window.__RPH_PERF__?.registerCacheReader?.('frameDetectionCache', () => getCacheStats(frameDetectionCache));
         return { clearCaches, contentUsesHtmlFrame, renderMarkdown };`,
-    'message renderer performance wrapper'
+    '        return { clearCaches, contentUsesHtmlFrame, renderMarkdown };'
   );
+  source = source.replace(
+    "        const renderMarkdownImpl = (text, role = 'assistant', skipRegex = false) => {",
+    "        const renderMarkdown = (text, role = 'assistant', skipRegex = false) => {"
+  );
+  requireContains(source, "const renderMarkdown = (text, role = 'assistant', skipRegex = false) => {", 'message renderer');
+  if (source.includes('__RPH_PERF__')) throw new Error('Performance diagnostics remain in runtime services');
+  return source;
+}
 
-  requireSingle(source, 'const getCacheStats = (cache) => {', 'message renderer cache statistics');
-  requireSingle(source, 'const renderMarkdownImpl = (text, role = \'assistant\', skipRegex = false) => {', 'message renderer implementation');
-  requireSingle(source, 'const renderMarkdown = (text, role = \'assistant\', skipRegex = false) => {', 'message renderer wrapper');
+const appPerfBlocks = Object.freeze({
+  observedSet: '        const perfObservedRevealElements = window.__RPH_PERF__?.enabled ? new WeakSet() : null;\n',
+  observedAdd: '                        perfObservedRevealElements?.add(el);\n',
+  savePromiseGuard: '            if (window.__RPH_PERF__?.active) return Promise.resolve();\n',
+  saveGuard: '            if (window.__RPH_PERF__?.active) return;\n',
+  trackDom: `                        if (window.__RPH_PERF__?.active) {
+                            window.__RPH_PERF__.trackDomStabilization(
+                                nextTick().then(() => new Promise(resolve => requestAnimationFrame(resolve)))
+                            );
+                        }
+`,
+  processRegexWrapper: `        const processRegex = (text, options = {}) => {
+            const perf = window.__RPH_PERF__;
+            return perf?.active
+                ? perf.measure('processRegex', () => processRegexImpl(text, options))
+                : processRegexImpl(text, options);
+        };
+`,
+  wideLayoutWrapper: `        const messageUsesWideLayout = (msg) => {
+            const perf = window.__RPH_PERF__;
+            return perf?.active
+                ? perf.measure('messageUsesWideLayout', () => messageUsesWideLayoutImpl(msg))
+                : messageUsesWideLayoutImpl(msg);
+        };
+`,
+  timelineWrapper: `        const getTimelineSteps = (message) => {
+            const perf = window.__RPH_PERF__;
+            return perf?.active
+                ? perf.measure('getTimelineSteps', () => getTimelineStepsImpl(message))
+                : getTimelineStepsImpl(message);
+        };
+`,
+  appendStart: `            const appendAssistantText = (message, field, text) => {
+                const perfStartedAt = window.__RPH_PERF__?.active ? performance.now() : null;
+                try {`,
+  appendEnd: `                if (isContinuation) activeToolContinuationHasResponse.value = true;
+                } finally {
+                    if (perfStartedAt !== null) {
+                        window.__RPH_PERF__.recordFunction('appendAssistantText', performance.now() - perfStartedAt);
+                    }
+                }
+            };`,
+  exports: `            __perfSetChatRenderLimit: limit => { if (window.__RPH_PERF__?.enabled) chatRenderLimit.value = limit; },
+            __perfLoadEarlierChatMessages: batchSize => window.__RPH_PERF__?.enabled
+                ? loadEarlierChatMessages(batchSize)
+                : Promise.resolve(),
+            __perfGetChatRenderLimit: () => window.__RPH_PERF__?.enabled ? chatRenderLimit.value : null,
+            __perfGetScrollRevealObservedCount: () => window.__RPH_PERF__?.enabled
+                ? (messageElements.value || []).filter(el => perfObservedRevealElements?.has(el)).length
+                : null,
+            __perfClearCaches: () => {
+                if (!window.__RPH_PERF__?.enabled) return;
+                clearMessageRenderCaches();
+                window.RPHubUtils.clearParseCotCache?.();
+            },
+`,
+  mount: `const appInstance = app.mount('#app');
+window.__RPH_PERF__?.attachApp?.(appInstance);
+window.__RPH_SCROLL_PERF__?.attachApp?.(appInstance);`
+});
+
+function replaceAppPerfBlock(source, before, after, label, expected = 1) {
+  const count = countOccurrences(source, before);
+  if (count !== expected) throw new Error(`Expected ${expected} ${label}, found ${count}`);
+  return source.split(before).join(after);
+}
+
+export function removeAppDiagnostics(source) {
+  const diagnosticMarkers = ['__RPH_PERF__', '__RPH_SCROLL_PERF__', '__perf', 'processRegexImpl', 'messageUsesWideLayoutImpl', 'getTimelineStepsImpl'];
+  if (!diagnosticMarkers.some(marker => source.includes(marker))) {
+    requireContains(source, "app.mount('#app');", 'Vue app mount');
+    return source;
+  }
+  source = replaceAppPerfBlock(source, appPerfBlocks.observedSet, '', 'scroll reveal diagnostic set');
+  source = replaceAppPerfBlock(source, appPerfBlocks.observedAdd, '', 'scroll reveal diagnostic observation');
+  source = replaceAppPerfBlock(source, appPerfBlocks.savePromiseGuard, '', 'chat-save diagnostic guard');
+  source = replaceAppPerfBlock(source, appPerfBlocks.saveGuard, '', 'persistence diagnostic guards', 2);
+  source = replaceAppPerfBlock(source, '        const processRegexImpl =', '        const processRegex =', 'processRegex diagnostic implementation');
+  source = replaceAppPerfBlock(source, appPerfBlocks.processRegexWrapper, '', 'processRegex diagnostic wrapper');
+  source = replaceAppPerfBlock(source, '        const messageUsesWideLayoutImpl =', '        const messageUsesWideLayout =', 'wide-layout diagnostic implementation');
+  source = replaceAppPerfBlock(source, appPerfBlocks.wideLayoutWrapper, '', 'wide-layout diagnostic wrapper');
+  source = replaceAppPerfBlock(source, '        const getTimelineStepsImpl =', '        const getTimelineSteps =', 'timeline diagnostic implementation');
+  source = replaceAppPerfBlock(source, appPerfBlocks.timelineWrapper, '', 'timeline diagnostic wrapper');
+  source = replaceAppPerfBlock(source, appPerfBlocks.appendStart, '            const appendAssistantText = (message, field, text) => {', 'assistant append diagnostic start');
+  source = replaceAppPerfBlock(source, appPerfBlocks.appendEnd, `                if (isContinuation) activeToolContinuationHasResponse.value = true;
+            };`, 'assistant append diagnostic end');
+  source = replaceAppPerfBlock(source, appPerfBlocks.trackDom, '', 'DOM stabilization diagnostic');
+  source = replaceAppPerfBlock(source, appPerfBlocks.exports, '', 'benchmark app exports');
+  source = replaceAppPerfBlock(source, appPerfBlocks.mount, "app.mount('#app');", 'benchmark app mount');
+  if (diagnosticMarkers.some(marker => source.includes(marker))) throw new Error('Performance diagnostics remain in app.js');
+  return source;
+}
+
+function removeOffscreenDiagnostics(source) {
+  source = source.replace(/    const diagnostics = window\.__RPH_PERF__\?\.enabled === true \? \{[\s\S]*?    \} : null;\n/, '');
+  source = source.replace(/        if \(diagnostics && previousState && previousState !== state\) \{[\s\S]*?        \}\n/, '');
+  source = source.replace('        const previousState = meta.state;\n', '');
+  source = source.replace(/\n    const resetDiagnostics = \(\) => \{[\s\S]*?    \};\n\n    const getDiagnostics = \(\) => diagnostics \? \{[\s\S]*?    \} : null;\n/, '\n');
+  source = source.replace('        getDiagnostics,\n', '');
+  source = source.replace('        resetDiagnostics,\n', '');
+  if (source.includes('diagnostics')) throw new Error('Performance diagnostics remain in offscreen iframe lifecycle');
   return source;
 }
 
 export async function applyPerformanceHooks() {
   const changes = [];
   changes.push(await editText('index.html', category, patchIndexScriptOverlay));
-
   changes.push(await editText('assets/js/app.js', category, source => {
+    source = removeAppDiagnostics(source);
     requireContains(source, 'window.RPHubOffscreenIframeLifecycle?.attach(container);', 'offscreen attach hook');
     requireContains(source, 'window.RPHubOffscreenIframeLifecycle?.detach();', 'offscreen cleanup hook');
     return source;
   }));
-
   changes.push(await editText('assets/js/runtime-services.js', category, patchRuntimeServicesOverlay));
+  changes.push(await editText('assets/js/offscreen-iframe-lifecycle.js', category, removeOffscreenDiagnostics));
   return changes.filter(Boolean);
 }

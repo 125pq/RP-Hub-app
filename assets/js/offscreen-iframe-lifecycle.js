@@ -7,12 +7,6 @@
     const SCROLL_IDLE_DELAY = 180;
     const metadata = new WeakMap();
     const registeredFrames = new Set();
-    const diagnostics = window.__RPH_PERF__?.enabled === true ? {
-        transitions: {},
-        suspensions: 0,
-        preloadResumes: 0,
-        directActiveResumes: 0
-    } : null;
 
     let container = null;
     let activeObserver = null;
@@ -72,14 +66,6 @@ html.${OFFSCREEN_CLASS} *::after {
         const meta = metadata.get(iframe);
         if (!meta) return;
         const state = classify(iframe);
-        const previousState = meta.state;
-        if (diagnostics && previousState && previousState !== state) {
-            const key = `${previousState}->${state}`;
-            diagnostics.transitions[key] = (diagnostics.transitions[key] || 0) + 1;
-            if (state === 'OFFSCREEN') diagnostics.suspensions++;
-            if (previousState === 'OFFSCREEN' && state === 'NEAR') diagnostics.preloadResumes++;
-            if (previousState === 'OFFSCREEN' && state === 'ACTIVE') diagnostics.directActiveResumes++;
-        }
         meta.state = state;
         applySuspension(iframe, state === 'OFFSCREEN' || scrolling);
     };
@@ -233,28 +219,11 @@ html.${OFFSCREEN_CLASS} *::after {
         return meta ? { state: meta.state, suspended: meta.suspended } : null;
     };
 
-    const resetDiagnostics = () => {
-        if (!diagnostics) return;
-        diagnostics.transitions = {};
-        diagnostics.suspensions = 0;
-        diagnostics.preloadResumes = 0;
-        diagnostics.directActiveResumes = 0;
-    };
-
-    const getDiagnostics = () => diagnostics ? {
-        transitions: { ...diagnostics.transitions },
-        suspensions: diagnostics.suspensions,
-        preloadResumes: diagnostics.preloadResumes,
-        directActiveResumes: diagnostics.directActiveResumes,
-        registeredFrames: registeredFrames.size
-    } : null;
 
     window.RPHubOffscreenIframeLifecycle = Object.freeze({
         attach,
         detach,
-        getDiagnostics,
         getState,
-        resetDiagnostics,
         selector: FRAME_SELECTOR,
         preloadViewports: PRELOAD_VIEWPORTS
     });

@@ -12,28 +12,9 @@ const upstreamApiSource = execFileSync('git', ['cat-file', 'blob', `${stable192}
 });
 const apiSource = patchApiUtilsOverlay(upstreamApiSource.replace(/\r\n/g, '\n'));
 const flushes = [];
-let maxLatencyMs = 50;
 let nextResponse = null;
 
-const perf = {
-  active: true,
-  beginFlush(delta, reason) {
-    const token = { delta: { ...delta }, reason };
-    flushes.push(token);
-    return token;
-  },
-  endFlush() {},
-  getStreamMaxLatencyMs: () => maxLatencyMs,
-  recordStreamDelta() {},
-  takeSyntheticResponse() {
-    const response = nextResponse;
-    nextResponse = null;
-    return response;
-  },
-};
-
 const windowObject = {
-  __RPH_PERF__: perf,
   RPHubUtils: {
     extractApiErrorMessage(data) {
       return data?.error?.message || '';
@@ -56,6 +37,12 @@ vm.runInContext(apiSource, vm.createContext({
   performance,
   setTimeout,
   clearTimeout,
+  fetch: async () => {
+    const response = nextResponse;
+    nextResponse = null;
+    if (!response) throw new Error('Missing synthetic test response');
+    return response;
+  },
   console,
 }), { filename: 'generated-1.9.2-api-utils.js' });
 
@@ -98,6 +85,7 @@ const run = async (events, terminalError = null) => {
     temperature: 1,
     stream: true,
     onDelta: delta => {
+      flushes.push({ ...delta });
       content += delta.content;
       reasoning += delta.reasoning;
     },
@@ -109,18 +97,17 @@ const run = async (events, terminalError = null) => {
   const result = await run([{ content: '第一段。\n' }, { content: '\n尾段。' }]);
   await result.promise;
   assert.equal(result.content, '第一段。\n\n尾段。');
-  assert.deepEqual(flushes.map(item => item.reason), ['paragraph']);
+  assert.deepEqual(flushes.map(item => item.content), ['第一段。\n\n尾段。']);
 }
 
 {
   const result = await run([{ content: '甲。\r\n' }, { content: '\r\n乙。' }]);
   await result.promise;
   assert.equal(result.content, '甲。\r\n\r\n乙。');
-  assert.deepEqual(flushes.map(item => item.reason), ['paragraph']);
+  assert.deepEqual(flushes.map(item => item.content), ['甲。\r\n\r\n乙。']);
 }
 
 {
-  maxLatencyMs = 350;
   const result = await run([
     { content: '第一段。\n\n' },
     { content: '第二段。\n\n', delayAfter: 100 },
@@ -128,7 +115,7 @@ const run = async (events, terminalError = null) => {
   ]);
   await result.promise;
   assert.equal(result.content, '第一段。\n\n第二段。\n\n尾段。');
-  assert.deepEqual(flushes.map(item => item.reason), ['paragraph', 'paragraph', 'final']);
+  assert.deepEqual(flushes.map(item => item.content), ['第一段。\n\n', '第二段。\n\n', '尾段。']);
 }
 
 {
@@ -141,7 +128,7 @@ const run = async (events, terminalError = null) => {
   ]);
   await result.promise;
   assert.equal(result.content, '```js\nconst a = 1;\n\nconst b = 2;\n```');
-  assert.deepEqual(flushes.map(item => item.reason), ['final']);
+  assert.equal(flushes.length, 1);
 }
 
 for (const tag of ['think', 'cot']) {
@@ -153,15 +140,14 @@ for (const tag of ['think', 'cot']) {
   ]);
   await result.promise;
   assert.equal(result.content, `<${tag}>分析甲。\n\n分析乙。</${tag}>`);
-  assert.deepEqual(flushes.map(item => item.reason), ['paragraph']);
+  assert.equal(flushes.length, 1);
 }
 
 {
-  maxLatencyMs = 50;
-  const result = await run([{ content: '长段开头', delayAfter: 70 }, { content: '继续' }]);
+  const result = await run([{ content: '长段开头', delayAfter: 370 }, { content: '继续' }]);
   await result.promise;
   assert.equal(result.content, '长段开头继续');
-  assert.deepEqual(flushes.map(item => item.reason), ['max-latency', 'final']);
+  assert.deepEqual(flushes.map(item => item.content), ['长段开头', '继续']);
 }
 
 for (const [name, error] of [
@@ -171,7 +157,7 @@ for (const [name, error] of [
   const result = await run([{ content: '已收到但尚未发布' }], error);
   await assert.rejects(result.promise, candidate => candidate.name === error.name && candidate.message === error.message);
   assert.equal(result.content, '已收到但尚未发布');
-  assert.deepEqual(flushes.map(item => item.reason), [name]);
+  assert.equal(flushes.length, 1, `${name} flushes pending content`);
 }
 
 {
@@ -179,11 +165,11 @@ for (const [name, error] of [
   await result.promise;
   assert.equal(result.reasoning, '原生推理');
   assert.equal(result.content, '正文');
-  assert.deepEqual(flushes.map(item => item.reason), ['final']);
+  assert.deepEqual(flushes, [{ content: '正文', reasoning: '原生推理' }]);
   const countAfterCompletion = flushes.length;
   await wait(30);
   assert.equal(flushes.length, countAfterCompletion, 'completion clears stale timers');
 }
 
 console.log('Generated stable 1.9.2 API paragraph-aware streaming flush: PASS');
-console.log('Covered: LF/CRLF paragraph, burst coalescing, final, max latency, split fence, think, cot, abort, error, reasoning, timer cleanup');
+console.log('Covered without benchmark hooks: LF/CRLF paragraph, burst coalescing, final, max latency, split fence, think, cot, abort, error, reasoning, timer cleanup');

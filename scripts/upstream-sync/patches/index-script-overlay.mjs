@@ -22,6 +22,12 @@ function countLine(lines, line) {
   return lines.reduce((count, current) => count + (current === line ? 1 : 0), 0);
 }
 
+function removeOptionalLine(lines, line, label) {
+  const count = countLine(lines, line);
+  if (count > 1) throw new Error(`Duplicate hook detected: ${label}`);
+  return count === 1 ? lines.filter(current => current !== line) : lines;
+}
+
 function ensureBefore(lines, anchor, insertion, label) {
   const insertionCount = countLine(lines, insertion);
   if (insertionCount > 1) throw new Error(`Duplicate hook detected: ${label}`);
@@ -57,8 +63,6 @@ function normalizeHistoricalIndent(lines, asset) {
 function assertScriptOrder(lines) {
   const assets = [
     'built-in-content.js',
-    'performance-benchmark.js',
-    'scroll-performance-diagnosis.js',
     'core-utils.js',
     'data-services.js',
     'offscreen-iframe-lifecycle.js',
@@ -72,7 +76,7 @@ function assertScriptOrder(lines) {
     'app.js'
   ];
   const indexes = assets.map(asset => {
-    const exact = ['built-in-content.js', 'performance-benchmark.js', 'scroll-performance-diagnosis.js', 'core-utils.js'].includes(asset)
+    const exact = ['built-in-content.js', 'core-utils.js'].includes(asset)
       ? scriptLine(asset, '')
       : scriptLine(asset);
     const index = lines.indexOf(exact);
@@ -83,7 +87,9 @@ function assertScriptOrder(lines) {
   const versionLines = lines.filter(line => /assets\/js\/(?:presence|update-check)\.js\?v=/.test(line));
   if (versionLines.length !== 1) throw new Error(`Expected one upstream update loader, found ${versionLines.length}`);
   const versionIndex = lines.indexOf(versionLines[0]);
-  if (!(indexes[6] < versionIndex && versionIndex < indexes[7])) {
+  const runtimeIndex = indexes[assets.indexOf('runtime-services.js')];
+  const uiIndex = indexes[assets.indexOf('ui-components.js')];
+  if (!(runtimeIndex < versionIndex && versionIndex < uiIndex)) {
     throw new Error('index.html upstream update loader drifted out of runtime order');
   }
   for (let i = 1; i < indexes.length; i += 1) {
@@ -101,8 +107,8 @@ export function patchIndexScriptOverlay(source) {
   const core = scriptLine('core-utils.js', '');
   const data = scriptLine('data-services.js');
   const app = scriptLine('app.js');
-  lines = ensureBefore(lines, core, scriptLine('performance-benchmark.js', ''), 'performance benchmark entry');
-  lines = ensureBefore(lines, core, scriptLine('scroll-performance-diagnosis.js', ''), 'scroll diagnosis entry');
+  lines = removeOptionalLine(lines, scriptLine('performance-benchmark.js', ''), 'performance benchmark entry');
+  lines = removeOptionalLine(lines, scriptLine('scroll-performance-diagnosis.js', ''), 'scroll diagnosis entry');
   lines = ensureAfter(lines, data, scriptLine('offscreen-iframe-lifecycle.js'), 'offscreen iframe entry');
   for (const asset of [
     'platform-services.js',

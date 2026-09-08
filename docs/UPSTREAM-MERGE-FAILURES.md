@@ -16,6 +16,26 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-08：上游 `1.9.3`（`4aef0bb`）API 重构与性能诊断退役
+
+### 现场与根因
+
+- 本地父提交为 `9ce9ef0ff93fa4816fea309cfd541b5b33fca338`，共同稳定基线为 `1.9.2/a83d907497106e401f0988b29b653422159e4c7f`，稳定 Release 目标为 `1.9.3/4aef0bb46c9b3370faba174a20435e5989799727`。
+- 真实预览合并产生 `assets/js/api-utils.js`、`assets/js/app.js`、`assets/js/core-utils.js` 和 `character/index.html` 冲突；自动重放的首个有效错误为 `Unsupported endpoint-only API module drift`。
+- 上游 1.9.3 将请求拆成带重试的 `requestChatCompletionOnce(options, attempt)` 与包装器，并加入工具调用、finish reason 和重试状态；旧 API overlay 只识别 1.9.2 单请求结构。本地性能诊断又横跨 app、API、渲染、数据服务和离屏 iframe，继续保留会扩大热点函数的冲突面。
+
+### 本步处理与验证
+
+- 删除生产运行时性能诊断埅读取、计时、统计导出和两个诊断脚本入口；保留现有段落感知流式调度及正常业务行为。本步骤尚未执行后续计划中的流式调度退役、安全区 CSS 迁移、`app.js` 接入缩减或 `image###` 差异删除。
+- 补丁只接受“完全干净”或“完整已审查旧诊断块”两种状态；部分、重复或漂移输入均 fail closed。自动解析器继续使用 `transform(stage1) === stage2` 的直接证明，没有改成双边 transform，也没有扩大 EOL allowance。
+- 新增真实 1.9.3 API fixture，证明重试、工具调用和段落调度均保留，诊断被移除，二次重放无变化；另覆盖未注册修改、旧诊断块 partial/drift/duplicate 的拒绝路径。
+- `npm run test:upstream-sync`、`npm run test:performance`、`npm run test:syntax`、真实 1.9.3 fixture、EOL guard、二次 reapply（`REAPPLY_CHANGED_FILES=0`）和 `git diff --check` 均通过。
+
+### 发布影响与剩余风险
+
+- 本步不改版本号，不执行正式同步，不 push、dispatch 或创建 Release，也不改变 GitHub/Gitee 更新源。
+- 1.9.3 的其余冲突与本地优化缩减仍待分步处理；后续必须继续锁定稳定 `4aef0bb`，完成真实全树合并、Web 构建和 dist 校验后，才能认为同步能力完整恢复。
+
 ## 2026-09-08：上游 `1.9.2`（`a83d907`）合并后正文处理契约误报
 
 ### 现场

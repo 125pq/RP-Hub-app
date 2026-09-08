@@ -32,8 +32,7 @@
         else options.signal?.addEventListener('abort', abort, { once: true });
         touch();
         try {
-            const syntheticResponse = window.__RPH_PERF__?.takeSyntheticResponse?.(options);
-            const response = syntheticResponse || await fetch(options.url, {
+            const response = await fetch(options.url, {
                 method: options.body === undefined ? 'GET' : 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.apiKey}` },
                 ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
@@ -127,12 +126,7 @@
         return { scan };
     };
 
-    const getStreamMaxVisibleLatency = () => {
-        const benchmarkValue = Number(window.__RPH_PERF__?.getStreamMaxLatencyMs?.());
-        return Number.isFinite(benchmarkValue) && benchmarkValue >= 50
-            ? benchmarkValue
-            : STREAM_MAX_VISIBLE_LATENCY_MS;
-    };
+    const getStreamMaxVisibleLatency = () => STREAM_MAX_VISIBLE_LATENCY_MS;
     const requestChatCompletion = async (options) => {
         const startedAt = Date.now();
         const result = { content: '', reasoning: '', usage: null, finishReason: null, isStream: false };
@@ -164,12 +158,7 @@
             pendingSince = null;
             paragraphBoundaryPending = false;
             lastPublishAt = performance.now();
-            flushPromise = flushPromise.then(async () => {
-                const perf = window.__RPH_PERF__;
-                const token = perf?.active ? perf.beginFlush(delta, reason) : null;
-                try { await options.onDelta?.(delta); }
-                finally { if (token) perf.endFlush(token); }
-            });
+            flushPromise = flushPromise.then(() => options.onDelta?.(delta));
         };
         const schedulePublish = () => {
             if (pendingSince === null) return;
@@ -206,7 +195,6 @@
             pendingContent += content;
             pendingReasoning += reasoning;
             if (!result.isStream || (!content && !reasoning)) return;
-            window.__RPH_PERF__?.recordStreamDelta?.({ content, reasoning });
             if (pendingSince === null) pendingSince = performance.now();
             if (contentBoundaries.scan(content) || reasoningBoundaries.scan(reasoning)) paragraphBoundaryPending = true;
             schedulePublish();

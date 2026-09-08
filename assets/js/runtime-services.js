@@ -8,16 +8,6 @@
         const renderedCache = new Map();
         const frameDetectionCache = new Map();
 
-        const getCacheStats = (cache) => {
-            let keyChars = 0;
-            let valueChars = 0;
-            cache.forEach((value, key) => {
-                keyChars += typeof key === 'string' ? key.length : 0;
-                valueChars += typeof value === 'string' ? value.length : 0;
-            });
-            return { entries: cache.size, approxKeyChars: keyChars, approxValueChars: valueChars };
-        };
-
         const cacheValue = (cache, key, value) => {
             cache.set(key, value);
             if (cache.size > MAX_CACHE_SIZE) cache.delete(cache.keys().next().value);
@@ -65,15 +55,7 @@
             FORCE_BODY: true
         };
 
-        const sanitizeMarkdown = (text) => {
-            const perf = window.__RPH_PERF__;
-            const parsed = perf?.active
-                ? perf.measure('marked.parse', () => marked.parse(text))
-                : marked.parse(text);
-            return perf?.active
-                ? perf.measure('DOMPurify.sanitize', () => DOMPurify.sanitize(parsed, cleanConfig))
-                : DOMPurify.sanitize(parsed, cleanConfig);
-        };
+        const sanitizeMarkdown = (text) => DOMPurify.sanitize(marked.parse(text), cleanConfig);
         const createIframe = (html) => createExecutableHtmlIframe(html, 'border-t border-gray-200 shadow-sm');
 
         const replaceHtmlCodeBlocks = (documentNode) => {
@@ -114,7 +96,7 @@
             return modified;
         };
 
-        const renderMarkdownImpl = (text, role = 'assistant', skipRegex = false) => {
+        const renderMarkdown = (text, role = 'assistant', skipRegex = false) => {
             if (!text) return '';
             const cacheKey = `${role}_${skipRegex}_${text}`;
             if (renderedCache.has(cacheKey)) return renderedCache.get(cacheKey);
@@ -174,15 +156,6 @@
             return cacheValue(renderedCache, cacheKey, html);
         };
 
-        const renderMarkdown = (text, role = 'assistant', skipRegex = false) => {
-            const perf = window.__RPH_PERF__;
-            return perf?.active
-                ? perf.measure('renderMarkdown', () => renderMarkdownImpl(text, role, skipRegex))
-                : renderMarkdownImpl(text, role, skipRegex);
-        };
-
-        window.__RPH_PERF__?.registerCacheReader?.('renderedCache', () => getCacheStats(renderedCache));
-        window.__RPH_PERF__?.registerCacheReader?.('frameDetectionCache', () => getCacheStats(frameDetectionCache));
         return { clearCaches, contentUsesHtmlFrame, renderMarkdown };
     };
 

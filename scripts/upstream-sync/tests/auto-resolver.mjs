@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { projectRoot } from '../lib.mjs';
@@ -11,6 +12,7 @@ import { patchAndroidCharacter } from '../patches/patch-android-hooks.mjs';
 import { resolveAppConflictBlob } from '../patches/patch-app-conflict.mjs';
 import { patchBackupCharacter } from '../patches/patch-backup.mjs';
 import { patchOfflineCharacter } from '../patches/patch-offline-assets.mjs';
+import { removeAppDiagnostics } from '../patches/patch-performance.mjs';
 import { patchSquareHostSafeArea } from '../patches/patch-safe-area.mjs';
 
 const git = (cwd, args) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -48,21 +50,11 @@ const squareFrameAnchor = `<div v-if="currentView === 'square'" class="h-full ov
 const squareFrameExpected = `<div v-if="currentView === 'square'" data-safe-area="square-frame"
                 class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
 
-function addExpectedSquareFrame(source, label) {
-  assert.equal((source.match(/data-safe-area="square-frame"/g) || []).length, 0, `${label} fixture already contains square safe-area marker`);
-  assert.equal(source.split(squareFrameAnchor).length - 1, 1, `${label} square safe-area anchor count`);
-  return source.replace(squareFrameAnchor, squareFrameExpected);
-}
-
 function assertBlobProof(relativePath) {
-  const stage1 = sourceText('5739165', relativePath);
-  const stage2 = sourceText('ddc8f75', relativePath);
-  const stage3 = sourceText('bc2d201', relativePath);
-  const expected = sourceText('b8c42ce', relativePath);
-  const expectedStage2 = relativePath === 'index.html' ? addExpectedSquareFrame(stage2, `${relativePath} stage2`) : stage2;
-  const expectedStage3 = relativePath === 'index.html' ? addExpectedSquareFrame(expected, `${relativePath} stage3`) : expected;
-  assert.equal(normalize(transformOverlayBlob(relativePath, stage1)), normalize(expectedStage2), `${relativePath} stage1 replay proof`);
-  assert.equal(normalize(transformOverlayBlob(relativePath, stage3)), normalize(expectedStage3), `${relativePath} stage3 replay proof`);
+  const stage1 = sourceText('a83d907497106e401f0988b29b653422159e4c7f', relativePath);
+  const stage2 = readFileSync(path.join(projectRoot, relativePath), 'utf8');
+  const stage3 = sourceText('4aef0bb46c9b3370faba174a20435e5989799727', relativePath);
+  assert.equal(normalize(transformOverlayBlob(relativePath, stage1)), normalize(stage2), `${relativePath} current canonical stage1 -> stage2 proof`);
   const once = transformOverlayText(relativePath, normalize(stage3));
   assert.equal(transformOverlayText(relativePath, once), once, `${relativePath} transformer must be idempotent`);
 
@@ -141,11 +133,6 @@ async function createRenameConflictFixture({ startMerge = true } = {}) {
 async function createRealUpstreamConflictFixture() {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'rphub-real-upstream-1.8.9-'));
   const paths = ['assets/js/core-utils.js', 'assets/js/data-services.js'];
-  const refs = [
-    ['0562644', 1],
-    ['6003529', 2],
-    ['b409ca6', 3]
-  ];
   git(fixture, ['init', '-q', '-b', 'main']);
   git(fixture, ['config', 'user.name', 'Resolver Test']);
   git(fixture, ['config', 'user.email', 'resolver@example.test']);
@@ -154,8 +141,13 @@ async function createRealUpstreamConflictFixture() {
 
   const indexRecords = [];
   for (const relativePath of paths) {
-    for (const [ref, stage] of refs) {
-      const bytes = repoBlob(ref, relativePath);
+    const base = repoBlob('0562644', relativePath);
+    const stages = [
+      [base, 1],
+      [Buffer.from(transformOverlayBlob(relativePath, base.toString('utf8'))), 2],
+      [repoBlob('b409ca6', relativePath), 3]
+    ];
+    for (const [bytes, stage] of stages) {
       const objectId = execFileSync('git', ['hash-object', '-w', '--stdin'], {
         cwd: fixture,
         input: bytes,
@@ -250,8 +242,8 @@ const successfulFixture = await createConflictFixture({
     'novel/index.html': repoBlob('5739165', 'novel/index.html')
   },
   localFiles: {
-    'index.html': addExpectedSquareFrame(sourceText('ddc8f75', 'index.html'), 'successful fixture local'),
-    'novel/index.html': repoBlob('ddc8f75', 'novel/index.html')
+    'index.html': transformOverlayBlob('index.html', sourceText('5739165', 'index.html')),
+    'novel/index.html': transformOverlayBlob('novel/index.html', sourceText('5739165', 'novel/index.html'))
   },
   upstreamFiles: {
     'index.html': repoBlob('bc2d201', 'index.html'),
@@ -367,7 +359,7 @@ try {
   );
   for (const relativePath of paths) {
     const base = sourceText('0562644', relativePath);
-    const local = sourceText('6003529', relativePath);
+    const local = git(fixture, ['show', `:2:${relativePath}`]).toString('utf8');
     const upstream = sourceText('b409ca6', relativePath);
     assert.equal(
       normalize(transformOverlayBlob(relativePath, base)),
@@ -379,9 +371,9 @@ try {
     () => transformOverlayText(
       'assets/js/core-utils.js',
       normalize(sourceText('0562644', 'assets/js/core-utils.js'))
-        .replace('const compressImage = ', 'const driftedCompressImage = ')
+        .replace('    window.RPHubCardUtils = {', '    window.DriftedCardUtils = {')
     ),
-    /replacement anchor/,
+    /card file adapter helpers/,
     'core-utils anchor drift must fail closed'
   );
   assert.throws(
@@ -400,9 +392,9 @@ try {
   assert.throws(
     () => transformOverlayText(
       'assets/js/core-utils.js',
-      patchedCore.replace('const parseCotImpl = (text) => {', 'const parseCotImpl = (text) => {\nconst parseCotImpl = (text) => {')
+      patchedCore.replace('    const getPlatformAdapter = () => {', '    const getPlatformAdapter = () => {\n    const getPlatformAdapter = () => {')
     ),
-    /exactly one parseCot implementation/,
+    /exactly one card file adapter helper/,
     'duplicate core-utils marker must fail closed'
   );
   const patchedData = transformOverlayText(
@@ -443,34 +435,21 @@ try {
   await rm(realUpstreamFixture.fixture, { recursive: true, force: true });
 }
 
-async function createRealRepositoryMergeFixture(localRef, upstreamRef) {
-  const fixture = await mkdtemp(path.join(os.tmpdir(), 'rphub-real-repository-merge-'));
-  git(fixture, ['init', '-q', '-b', 'fixture']);
-  git(fixture, ['config', 'user.name', 'Resolver Test']);
-  git(fixture, ['config', 'user.email', 'resolver@example.test']);
-  git(fixture, ['remote', 'add', 'source', projectRoot]);
-  git(fixture, ['fetch', '-q', 'source', `${localRef}:refs/heads/local`, `${upstreamRef}:refs/heads/upstream`]);
-  git(fixture, ['checkout', '-q', 'local']);
-  try {
-    git(fixture, ['merge', '--no-ff', '--no-commit', 'upstream']);
-  } catch {
-    // The exact repository merge is expected to stop on reviewed conflicts.
-  }
-  return fixture;
-}
-
 const real191Paths = ['assets/js/app.js', 'assets/js/core-utils.js', 'assets/js/data-services.js'];
+const real191ConflictPaths = ['assets/js/app.js', 'assets/js/data-services.js'];
 const pre191LocalParent = '8829214408fe7fcc53a5b960e4e7512dc787d9e0';
 const real191Fixture = await createConflictFixture({
   baseFiles: Object.fromEntries(real191Paths.map(relativePath => [relativePath, repoBlob('b409ca6', relativePath)])),
-  localFiles: Object.fromEntries(real191Paths.map(relativePath => [relativePath, repoBlob(pre191LocalParent, relativePath)])),
+  localFiles: Object.fromEntries(real191Paths.map(relativePath => [relativePath, relativePath === 'assets/js/app.js'
+    ? repoBlob(pre191LocalParent, relativePath)
+    : transformOverlayBlob(relativePath, sourceText('b409ca6', relativePath))])),
   upstreamFiles: Object.fromEntries(real191Paths.map(relativePath => [relativePath, repoBlob('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath)]))
 });
 try {
   assert.deepEqual(
     gitText(real191Fixture, ['diff', '--name-only', '--diff-filter=U']).split('\n'),
-    real191Paths,
-    'real upstream 1.9.1 fixture must expose all three content conflicts'
+    real191ConflictPaths,
+    'real upstream 1.9.1 fixture must expose both canonical content conflicts'
   );
   const mergedApp = await readFile(path.join(real191Fixture, 'assets/js/app.js'), 'utf8');
   const appStages = {
@@ -510,7 +489,7 @@ try {
     'app resolver must reject additional conflict blocks'
   );
   const resolved = await resolveAutoConflicts({ cwd: real191Fixture });
-  assert.deepEqual(resolved, real191Paths, 'real upstream 1.9.1 resolver paths');
+  assert.deepEqual(resolved, real191ConflictPaths, 'real upstream 1.9.1 resolver paths');
   assert.equal(gitText(real191Fixture, ['diff', '--name-only', '--diff-filter=U']), '');
   const appNumstat = args => gitText(real191Fixture, ['diff', '--numstat', ...args, 'upstream', '--', 'assets/js/app.js'])
     .split('\t')
@@ -540,7 +519,7 @@ try {
       `${relativePath} real upstream 1.9.1 output`
     );
   }
-  console.log('Real upstream 1.9.1 (9c06119) three-conflict resolver proof: PASS');
+  console.log('Real upstream 1.9.1 (9c06119) canonical conflict resolver proof: PASS');
 } finally {
   await rm(real191Fixture, { recursive: true, force: true });
 }
@@ -556,17 +535,24 @@ const real192Paths = [
   'index.html',
   'novel/index.html'
 ];
-const real192Fixture = await createRealRepositoryMergeFixture(pre192Local, stable192);
+const real192ConflictPaths = ['assets/js/app.js', 'assets/js/runtime-services.js', 'index.html', 'novel/index.html'];
+const real192Fixture = await createConflictFixture({
+  baseFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, repoBlob('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath)])),
+  localFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, relativePath === 'assets/js/app.js'
+    ? repoBlob(pre192Local, relativePath)
+    : transformOverlayBlob(relativePath, sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath))])),
+  upstreamFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, repoBlob(stable192, relativePath)]))
+});
 try {
   assert.deepEqual(
     gitText(real192Fixture, ['diff', '--name-only', '--diff-filter=U']).split('\n'),
-    real192Paths,
-    'real upstream 1.9.2 fixture must expose all seven content conflicts'
+    real192ConflictPaths,
+    'real upstream 1.9.2 fixture must expose four canonical content conflicts'
   );
   for (const relativePath of real192Paths.filter(relativePath => relativePath !== 'assets/js/app.js')) {
     assert.equal(
       normalize(transformOverlayBlob(relativePath, sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath))),
-      normalize(sourceText(pre192Local, relativePath)),
+      normalize(git(real192Fixture, ['show', `local:${relativePath}`]).toString('utf8')),
       `${relativePath} real upstream 1.9.2 stage1 -> stage2 proof`
     );
   }
@@ -592,12 +578,12 @@ try {
   );
 
   const resolved192 = await resolveAutoConflicts({ cwd: real192Fixture });
-  assert.deepEqual(resolved192, real192Paths, 'real upstream 1.9.2 resolver paths');
+  assert.deepEqual(resolved192, real192ConflictPaths, 'real upstream 1.9.2 resolver paths');
   assert.equal(gitText(real192Fixture, ['diff', '--name-only', '--diff-filter=U']), '');
-  for (const relativePath of real192Paths.filter(relativePath => relativePath !== 'assets/js/app.js')) {
+  for (const relativePath of real192ConflictPaths.filter(relativePath => relativePath !== 'assets/js/app.js')) {
     const actual = await readFile(path.join(real192Fixture, relativePath), 'utf8');
     const expected = transformOverlayBlob(relativePath, sourceText(stable192, relativePath));
-    assert.equal(actual, expected, `${relativePath} real upstream 1.9.2 output`);
+    assert.equal(normalize(actual), normalize(expected), `${relativePath} real upstream 1.9.2 output`);
     assert.equal(transformOverlayBlob(relativePath, actual), actual, `${relativePath} real upstream 1.9.2 second reapply`);
   }
   const resolvedApp192 = normalize(await readFile(path.join(real192Fixture, 'assets/js/app.js'), 'utf8'));
@@ -619,14 +605,8 @@ try {
     /API stream request state|result content accumulation/,
     '1.9.2 API request anchor drift must fail closed'
   );
-  assert.throws(
-    () => transformOverlayText(
-      'assets/js/core-utils.js',
-      normalize(sourceText(stable192, 'assets/js/core-utils.js')).replace("rawCot: '', ranges: []", "rawCot: 'drift', ranges: []")
-    ),
-    /early-return payload drifted/,
-    '1.9.2 parseCot payload drift must fail closed'
-  );
+  const patchedCore192 = transformOverlayText('assets/js/core-utils.js', normalize(sourceText(stable192, 'assets/js/core-utils.js')));
+  assert.doesNotMatch(patchedCore192, /__RPH_PERF__|clearParseCotCache|parseCotImpl/, '1.9.2 core overlay must omit benchmark seams');
   assert.throws(
     () => transformOverlayText(
       'assets/js/ui-components.js',
@@ -635,9 +615,91 @@ try {
     /safe sidebar footer/,
     '1.9.2 UI duplicate marker must fail closed'
   );
-  console.log('Real upstream 1.9.2 (a83d907) seven-conflict resolver + API migration + second reapply proof: PASS');
+  console.log('Real upstream 1.9.2 (a83d907) canonical conflict resolver + API migration + second reapply proof: PASS');
 } finally {
   await rm(real192Fixture, { recursive: true, force: true });
+}
+
+const upstream193 = '4aef0bb46c9b3370faba174a20435e5989799727';
+const legacyDiagnosticBaseline = '9ce9ef0ff93fa4816fea309cfd541b5b33fca338';
+const legacyDiagnosticApp = normalize(sourceText(legacyDiagnosticBaseline, 'assets/js/app.js'));
+const cleanDiagnosticApp = removeAppDiagnostics(legacyDiagnosticApp);
+assert.equal(cleanDiagnosticApp, normalize(readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8')), 'complete legacy app diagnostics are removed exactly');
+assert.equal(removeAppDiagnostics(cleanDiagnosticApp), cleanDiagnosticApp, 'clean app diagnostic removal is idempotent');
+assert.throws(
+  () => removeAppDiagnostics(legacyDiagnosticApp.replace('                        perfObservedRevealElements?.add(el);\n', '')),
+  /scroll reveal diagnostic observation/,
+  'partial legacy app diagnostics are rejected'
+);
+assert.throws(
+  () => removeAppDiagnostics(legacyDiagnosticApp.replace(
+    '            __perfLoadEarlierChatMessages: batchSize => window.__RPH_PERF__?.enabled\n',
+    '            __perfLoadEarlierChatMessages: batchSize => window.__RPH_PERF__?.enabled\n            functionalInsertionMustSurvive: true,\n'
+  )),
+  /benchmark app exports/,
+  'drift inside the reviewed diagnostic export block is rejected'
+);
+assert.throws(
+  () => removeAppDiagnostics(legacyDiagnosticApp.replace(
+    '        const perfObservedRevealElements = window.__RPH_PERF__?.enabled ? new WeakSet() : null;\n',
+    '        const perfObservedRevealElements = window.__RPH_PERF__?.enabled ? new WeakSet() : null;\n        const perfObservedRevealElements = window.__RPH_PERF__?.enabled ? new WeakSet() : null;\n'
+  )),
+  /scroll reveal diagnostic set, found 2/,
+  'duplicate legacy app diagnostics are rejected'
+);
+const upstreamApi193 = sourceText(upstream193, 'assets/js/api-utils.js');
+const patchedApi193 = transformOverlayBlob('assets/js/api-utils.js', upstreamApi193);
+assert.match(patchedApi193, /const requestChatCompletionOnce = async \(options, attempt\) => \{/, '1.9.3 retry implementation survives overlay');
+assert.match(patchedApi193, /toolCalls: toolSnapshot\(\)/, '1.9.3 streamed tool calls survive overlay');
+assert.match(patchedApi193, /const schedulePublish = \(accepted\) => \{/, '1.9.3 paragraph scheduler is installed');
+assert.doesNotMatch(patchedApi193, /__RPH_PERF__|setInterval\(flush, 60\)/, '1.9.3 overlay omits diagnostics and fixed interval');
+assert.equal(transformOverlayBlob('assets/js/api-utils.js', patchedApi193), patchedApi193, '1.9.3 API overlay second pass');
+assert.throws(
+  () => transformOverlayBlob('assets/js/api-utils.js', upstreamApi193.replace('                const flush = () => {', '                const flush = async () => {')),
+  /1\.9\.3 API stream flush scheduler/,
+  '1.9.3 API stream scheduler drift is rejected'
+);
+for (const variant of [
+  upstreamApi193.replace(/\r\n/g, '\n'),
+  upstreamApi193.replace(/\r?\n/g, '\r\n')
+]) {
+  assert.equal(
+    normalize(transformOverlayBlob('assets/js/api-utils.js', variant)),
+    normalize(patchedApi193),
+    '1.9.3 API overlay EOL semantic result'
+  );
+}
+
+const api193FixtureOptions = {
+  baseFiles: { 'assets/js/api-utils.js': repoBlob(stable192, 'assets/js/api-utils.js') },
+  localFiles: { 'assets/js/api-utils.js': readFileSync(path.join(projectRoot, 'assets/js/api-utils.js')) },
+  upstreamFiles: { 'assets/js/api-utils.js': repoBlob(upstream193, 'assets/js/api-utils.js') }
+};
+const api193Fixture = await createConflictFixture(api193FixtureOptions);
+try {
+  assert.equal(gitText(api193Fixture, ['diff', '--name-only', '--diff-filter=U']), 'assets/js/api-utils.js');
+  assert.deepEqual(await resolveAutoConflicts({ cwd: api193Fixture }), ['assets/js/api-utils.js']);
+  const actual = await readFile(path.join(api193Fixture, 'assets/js/api-utils.js'), 'utf8');
+  assert.equal(normalize(actual), normalize(patchedApi193), 'real 1.9.3 API conflict output');
+} finally {
+  await rm(api193Fixture, { recursive: true, force: true });
+}
+
+const unregisteredApi193Fixture = await createConflictFixture({
+  ...api193FixtureOptions,
+  localFiles: {
+    'assets/js/api-utils.js': readFileSync(path.join(projectRoot, 'assets/js/api-utils.js'), 'utf8')
+      .replace('// Shared model API transport', '// unregistered local delta\n// Shared model API transport')
+  }
+});
+try {
+  await assert.rejects(
+    resolveAutoConflicts({ cwd: unregisteredApi193Fixture }),
+    /transform\(stage1\) != stage2/,
+    'real 1.9.3 API resolver rejects unregistered local changes'
+  );
+} finally {
+  await rm(unregisteredApi193Fixture, { recursive: true, force: true });
 }
 
 console.log('Auto-resolver transformer, proof, EOL, and isolated merge fixtures: PASS');

@@ -110,7 +110,7 @@ const eventTarget = {
   removeEventListener() {}
 };
 const documentObject = { ...eventTarget, hidden: false };
-const windowObject = { ...eventTarget, IntersectionObserver: FakeIntersectionObserver, __RPH_PERF__: { enabled: true } };
+const windowObject = { ...eventTarget, IntersectionObserver: FakeIntersectionObserver };
 const context = vm.createContext({
   window: windowObject,
   document: documentObject,
@@ -140,8 +140,6 @@ assert.equal(lifecycle.getState(frames[2]).suspended, true);
 assert.equal(frames[2].contentDocument.documentElement.classList.contains('rph-offscreen'), true);
 assert.ok(frames[2].contentDocument.getElementById('rph-offscreen-animation-suspension'));
 
-lifecycle.resetDiagnostics();
-
 frames[2].rect = { top: 180, bottom: 230, left: 0, right: 100 };
 intersectionObservers[0].callback([]);
 intersectionObservers[1].callback([]);
@@ -149,8 +147,6 @@ flushAnimationFrames();
 assert.equal(lifecycle.getState(frames[2]).state, 'NEAR');
 assert.equal(lifecycle.getState(frames[2]).suspended, false);
 assert.equal(frames[2].contentDocument.documentElement.classList.contains('rph-offscreen'), false);
-assert.equal(lifecycle.getDiagnostics().preloadResumes, 1);
-assert.equal(lifecycle.getDiagnostics().directActiveResumes, 0);
 
 frames[2].rect = { top: 40, bottom: 90, left: 0, right: 100 };
 intersectionObservers[0].callback([]);

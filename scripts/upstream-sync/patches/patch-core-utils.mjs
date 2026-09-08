@@ -10,7 +10,7 @@ function requireAbsent(source, needle, label) {
   if (count !== 0) throw new Error(`Unexpected ${label}; found ${count}`);
 }
 
-const parseCotOriginalMarker = 'const parseCot = (text) => {\n    if (!text)';
+const parseCotOriginalMarker = 'const parseCot = (text) => {';
 const parseCotImplMarker = 'const parseCotImpl = (text) => {';
 const parseCotWrapperMarker = 'const parseCot = (text) => {\n    const perf = window.__RPH_PERF__;';
 const parseCotTelemetryMarker = "window.__RPH_PERF__?.registerCacheReader?.('parseCotCache', () => {";
@@ -65,25 +65,25 @@ const cardAdapterOverlay = `    const getPlatformAdapter = () => {
 
 `;
 
-function splitParseCot(source) {
-  if (source.includes(parseCotImplMarker)) return source;
-
-  const declaration = 'const parseCot = (text) => {';
-  const count = countOccurrences(source, declaration);
-  if (count !== 1) throw new Error(`Expected one parseCot declaration, found ${count}`);
-
-  // These are the complete reviewed function headers from the supported
-  // upstream releases. Replacing only the declaration preserves each release's
-  // parser body, while the exact early-return line makes payload drift fail
-  // closed instead of accepting an arbitrary parseCot implementation.
-  const reviewedHeaders = [
-    `${declaration}\n    if (!text) return { cot: '', main: '', sys: '', isFinished: false };`,
-    `${declaration}\n    if (!text) return { cot: '', main: '', isFinished: false };`,
-    `${declaration}\n    if (!text) return { cot: '', rawCot: '', ranges: [], closingTags: '', main: '', isFinished: false };`
+function removeParseCotDiagnostics(source) {
+  const diagnosticCounts = [
+    countOccurrences(source, parseCotImplMarker),
+    countOccurrences(source, parseCotWrapperMarker),
+    countOccurrences(source, parseCotTelemetryMarker),
+    countOccurrences(source, clearParseCotCacheMarker)
   ];
-  const matched = reviewedHeaders.filter(header => source.includes(header));
-  if (matched.length !== 1) throw new Error('parseCot early-return payload drifted');
-  return source.replace(matched[0], matched[0].replace(declaration, parseCotImplMarker));
+  const hasDiagnostics = diagnosticCounts.some(Boolean);
+  if (!hasDiagnostics) {
+    requireSingle(source, parseCotOriginalMarker, 'parseCot implementation');
+    return source;
+  }
+  if (diagnosticCounts.some(count => count !== 1)) {
+    throw new Error(`Partial parseCot performance diagnostics detected: ${diagnosticCounts.join(',')}`);
+  }
+  source = source.replace(parseCotImplMarker, parseCotOriginalMarker);
+  source = source.replace(`\n${parseCotPerfOverlay}\n`, '\n');
+  source = source.replace(`${clearParseCotCacheMarker}\n`, '');
+  return source;
 }
 
 const cardAdapterExports = `
@@ -91,23 +91,18 @@ const cardAdapterExports = `
         saveGeneratedFile,`;
 
 export function patchCoreUtilsOverlay(source) {
-  source = splitParseCot(source);
-  const parseCotAnchor = '\n\nconst compressImage = (source, maxWidth = 300, quality = 0.7)';
-  const parseCotReplacement = `\n${parseCotPerfOverlay}\n\nconst compressImage = (source, maxWidth = 300, quality = 0.7)`;
-  source = replaceOnce(source, parseCotAnchor, parseCotReplacement, 'parseCot performance wrapper');
-  source = ensureAfter(source, 'window.RPHubUtils = {', '\n    clearParseCotCache: () => parseCotCache.clear(),', 'parseCot cache reset export');
+  source = removeParseCotDiagnostics(source);
   source = ensureBefore(source, '    window.RPHubCardUtils = {', cardAdapterOverlay, 'card file adapter helpers');
   source = ensureAfter(source, '        injectPngTextChunk,', cardAdapterExports, 'card file adapter exports');
 
-  requireSingle(source, parseCotImplMarker, 'parseCot implementation');
-  requireSingle(source, parseCotWrapperMarker, 'parseCot performance wrapper');
-  requireSingle(source, parseCotTelemetryMarker, 'parseCot cache telemetry');
-  requireSingle(source, clearParseCotCacheMarker, 'parseCot cache reset export');
+  requireSingle(source, parseCotOriginalMarker, 'parseCot implementation');
   requireSingle(source, platformAdapterMarker, 'card file adapter helper');
   requireSingle(source, saveGeneratedFileMarker, 'card file save helper');
   requireSingle(source, cardAdapterExportsMarker, 'card file adapter export');
   requireSingle(source, 'window.RPHubUtils = {', 'RPHubUtils export object');
   requireSingle(source, '    window.RPHubCardUtils = {', 'RPHubCardUtils export object');
-  requireAbsent(source, parseCotOriginalMarker, 'unwrapped parseCot implementation');
+  requireAbsent(source, parseCotImplMarker, 'split parseCot implementation');
+  requireAbsent(source, '__RPH_PERF__', 'parseCot performance diagnostics');
+  requireAbsent(source, clearParseCotCacheMarker, 'parseCot benchmark cache reset');
   return source;
 }
