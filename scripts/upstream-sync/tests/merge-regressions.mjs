@@ -70,17 +70,93 @@ assertAll(data, [
   "!imageTail.includes('###') && !/[\\r\\n]/.test(imageTail)"
 ], 'data-services.js contract');
 
-assert.match(
-  app,
-  /stripUiTemplateUpdateBlock,\s*processMainContent(?:: processMainContentCached)?\s*\n\s*\} = window\.RPHubUiTemplateUtils/,
-  'app.js must import the shared cached processMainContent implementation'
-);
-if (app.includes('processMainContent: processMainContentCached')) {
-  assert.match(app, /return processMainContentCached\(normalizedMainText, isGeneratingState\);/);
-  assert.match(app, /isGeneratingState && settings\.preventTruncation/);
-} else {
-  assert.doesNotMatch(app, /const processMainContent\s*=/, 'app.js must use the shared cached processMainContent implementation');
+function callAppMainContentProcessor(mainText, isGeneratingState, truncationEnabled = false) {
+  const normalizedApp = app.replace(/\r\n/g, '\n');
+  const startMarker = '        const processMainContent = (mainText, isGeneratingState) => {';
+  const endMarker = '\n\n        const switchProfile = ';
+  const start = normalizedApp.indexOf(startMarker);
+  const end = normalizedApp.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, 'app.js must define one extractable main-content processor');
+  const processorSource = normalizedApp.slice(start, end);
+  assert.equal(normalizedApp.indexOf(startMarker, start + startMarker.length), -1, 'app.js must define exactly one main-content processor');
+
+  const context = {
+    mainText,
+    isGeneratingState,
+    result: null,
+    isTruncationEnabled: { value: truncationEnabled },
+    stripUiTemplateUpdateBlock(value) {
+      const source = String(value || '');
+      const marker = source.indexOf('<ui_template_updates>');
+      return marker < 0 ? source : source.slice(0, marker).trimEnd();
+    },
+    cardUtils: {
+      findLastUnprotectedMatch(source) {
+        const index = String(source || '').toLowerCase().lastIndexOf('image###');
+        return index < 0 ? null : { index };
+      }
+    }
+  };
+  runInNewContext(`${processorSource}\nresult = processMainContent(mainText, isGeneratingState);`, context);
+  return context.result;
 }
+
+function assertNoSharedProcessMainContentBinding(source) {
+  const destructuringBlocks = [...source.matchAll(
+    /const\s*\{([^{}]*)\}\s*=\s*window\.RPHubUiTemplateUtils\s*;/g
+  )];
+  assert.equal(
+    destructuringBlocks.length,
+    1,
+    'app.js must contain exactly one RPHubUiTemplateUtils destructuring block'
+  );
+  assert.doesNotMatch(
+    destructuringBlocks[0][1],
+    /\bprocessMainContent\b/,
+    '1.9.2 app must not bind shared processMainContent under any name or member order'
+  );
+}
+
+assert.match(app, /const uiTokens = /, '1.9.2 app must retain the upstream UI-aware main-content parser');
+assert.doesNotMatch(app, /processMainContentCached/, '1.9.2 app must not call the obsolete shared processor route');
+assertNoSharedProcessMainContentBinding(app);
+assert.throws(
+  () => assertNoSharedProcessMainContentBinding(`const {
+    processMainContent,
+    renderUiTemplateHtml,
+    stripUiTemplateUpdateBlock
+  } = window.RPHubUiTemplateUtils;`),
+  /must not bind shared processMainContent/,
+  'shared processMainContent shorthand must be rejected regardless of member order'
+);
+assert.throws(
+  () => assertNoSharedProcessMainContentBinding(`const {
+    renderUiTemplateHtml,
+    processMainContent: renderSharedMainContent,
+    stripUiTemplateUpdateBlock
+  } = window.RPHubUiTemplateUtils;`),
+  /must not bind shared processMainContent/,
+  'shared processMainContent must be rejected under a non-cached alias'
+);
+assert.match(app, /processMainContent, replaceUserNamePlaceholder,/, '1.9.2 app must expose its inline processor from setup');
+
+const incompleteUi = callAppMainContentProcessor('正文 <div>partial', true);
+assert.equal(incompleteUi.text, '正文 ', '1.9.2 app must hide an unclosed UI element while streaming');
+assert.equal(incompleteUi.showSpinner, true, '1.9.2 app must show the UI spinner for an unclosed element');
+const completeUi = callAppMainContentProcessor('正文 <div>ready</div>继续', true);
+assert.equal(completeUi.text, '正文 <div>ready</div>继续', '1.9.2 app must keep a closed UI element and trailing text visible');
+assert.equal(completeUi.showSpinner, false, '1.9.2 app must not show the spinner for a closed UI element');
+const inlineCode = callAppMainContentProcessor('正文 `<div>`', true);
+assert.equal(inlineCode.text, '正文 `<div>`', '1.9.2 app must ignore HTML-looking inline code');
+assert.equal(inlineCode.showSpinner, false, 'HTML-looking inline code must not show the UI spinner');
+const strippedUpdate = callAppMainContentProcessor('正文\n<ui_template_updates>{"score":42}</ui_template_updates>', false);
+assert.equal(strippedUpdate.text, '正文', '1.9.2 app must call the shared UI-update stripper before rendering');
+assert.equal(strippedUpdate.showSpinner, false, 'completed content must not show the UI spinner');
+const multilineImage = callAppMainContentProcessor('正文 image###unfinished\n后文', true, false);
+assert.equal(multilineImage.text, '正文 image###unfinished\n后文', '1.9.2 app must preserve multiline image text when truncation is disabled');
+const truncatedImage = callAppMainContentProcessor('正文 image###unfinished\n后文', true, true);
+assert.equal(truncatedImage.text, '正文 \n后文', '1.9.2 app must hide the incomplete image when truncation is enabled');
+assert.equal(truncatedImage.showSpinner, false, 'incomplete image handling must not use the UI spinner');
 
 const dataServicesContext = {
   window: {
@@ -179,6 +255,11 @@ const sharedProcessMainContent = dataServicesContext.window.RPHubUiTemplateUtils
 const incompleteImageResult = sharedProcessMainContent('正文 image###unfinished', true);
 assert.equal(incompleteImageResult.text, '正文 ', 'shared processMainContent must hide an unclosed image token while generating');
 assert.equal(incompleteImageResult.showSpinner, false, 'unclosed image token must not show the HTML spinner');
+assert.equal(
+  sharedProcessMainContent('正文 image###unfinished', true),
+  incompleteImageResult,
+  'shared processMainContent export must return the cached object for an identical call'
+);
 const completeImageResult = sharedProcessMainContent('正文 image###finished###', true);
 assert.equal(completeImageResult.text, '正文 image###finished###', 'shared processMainContent must retain a closed image token');
 assert.equal(completeImageResult.showSpinner, false, 'closed image token must not show the HTML spinner');

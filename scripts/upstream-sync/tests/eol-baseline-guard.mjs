@@ -29,12 +29,6 @@ const EOL_NOISE_ALLOWANCE = {
   'assets/js/data-services.js': 512,
   // P0-1 follow-up: local core-utils.js still carries legacy EOL churn.
   'assets/js/core-utils.js': 80,
-  // P0-1 follow-up: character/index.html still carries legacy EOL churn.
-  'character/index.html': 14,
-  // P0-1 follow-up: runtime-services.js still carries legacy EOL churn.
-  'assets/js/runtime-services.js': 10,
-  // P0-1 follow-up: ui-components.js still carries legacy EOL churn.
-  'assets/js/ui-components.js': 4
 };
 
 function probeGit(args) {

@@ -16,6 +16,38 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-08：上游 `1.9.2`（`a83d907`）合并后正文处理契约误报
+
+### 现场
+
+- 失败工作流为 `34137332685`；本地父提交为 `81fad6eaaddf20658d5c173c328657aa5e402780`，共同上游基线为 `9c0611964a39ff8cca8831d97ecf18b04abb1990`，稳定 Release 目标为 `1.9.2` 的 `a83d907497106e401f0988b29b653422159e4c7f`。审计时 `upstream/main=d2f2625c25da6bc148176a0afb76892f05687e13` 已包含稳定标签之后的未发布提交，本次复现和修复只使用稳定标签，没有混入移动分支。
+- `Fetch, merge, and reapply categorized hooks` 已解析七个已审查冲突；第一次 reapply 只迁移 `assets/js/api-utils.js`，第二次为 `REAPPLY_CHANGED_FILES=0`。随后 `Verify adapter and upstream hooks` 的首个有效错误位于 `scripts/upstream-sync/tests/merge-regressions.mjs:73`：`AssertionError: app.js must import the shared cached processMainContent implementation`。
+- 失败发生在构建、提交和发布之前；Android APK、`main` 推送、GitHub Release、GitHub/Gitee `android-latest` 和 Gitee manifest/分片步骤均跳过，没有半发布状态。
+
+### 根因与本地漏检
+
+- 这是 1.9.1 测试契约陈旧，不是 1.9.2 实现漏接。最终 `app.js` 按上游 1.9.2 语义定义并从 Vue setup 返回内联 `processMainContent`：它使用 `isTruncationEnabled`、受保护的 `image###` 查找以及 UI tag/fence 感知的流式截断器；专用 resolver 和真实 1.9.2 fixture 已明确要求移除 `processMainContentCached` 导入及调用。
+- 本地 data-services overlay 仍保留并导出共享缓存版 `window.RPHubUiTemplateUtils.processMainContent`。该导出可独立调用，对同一正文和生成状态会返回同一缓存对象；但 1.9.2 app 不再解构或调用它。把旧 wrapper 强接回 app 会绕过新的 UI/fence 状态机，不能仅为满足旧正则恢复该路线。
+- 本地门禁在修复提交 `81fad6e` 的未合并树上运行时，`app.js` 仍是 1.9.1 的别名 wrapper，因此旧正则会通过；`auto-resolver.mjs` 的真实 1.9.2 fixture 虽已断言最终 app 不含 `processMainContentCached`，却只检查源码 marker，没有在 fixture 的最终合并树中执行 `merge-regressions.mjs`。此前隔离合并只执行了 performance 门禁，两个相反契约因此没有在同一最终树相遇；今后当前产品行为门禁只面向 stable 1.9.2 最终树，合并前验证必须先构造真实 final fixture/隔离合并，不能靠兼容旧主线让测试变绿。
+- 修复首错后，最终树的完整门禁还暴露了被遮蔽的 EOL baseline：1.9.2 strict transformers 以新 upstream blob 的逐行 EOL 重建 `runtime-services.js`、`ui-components.js` 和 `character/index.html`，三者真实 EOL/尾随空白噪声已从旧 allowance `10/4/14` 降为 `0/0/0`，旧门禁却仍要求历史噪声必须存在。
+
+### 处理与回归测试
+
+- 不改任何上游 HTML/JS/CSS，也不改 resolver 或生产正文处理实现；`merge-regressions.mjs` 的当前产品契约只接受 stable 1.9.2 路线：必须存在 `uiTokens` 状态机、从 setup 导出内联处理器，并唯一提取整个 `RPHubUiTemplateUtils` 解构块，无视成员顺序地拒绝任何 shared `processMainContent` 绑定；换序 shorthand 和非 cached 别名均有 fail-closed 负例。
+- 测试从真实 app 源码提取并执行该函数，覆盖 UI update block stripping、未闭合/已闭合 UI、HTML-looking inline code、截断开关关闭/开启时的多行 `image###` 行为；任何偏离这条完整路线的形态继续 fail closed。历史 1.9.1 resolver fixture 只保留迁移 proof，不再作为当前 runtime/import 行为的兼容分支。
+- data-services 的 VM 合约继续验证导出函数对未闭合/闭合 `image###` 的处理，并新增同参数重复调用返回同一对象的缓存命中证明。focused test、完整 upstream-sync/platform/performance、Web build/dist、workflow contract、diff check，以及 `81fad6e + a83d907` 隔离最终合并树中的完整 upstream-sync 门禁均通过。
+- EOL baseline 直接移除上述三个文件的历史 allowance，最终 1.9.2 一律精确要求零噪声；没有增加版本兼容分支、扩大允许范围，也未修改 `.gitattributes` 或生产文件换行。
+
+### 版本与发布影响
+
+- 本次只修复同步后的测试契约和事故记录，不改版本号，不创建同步 merge commit，不 commit/push/dispatch，也不创建 Release。失败运行 `34137332685` 没有发布副作用。
+- 后续获准重跑时仍必须锁定稳定 `1.9.2/a83d907`；`d2f2625` 等 `upstream/main` 未发布提交不得进入本次 Android Release。正式成功后仍需独立核验 merge SHA、APK 元数据/签名/SHA-256、GitHub Release 以及 GitHub/Gitee 两侧更新源。
+
+### 后续风险
+
+- data-services 的共享缓存导出在 1.9.2 主 app 路由中不再被消费，只保留兼容性和独立调用行为；如果要恢复主渲染缓存，必须在不改变上游 UI/fence 状态机语义的前提下单独设计和做性能回归，不能复用 1.9.1 wrapper。
+- 当前契约有意只绑定 stable 1.9.2 的已审查行为。上游再次移动处理器、改变 setup 导出或 UI token 语义时会 fail closed，应更新真实最终合并 fixture 和调用级测试，不能添加宽泛正则或旧版本兼容分支兜底。
+
 ## 2026-09-07：上游 `1.9.2`（`a83d907`）七文件冲突与 API 模块迁移
 
 ### 现场
