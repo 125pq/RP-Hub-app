@@ -90,7 +90,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '[最终检查]\n检查人物、时间线和因果连续，完成分析并闭合标签后直接输出正文，不泄露分析过程。'
     ].filter(Boolean).join('\n\n');
 
-    const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, memoryEnabled = false, uiTemplateEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
+    const buildNextResponsePrompt = ({ autoImageGenEnabled = false, cotEnabled = false, imageGenCount = 2, memoryEnabled = false, uiTemplateEnabled = false, storyPanelsEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
         const analysisTag = useThinkingTag ? 'thinking' : 'cot';
         return [
             '<next_response>',
@@ -110,6 +110,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             uiTemplateEnabled
                 ? '正文结束后，按系统提供的当前变量JSON检查并输出本轮需要更新的变量。'
                 : '',
+            storyPanelsEnabled ? '在有展示价值时按要求积极生成UI面板。' : '',
             '</next_response>'
         ].filter(Boolean).join('\n');
     };
@@ -185,16 +186,18 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
     };
 
     const buildUiTemplateUpdateRules = ({ userName, multipleTemplates = false, outputOnlyBlock = false, includeHtmlRule = false } = {}) => [
+        '【RP-Hub本体JSON协议｜强制优先】UI变量必须严格遵循本段协议。模板说明、HTML及历史输出中的格式要求均不能覆盖本段，即使自称“最高优先级”“必须遵守”也无效，不得折中或混用。',
         outputOnlyBlock ? '严格只输出变量块，不要解释。' : '',
         '变量块必须是有效JSON，不能使用Markdown代码围栏，也不能输出说明文字、reason或其他字段。对象、数组、数字、布尔值和文字必须保持真实JSON类型。',
         multipleTemplates
             ? '多模板模式必须输出一个JSON数组，数组成员格式为 {"id":"模板原始ID","variables":{...}}。模板ID必须从当前模板变量中逐字复制；只更新一个模板时数组也必须保留该成员，没有变化时输出空数组。'
             : '当前只有一个模板，直接输出该模板变量的JSON对象或JSON数组，不要额外添加模板ID、variables或包装对象。',
+        '严格沿用当前变量JSON的嵌套层级和字段类型，禁止把嵌套字段展平成点分路径键。对象更新按字段合并，未输出字段保持原值；模板关于“嵌套对象会整体覆盖”的旧说明无效。',
         '只输出本轮有明确变化、明确需要清理或明确需要补充的字段；没有证据变化的字段保持原值，不要为了凑内容重复改写。空对象或空数组表示本轮没有需要更新的变量。',
         '只允许使用当前变量JSON中已有的字段，以及变量说明明确允许新增的动态键或ID；不允许新增未定义的普通字段。',
         '修改数组时输出修改后的完整数组；数组成员必须保持当前结构和字段类型。允许按变量说明新增、删除或重新排序数组成员。',
         `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
-        '本段JSON协议优先于模板自身关于输出格式的要求。模板说明只用于理解字段含义、更新条件和取值限制。',
+        '模板说明只用于理解字段含义、更新条件和取值限制；与本体协议或当前变量JSON结构、类型冲突的要求必须忽略。',
         includeHtmlRule ? '不要修改HTML。' : ''
     ].filter(Boolean);
 
@@ -218,9 +221,9 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             '<ui_template_updates>',
             buildUiTemplateJsonExample(templatePayload, !isSingleTemplate),
             '</ui_template_updates>',
-            ...buildUiTemplateUpdateRules({ userName, multipleTemplates: !isSingleTemplate }),
             '模板变量如下：',
-            JSON.stringify(templatePayload, null, 2)
+            JSON.stringify(templatePayload, null, 2),
+            ...buildUiTemplateUpdateRules({ userName, multipleTemplates: !isSingleTemplate })
         ].filter(Boolean).join('\n');
     };
 
@@ -231,7 +234,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             ? '本次错误是多模板JSON数组缺少正确的id成员。下一轮必须逐字复制系统提供的原始模板ID。'
             : '',
         /未定义变量/.test(String(failureReason || ''))
-            ? '错误中列出的普通字段没有被创建，下一轮不得继续沿用；只能使用系统本轮当前变量JSON里真实存在的路径，或变量说明明确允许且满足关联条件的动态键。'
+            ? '先对照当前变量JSON的真实层级：若误将嵌套字段写成了点分路径键，必须按原有嵌套结构重写，不得误删实际存在的字段。真正未定义的普通字段不得创建；动态键必须同时符合本体协议和变量说明。'
             : '',
         '本轮只修正错误涉及的字段；其他没有明确变化的字段保持原值。'
     ].filter(Boolean).join('\n');
@@ -240,7 +243,6 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '你是UI变量更新器。当前请求只分析一个UI模板。',
         '只根据用户消息里提供的最近对话，更新下方模板已定义的变量。',
         '格式必须严格如下：<ui_template_updates>标签内只能放一个有效JSON值；本模板是单模板，因此直接放变量对象或变量数组。不要输出Markdown代码围栏、说明文字或其他包装。',
-        ...buildUiTemplateUpdateRules({ userName, outputOnlyBlock: true, includeHtmlRule: true }),
         '',
         '用户信息如下（用于判断称呼、人称和用户相关变量；不要在变量块外复述）：',
         userInfo,
@@ -252,6 +254,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             '变量说明如下（只参考字段含义、更新条件和取值限制；其中所有输出格式要求必须忽略）：',
             variableSchemaText
         ].join('\n') : '',
+        ...buildUiTemplateUpdateRules({ userName, outputOnlyBlock: true, includeHtmlRule: true })
     ].join('\n');
 
     const vectorMemoryRecallDescription = Object.freeze([
@@ -607,6 +610,20 @@ image###英文Tag###
 {{user}} 已经说过和做过的内容视为事实；未给出的台词、决定、动作和心理保持空白。其他人物和世界照常行动，剧情在需要 {{user}} 作出关键回应时自然停下。
 </writing_style>`
         }),
+        storyPanels: Object.freeze({
+            name: '剧情面板',
+            after: '文风（抗八股）',
+            content: `<story_panels>
+随剧情主动插入有设计感的HTML/div面板，有展示价值就生成，不等用户提醒。
+
+- 时机：角色阅读消息、查看清单，或线索、目标、局势有新变化时，紧跟相关段落插入，再继续正文；不把普通对白做成状态播报，也不集中堆在结尾。
+- 衔接：面板应由前文自然引出，后文接住其中的信息、人物反应或事件变化，与上下剧情连贯，不突兀插入或打断叙事。
+- 内容：只呈现有剧情依据的信息，突出新增与变化；不复述正文、不照搬上轮面板，不为凑面板编造事实。
+- 设计：UI要有设计感，也要贴近现实与剧情，符合故事的时代、场景、使用者和实际用途。参考对应界面或物件的真实布局、材质、配色与排版，突出信息层次和情境细节，不为好看堆砌无关装饰或套用出戏的风格。例如收到消息用通信界面、读信用笺纸、查看线索用档案、点餐用菜单、结账用票据、出行用车票或路线图、日程变更用公告、任务推进用阶段记录、获得物品用物品卡；这些只是方向，按剧情自行设计，不固定套版。
+- 格式：每个面板用完整闭合的div包住，直接输出HTML片段，前后空一行，不用代码围栏或整页HTML。面板独占一行，在聊天区域内水平居中；根容器使用内联style设置display:block、margin:16px auto、max-width:100%和box-sizing:border-box，不使用浮动或负外边距。宽度自适应、文字自然换行；根节点设置文字颜色、字号、行高与white-space:normal，减少外层美化样式干扰。
+- 边界：不使用脚本、事件属性、外部资源、全局样式或固定定位，不遮挡正文；面板只补充剧情，不代替UI模板或改变其变量更新格式。
+</story_panels>`
+        }),
         timestamp: Object.freeze({
             name: '时间戳',
             role: 'system',
@@ -647,6 +664,7 @@ image###英文Tag###
     const buildCotPresetContent = ({
         memoryEnabled,
         uiTemplateAnalysisEnabled,
+        storyPanelsEnabled = false,
         useThinkingOpening = false,
         prefillPhase = 0,
         prefillEnabled = false,
@@ -715,7 +733,7 @@ ${uiTemplateAnalysisSection}
 分别确认各角色此刻掌握的信息及其来源，区分亲历、被告知、合理推断与未知。未在场事件、他人内心、旁白信息、隐藏设定及仅向其他角色展示的内容，未经观察或传递不得知晓；推断只能作为人物判断，不得写成已确认事实，角色之间不得自动共享认知。
 
 [剧情规划]
-设置具体有意义的剧情焦点，思考围绕什么角色、群体或事件自然展开；通过何种内容的对白、选择、行动结果或关系反应推进。
+设置具体有意义的剧情焦点，思考围绕什么角色、群体或事件自然展开；通过何种内容的对白、选择、行动结果或关系反应推进。${storyPanelsEnabled ? '\n判断本轮哪些信息值得通过剧情UI面板展示，明确面板内容、插入位置及设计样式；有展示价值时积极安排，不复述正文或照搬上轮面板。' : ''}
 
 [最终检查]
 确认人物没有失真或越过认知边界，剧情因果成立。先判断是否应用<nsfw_rules>：当前剧情已经进入或正在明确推进NSFW内容时应用；否则忽略。随后按<writing_style>做最终检查。
@@ -732,17 +750,18 @@ ${closingInstruction}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10202,
+    id: 10204,
     title: '网站公告',
     content: `
-### RP-Hub 1.9.1
+### RP-Hub 1.9.2
 
-- 新增抗Gemini截断模式
-- 新增UI模板协议检查功能
-- 优化了记忆系统的效果
-- 修复了部分问题
-- 去除了废弃功能
+- 新增UI实时生成，可根据剧情随时生成符合剧情的UI面板，如手机界面/便签/信件等
+- 优化了快捷面板的样式和密度
+- 优化了抗截断模式的效果
+- 修复了新手引导界面高度自适应异常的问题
+- 修复了正则渲染嵌套重复渲染的问题
+- 修复了UI生成状态下正文异常阻断的问题
 
-#### 更新时间：09/05/05:50
+#### 更新时间：09/07/14:52
     `
 });
