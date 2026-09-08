@@ -800,6 +800,13 @@ const app = createApp({
                     if (!source || typeof source.name !== 'string' || !source.name.trim()) throw new Error('角色卡缺少有效名称');
                     const avatar = await cardUtils.blobToDataUrl(new Blob([buffer], { type: 'image/png' }));
                     const char = await importCharacterData(data, avatar, { activate: false });
+                    try {
+                        const index = characters.value.findIndex(item => item.uuid === char.uuid);
+                        if (!await selectCharacter(index, false, { silent: true })) throw new Error('切换未完成');
+                    } catch (error) {
+                        console.error('Square character switch failed:', error);
+                        throw new Error('角色卡已导入，但自动切换未完成，请在角色库手动选择，无需重复导入');
+                    }
                     reply({ name: char.name });
                 } catch (error) {
                     console.error('Square import failed:', error);
@@ -8019,16 +8026,18 @@ const app = createApp({
             return loaded;
         };
 
-        const selectCharacter = async (index, isNewImport = false) => {
+        const selectCharacter = async (index, isNewImport = false, { silent = false } = {}) => {
             const char = characters.value[index];
             if (!char) {
                 showToast('角色不存在，无法读取聊天记录', 'error');
                 return;
             }
             if (!isNewImport && currentCharacterIndex.value === index) {
-                currentView.value = 'chat';
-                await scrollChatToBottom();
-                return;
+                if (!silent) {
+                    currentView.value = 'chat';
+                    await scrollChatToBottom();
+                }
+                return true;
             }
             clearPendingChatImages();
             clearPendingCardInteraction();
@@ -8116,23 +8125,24 @@ const app = createApp({
             // Sync image style rules
             if (isAutoImageGenEnabled.value) {
                 const messages = updateImageGenRegexState({ enableRegex: true });
-                if (messages && messages.length > 0) {
+                if (!silent && messages && messages.length > 0) {
                     showToast('已同步生图风格：' + messages.join('，'), 'success');
                 }
             }
 
-            currentView.value = 'chat';
-            await scrollChatToBottom();
-            if (!isLatestSwitch()) return;
-            showToast(`已切换到角色: ${char.name}`, 'success');
+            if (!silent) {
+                currentView.value = 'chat';
+                await scrollChatToBottom();
+                if (!isLatestSwitch()) return;
+                showToast(`已切换到角色: ${char.name}`, 'success');
 
-            // 弹出自动生图询问 (仅在导入新卡时)
-            if (isNewImport) {
-                showAutoImageGenModal.value = true;
+                // 弹出自动生图询问 (仅在导入新卡时)
+                if (isNewImport) showAutoImageGenModal.value = true;
             }
 
             _characterSwitchSavePromise = setStoredValue('last_active_char', index);
             await _characterSwitchSavePromise;
+            return isLatestSwitch();
             } finally {
                 if (isLatestSwitch()) switchingCharacterIndex.value = -1;
             }
