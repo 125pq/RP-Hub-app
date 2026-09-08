@@ -725,7 +725,7 @@ window.RPHubLatestUpdate = Object.freeze({
 - 优化了开屏动画
 - 优化了剧情UI面板的出现时机
 - 修复了沉浸模式下宽度异常的问题
--
+
 #### 更新时间：09/08/15:30
     `
 });
