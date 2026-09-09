@@ -8,6 +8,10 @@ const backup = await readFile(new URL('../../assets/js/rphub-backup.js', import.
 
 assert.match(css, /--safe-top:\s*var\(--safe-area-inset-top,\s*env\(safe-area-inset-top,\s*0px\)\)/);
 assert.match(css, /--safe-bottom:\s*var\(--safe-area-inset-bottom,\s*env\(safe-area-inset-bottom,\s*0px\)\)/);
+assert.match(css, /\.safe-area-keyboard-open,[\s\S]*--safe-bottom-effective:\s*0px/);
+const workshopPanelRule = css.match(/^#app \.workshop-input-panel \{([\s\S]*?)^\}/m)?.[1] || '';
+assert.match(workshopPanelRule, /padding-bottom:\s*calc\(1rem \+ var\(--safe-bottom-effective\)\)/);
+assert.doesNotMatch(workshopPanelRule, /var\(--safe-bottom\)(?!-effective)/);
 assert.match(source, /var\(--safe-area-inset-top,env\(safe-area-inset-top,0px\)\)/);
 assert.match(source, /if \(root !== document\.documentElement\)/);
 assert.match(source, /if \(root !== document\.documentElement\) \{[\s\S]*root\.style\.setProperty\('--safe-top'/);

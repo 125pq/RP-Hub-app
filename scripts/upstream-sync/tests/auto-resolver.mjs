@@ -13,7 +13,11 @@ import { resolveAppConflictBlob } from '../patches/patch-app-conflict.mjs';
 import { patchBackupCharacter } from '../patches/patch-backup.mjs';
 import { patchOfflineCharacter } from '../patches/patch-offline-assets.mjs';
 import { removeAppDiagnostics } from '../patches/patch-performance.mjs';
-import { patchSquareHostSafeArea } from '../patches/patch-safe-area.mjs';
+import {
+  patchSafeAreaCharacter,
+  patchSquareHostSafeArea,
+  patchWorkshopInputPanelSafeArea
+} from '../patches/patch-safe-area.mjs';
 
 const git = (cwd, args) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
 const gitText = (cwd, args) => git(cwd, args).toString('utf8').trim();
@@ -166,7 +170,7 @@ async function createRealUpstreamConflictFixture() {
   return { fixture, paths };
 }
 
-for (const relativePath of ['index.html', 'novel/index.html']) assertBlobProof(relativePath);
+for (const relativePath of ['index.html', 'character/index.html', 'novel/index.html']) assertBlobProof(relativePath);
 
 const squareFrameSource = sourceText('bc2d201', 'index.html');
 const squareFramePatched = patchSquareHostSafeArea(squareFrameSource);
@@ -211,6 +215,63 @@ assert.throws(
   'raw character upstream runtime must not pass local asset validation'
 );
 const stableCharacter192 = normalize(sourceText('a83d907497106e401f0988b29b653422159e4c7f', 'character/index.html'));
+const upstreamWorkshopUtility = 'pb-[max(1rem,env(safe-area-inset-bottom))]';
+const localWorkshopUtility = 'pb-[max(1rem,var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))]';
+const patchedSafeAreaCharacter192 = patchSafeAreaCharacter(stableCharacter192);
+assert.equal((patchedSafeAreaCharacter192.match(new RegExp(upstreamWorkshopUtility.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length, 1);
+assert.doesNotMatch(patchedSafeAreaCharacter192, /class="workshop-input-panel [^"]*--safe-area-inset-bottom/);
+assert.equal(patchSafeAreaCharacter(patchedSafeAreaCharacter192), patchedSafeAreaCharacter192, 'canonical character safe-area patch is idempotent');
+const reorderedWorkshopPanel = patchedSafeAreaCharacter192.replace(
+  'class="workshop-input-panel bg-base-100/95',
+  'class="workshop-input-panel md:shadow-none bg-base-100/95'
+);
+assert.notEqual(reorderedWorkshopPanel, patchedSafeAreaCharacter192, 'unrelated panel class fixture must differ before patching');
+assert.equal(
+  patchSafeAreaCharacter(reorderedWorkshopPanel),
+  reorderedWorkshopPanel,
+  'unrelated character panel class drift remains untouched'
+);
+assert.equal(
+  patchSafeAreaCharacter(`${patchedSafeAreaCharacter192}\n<!-- class="workshop-input-panel ${upstreamWorkshopUtility}" -->`),
+  `${patchedSafeAreaCharacter192}\n<!-- class="workshop-input-panel ${upstreamWorkshopUtility}" -->`,
+  'unrelated commented character markup remains untouched'
+);
+const legacySafeAreaCharacter = patchedSafeAreaCharacter192.replace(upstreamWorkshopUtility, localWorkshopUtility);
+assert.equal(patchSafeAreaCharacter(legacySafeAreaCharacter), patchedSafeAreaCharacter192, 'legacy character utility migrates back to the upstream token');
+const leadingCommentLegacyCharacter = `<!-- ${localWorkshopUtility} -->\n${legacySafeAreaCharacter}`;
+const leadingCommentMigratedCharacter = patchSafeAreaCharacter(leadingCommentLegacyCharacter);
+assert.match(leadingCommentMigratedCharacter, new RegExp(`^<!-- ${localWorkshopUtility.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} -->`));
+assert.equal((leadingCommentMigratedCharacter.match(new RegExp(localWorkshopUtility.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length, 1);
+assert.equal((leadingCommentMigratedCharacter.match(new RegExp(upstreamWorkshopUtility.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length, 1);
+assert.equal(
+  patchSafeAreaCharacter(leadingCommentMigratedCharacter),
+  leadingCommentMigratedCharacter,
+  'leading comment utility remains unchanged and character migration is byte-idempotent'
+);
+assert.throws(
+  () => patchSafeAreaCharacter(`${patchedSafeAreaCharacter192}\n<div class="${upstreamWorkshopUtility}"></div>`),
+  /Expected one character workshop input utility/,
+  'duplicate character workshop utility must fail closed'
+);
+assert.throws(
+  () => patchSafeAreaCharacter(`${patchedSafeAreaCharacter192}\n<div class="aux workshop-input-panel ${upstreamWorkshopUtility}"></div>`),
+  /Expected one character workshop input panel class/,
+  'duplicate character workshop panel selector must fail closed'
+);
+assert.throws(
+  () => patchSafeAreaCharacter(patchedSafeAreaCharacter192.replace(upstreamWorkshopUtility, 'pb-[drifted-safe-area]')),
+  /Expected one character workshop input utility/,
+  'drifted character workshop utility must fail closed'
+);
+assert.throws(
+  () => patchSafeAreaCharacter(stableCharacter192.replace(
+    '                    padding-bottom: max(1rem, env(safe-area-inset-bottom));',
+    '                    padding-bottom: max(1rem, env(safe-area-inset-bottom));\n' +
+      '                    padding-bottom: max(1rem, env(safe-area-inset-bottom));'
+  )),
+  /Expected one character workshop input safe area anchor/,
+  'duplicate character workshop input CSS anchor must fail closed'
+);
 assert.throws(
   () => patchBackupCharacter(`${stableCharacter192}\nflushData.type !== 'RPHUB_BACKUP_FLUSH'\n`),
   /Partial character backup hook detected/,
@@ -623,6 +684,56 @@ try {
 }
 
 const upstream193 = '4aef0bb46c9b3370faba174a20435e5989799727';
+const upstreamCharacter193 = sourceText(upstream193, 'character/index.html');
+const legacyCharacter193Fixture = await createConflictFixture({
+  baseFiles: { 'character/index.html': repoBlob(stable192, 'character/index.html') },
+  localFiles: {
+    'character/index.html': readFileSync(path.join(projectRoot, 'character/index.html'), 'utf8')
+      .replace(upstreamWorkshopUtility, localWorkshopUtility)
+  },
+  upstreamFiles: { 'character/index.html': repoBlob(upstream193, 'character/index.html') }
+});
+try {
+  assert.equal(
+    gitText(legacyCharacter193Fixture, ['diff', '--name-only', '--diff-filter=U']),
+    'character/index.html',
+    'legacy local workshop utility reproduces the real 1.9.3 character conflict'
+  );
+} finally {
+  await rm(legacyCharacter193Fixture, { recursive: true, force: true });
+}
+const character193Fixture = await createConflictFixture({
+  baseFiles: { 'character/index.html': repoBlob(stable192, 'character/index.html') },
+  localFiles: { 'character/index.html': readFileSync(path.join(projectRoot, 'character/index.html')) },
+  upstreamFiles: { 'character/index.html': repoBlob(upstream193, 'character/index.html') }
+});
+try {
+  assert.equal(
+    gitText(character193Fixture, ['diff', '--name-only', '--diff-filter=U']),
+    '',
+    'migrated workshop safe-area utility creates no real 1.9.3 character conflict'
+  );
+  const mergedCharacter193 = await readFile(path.join(character193Fixture, 'character/index.html'), 'utf8');
+  assert.equal(
+    normalize(mergedCharacter193),
+    normalize(transformOverlayBlob('character/index.html', upstreamCharacter193)),
+    'clean character merge retains upstream 1.9.3 plus registered fork hooks'
+  );
+  assert.doesNotMatch(
+    mergedCharacter193,
+    /class="workshop-input-panel [^"]*--safe-area-inset-bottom/,
+    'real 1.9.3 character merge must not restore the retired local utility'
+  );
+  assert.equal(
+    transformOverlayBlob('character/index.html', mergedCharacter193),
+    mergedCharacter193,
+    'real 1.9.3 character merge second reapply'
+  );
+  console.log('Real upstream 1.9.3 character safe-area clean merge + second reapply proof: PASS');
+} finally {
+  await rm(character193Fixture, { recursive: true, force: true });
+}
+
 const legacyDiagnosticBaseline = '9ce9ef0ff93fa4816fea309cfd541b5b33fca338';
 const endpointOnlyApi = normalize(sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', 'assets/js/api-utils.js'));
 assert.equal(transformOverlayText('assets/js/api-utils.js', endpointOnlyApi), endpointOnlyApi, 'endpoint-only API overlay is identity');

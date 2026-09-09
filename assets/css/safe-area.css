@@ -53,6 +53,13 @@
     padding-left: calc(1rem + var(--safe-left));
 }
 
+/* Preserve Tailwind's md:pb-24 baseline while keeping unusually large insets safe. */
+@media (min-width: 768px) {
+    #app .workshop-input-panel {
+        padding-bottom: max(6rem, calc(1rem + var(--safe-bottom-effective)));
+    }
+}
+
 #app .drawer-side .menu {
     padding-top: calc(1rem + var(--safe-top));
     padding-right: calc(1rem + var(--safe-right));

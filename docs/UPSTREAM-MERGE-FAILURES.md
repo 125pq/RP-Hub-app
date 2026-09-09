@@ -16,6 +16,46 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-09：上游 `1.9.3`（`4aef0bb`）角色工坊安全区冲突面迁移
+
+### 现场与根因
+
+- 本步骤本地父提交为 `b18f3ec`，共同稳定基线为
+  `1.9.2/a83d907497106e401f0988b29b653422159e4c7f`，稳定 Release 目标仍为
+  `1.9.3/4aef0bb46c9b3370faba174a20435e5989799727`。
+- 首个有效错误（最小真实复现）为 `CONFLICT (content): Merge conflict in
+  character/index.html`；`git diff --name-only --diff-filter=U` 只列出该文件，证明冲突由
+  panel class 的双边改动触发，而不是后续的报告性错误。
+- 真实预览中的 `character/index.html` 冲突落在角色工坊底部 input panel 的 class：本地把上游
+  `pb-[max(1rem,env(safe-area-inset-bottom))]` 改成了内嵌 native CSS variable fallback 的长 utility，
+  上游 1.9.3 同时在同一行删除 `md:pb-24`，因此 Git 无法自动判断取舍。安全区样式本来已有稳定的
+  `.workshop-input-panel` 选择器，把 native fallback 重复塞入上游 class 只扩大同步热点。
+
+### 本步取舍与验证
+
+- `character/index.html` 的 panel class 回归逐字一致的上游 1.9.2 标记；补丁在遇到旧本地长 utility
+  时只将其迁回上游 token，对 1.9.3 已删除 `md:pb-24` 的结构保持原样，不向新上游重新插类。
+- 底部安全区由 `assets/css/safe-area.css` 的稳定 `#app .workshop-input-panel` 规则承接：移动宽度
+  使用 `calc(1rem + var(--safe-bottom-effective))`；`768px` 起用
+  `max(6rem, calc(1rem + var(--safe-bottom-effective)))` 保留原 `md:pb-24` 的 6rem 下限并兼容异常大
+  inset。根变量继续是
+  `var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))`，所以 native 明确写入 `0px` 时不会
+  回退到浏览器 env；键盘 class 将 effective bottom 置零，panel 不会重复累计底部 inset。
+- CSS 迁移只接受唯一旧规则或唯一完整新规则；panel class、utility、CSS selector 缺失、漂移或重复
+  都 fail closed。补丁写入路径仍经 `editText` 的逐行 EOL 重建，character 还原只改一行 class；
+  character 与 CSS fixture 覆盖 LF、CRLF、mixed EOL 及二次执行字节幂等。
+- 真实 `1.9.2 -> 当前本地 character -> 1.9.3` 隔离三方合并证明该文件不再产生冲突，最终内容等于
+  1.9.3 加已登记 overlay，且二次重放无变化；这只证明本次 character 安全区热点已经消除，不代表
+  `app.js`、`image###` 或完整树的其余待办已经完成。
+
+### 发布影响与剩余风险
+
+- 本步骤不改版本号，不执行正式上游合并，不 push、dispatch、构建 APK 或创建 Release，也不改变
+  GitHub/Gitee 更新源。CSS `max()` 依赖当前项目已有的现代 Android WebView/浏览器支持；本步骤以
+  静态契约、真实 merge fixture、Web 构建和 dist 校验验证，未做实体设备旋转/键盘视觉检查。
+- 后续仍需缩小 `app.js` 接入面、删除 `image###` 本地差异，并在最终步骤执行真实全树 1.9.3 合并、
+  审查和提交。
+
 ## 2026-09-09：上游 `1.9.3`（`4aef0bb`）流式调度退役
 
 ### 现场与根因

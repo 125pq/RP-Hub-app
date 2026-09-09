@@ -1,4 +1,4 @@
-import { editText, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
+import { countOccurrences, editText, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
 
 const category = 'webview-layout-safe-area';
 
@@ -73,6 +73,45 @@ export function patchSidebarHeaderPadding(source) {
   return source.slice(0, footerAnchor) + expandedSidebarHeaderPadding + source.slice(footerAnchor);
 }
 
+const workshopInputPanelRule = `#app .workshop-input-panel {
+    padding-right: calc(1rem + var(--safe-right));
+    padding-bottom: calc(1rem + var(--safe-bottom-effective));
+    padding-left: calc(1rem + var(--safe-left));
+}`;
+
+const workshopInputPanelRules = `${workshopInputPanelRule}
+
+/* Preserve Tailwind's md:pb-24 baseline while keeping unusually large insets safe. */
+@media (min-width: 768px) {
+    #app .workshop-input-panel {
+        padding-bottom: max(6rem, calc(1rem + var(--safe-bottom-effective)));
+    }
+}`;
+
+function maskComments(source, pattern) {
+  return source.replace(pattern, comment => comment.replace(/[^\r\n]/g, ' '));
+}
+
+export function patchWorkshopInputPanelSafeArea(source) {
+  const commentPattern = /\/\*[\s\S]*?\*\//g;
+  const anchorSource = maskComments(source, commentPattern);
+  const selectorCount = (
+    anchorSource.match(/#app \.workshop-input-panel\s*\{/g) || []
+  ).length;
+  if (anchorSource.includes(maskComments(workshopInputPanelRules, commentPattern))) {
+    if (selectorCount !== 2) {
+      throw new Error(`Expected two character workshop input CSS rules, found ${selectorCount}`);
+    }
+    return source;
+  }
+  const legacyCount = countOccurrences(anchorSource, workshopInputPanelRule);
+  if (legacyCount !== 1 || selectorCount !== 1) {
+    throw new Error(`Expected one legacy character workshop input CSS rule, found ${legacyCount}; selectors ${selectorCount}`);
+  }
+  const legacyIndex = anchorSource.indexOf(workshopInputPanelRule);
+  return source.slice(0, legacyIndex) + workshopInputPanelRules + source.slice(legacyIndex + workshopInputPanelRule.length);
+}
+
 function patchIndexToast(source) {
   const target = `        <div\n            class="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none items-center">`;
   const replacement = `        <div data-safe-area="toast"\n            class="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none items-center">`;
@@ -137,24 +176,45 @@ export function patchSquareHostSafeArea(source) {
 export function patchSafeAreaCharacter(source) {
   source = patchViewportMeta(source, 'character/index.html', false);
   source = patchStylesheet(source, '../assets/css/safe-area.css', 'character/index.html');
-  source = replaceOnce(
-    source,
-    '                    padding-bottom: calc(7rem + env(safe-area-inset-bottom));',
-    '                    padding-bottom: calc(7rem + var(--safe-bottom-effective));',
-    'character workshop scroll safe area'
-  );
-  source = replaceOnce(
-    source,
-    '                    padding-bottom: max(1rem, env(safe-area-inset-bottom));',
-    '                    padding-bottom: calc(1rem + var(--safe-bottom-effective));',
-    'character workshop input safe area'
-  );
-  return replaceOnce(
-    source,
-    'pb-[max(1rem,env(safe-area-inset-bottom))]',
-    'pb-[max(1rem,var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))]',
-    'character workshop input utility safe area'
-  );
+  for (const [before, after, label] of [
+    [
+      '                    padding-bottom: calc(7rem + env(safe-area-inset-bottom));',
+      '                    padding-bottom: calc(7rem + var(--safe-bottom-effective));',
+      'character workshop scroll safe area'
+    ],
+    [
+      '                    padding-bottom: max(1rem, env(safe-area-inset-bottom));',
+      '                    padding-bottom: calc(1rem + var(--safe-bottom-effective));',
+      'character workshop input safe area'
+    ]
+  ]) {
+    const beforeCount = countOccurrences(source, before);
+    const afterCount = countOccurrences(source, after);
+    if (beforeCount + afterCount !== 1) {
+      throw new Error(`Expected one ${label} anchor, found upstream ${beforeCount}; patched ${afterCount}`);
+    }
+    if (beforeCount === 1) source = source.replace(before, after);
+  }
+  const localUtility = 'pb-[max(1rem,var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))]';
+  const upstreamUtility = 'pb-[max(1rem,env(safe-area-inset-bottom))]';
+  const anchorSource = maskComments(source, /<!--[\s\S]*?-->/g);
+  const panelClasses = [...anchorSource.matchAll(/(?<!:)\bclass="([^"]*)"/g)]
+    .filter(match => match[1].split(/\s+/).includes('workshop-input-panel'));
+  if (panelClasses.length !== 1) {
+    throw new Error(`Expected one character workshop input panel class, found ${panelClasses.length}`);
+  }
+  const panelClass = panelClasses[0];
+  const localCount = countOccurrences(panelClass[1], localUtility);
+  const upstreamCount = countOccurrences(panelClass[1], upstreamUtility);
+  const globalUtilityCount = countOccurrences(anchorSource, localUtility) + countOccurrences(anchorSource, upstreamUtility);
+  if (localCount + upstreamCount !== 1 || globalUtilityCount !== 1) {
+    throw new Error(`Expected one character workshop input utility, found local ${localCount}; upstream ${upstreamCount}`);
+  }
+  if (localCount !== 1) return source;
+  const classValueOffset = panelClass[0].indexOf(panelClass[1]);
+  const utilityOffset = classValueOffset + panelClass[1].indexOf(localUtility);
+  const utilityStart = panelClass.index + utilityOffset;
+  return source.slice(0, utilityStart) + upstreamUtility + source.slice(utilityStart + localUtility.length);
 }
 
 export async function applySafeAreaHooks() {
@@ -168,7 +228,9 @@ export async function applySafeAreaHooks() {
   }));
   for (const file of ['assets/css/safe-area.css', 'assets/js/safe-area.js']) {
     changes.push(await editText(file, category, source => (
-      file === 'assets/css/safe-area.css' ? patchSidebarHeaderPadding(source) : source
+      file === 'assets/css/safe-area.css'
+        ? patchWorkshopInputPanelSafeArea(patchSidebarHeaderPadding(source))
+        : source
     )));
   }
   return changes.filter(Boolean);

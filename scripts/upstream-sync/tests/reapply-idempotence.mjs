@@ -9,6 +9,7 @@ const files = [
   'assets/js/core-utils.js',
   'assets/js/ui-components.js',
   'assets/js/runtime-services.js',
+  'assets/css/safe-area.css',
   'assets/css/styles.css',
   'character/index.html',
   'novel/index.html'
