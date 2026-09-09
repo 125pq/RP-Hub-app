@@ -61,127 +61,12 @@
 
     const requestJson = options => withApiResponse(options, async response => parsePayload(await response.text(), response.status));
 
-    const STREAM_MAX_VISIBLE_LATENCY_MS = 350;
-    const STREAM_MIN_VISIBLE_GAP_MS = 80;
-
-    const createStreamingBoundaryTracker = () => {
-        let insideFence = false;
-        let fenceMarker = '';
-        let insideThink = false;
-        let insideCot = false;
-        let linePrefix = '';
-        let fenceHandledOnLine = false;
-        let recent = '';
-        let previousWasNewline = false;
-
-        const scan = (text) => {
-            let paragraphBoundary = false;
-            let semanticBlockClosed = false;
-
-            for (const char of String(text || '')) {
-                if (char === '\n') {
-                    if (previousWasNewline && !insideFence && !insideThink && !insideCot) {
-                        paragraphBoundary = true;
-                    }
-                    previousWasNewline = true;
-                    linePrefix = '';
-                    fenceHandledOnLine = false;
-                } else if (char !== '\r') {
-                    previousWasNewline = false;
-                    if (linePrefix.length < 8) linePrefix += char;
-                }
-
-                if (!fenceHandledOnLine && char !== '\r' && char !== '\n') {
-                    const fence = linePrefix.match(/^ {0,3}(`{3,}|~{3,})$/);
-                    if (fence) {
-                        fenceHandledOnLine = true;
-                        const marker = fence[1][0];
-                        if (!insideFence) {
-                            insideFence = true;
-                            fenceMarker = marker;
-                        } else if (marker === fenceMarker) {
-                            insideFence = false;
-                            fenceMarker = '';
-                        }
-                    }
-                }
-
-                recent = `${recent}${char}`.slice(-16).toLowerCase();
-                if (insideFence) continue;
-                if (recent.endsWith('<think>')) insideThink = true;
-                if (recent.endsWith('<cot>')) insideCot = true;
-                if (recent.endsWith('</think>')) {
-                    insideThink = false;
-                    semanticBlockClosed = true;
-                }
-                if (recent.endsWith('</cot>')) {
-                    insideCot = false;
-                    semanticBlockClosed = true;
-                }
-            }
-
-            return paragraphBoundary || semanticBlockClosed;
-        };
-
-        return { scan };
-    };
-
-    const getStreamMaxVisibleLatency = () => STREAM_MAX_VISIBLE_LATENCY_MS;
     const requestChatCompletion = async (options) => {
         const startedAt = Date.now();
         const result = { content: '', reasoning: '', usage: null, finishReason: null, isStream: false };
         let receivedPayload = false;
         let pendingContent = '';
         let pendingReasoning = '';
-        let flushPromise = Promise.resolve();
-        let publishTimer = null;
-        let publishTimerDueAt = null;
-        let publishTimerReason = null;
-        let pendingSince = null;
-        let paragraphBoundaryPending = false;
-        let lastPublishAt = -Infinity;
-        const contentBoundaries = createStreamingBoundaryTracker();
-        const reasoningBoundaries = createStreamingBoundaryTracker();
-        const maxVisibleLatencyMs = getStreamMaxVisibleLatency();
-
-        const clearPublishTimer = () => {
-            if (publishTimer !== null) clearTimeout(publishTimer);
-            publishTimer = null;
-            publishTimerDueAt = null;
-            publishTimerReason = null;
-        };
-        const flushPending = (reason) => {
-            if (!result.isStream || (!pendingContent && !pendingReasoning)) return;
-            clearPublishTimer();
-            const delta = { content: pendingContent, reasoning: pendingReasoning };
-            pendingContent = pendingReasoning = '';
-            pendingSince = null;
-            paragraphBoundaryPending = false;
-            lastPublishAt = performance.now();
-            flushPromise = flushPromise.then(() => options.onDelta?.(delta));
-        };
-        const schedulePublish = () => {
-            if (pendingSince === null) return;
-            const currentTime = performance.now();
-            const maxLatencyDueAt = pendingSince + maxVisibleLatencyMs;
-            const paragraphDueAt = paragraphBoundaryPending
-                ? Math.max(currentTime, lastPublishAt + STREAM_MIN_VISIBLE_GAP_MS)
-                : Infinity;
-            const reason = paragraphDueAt <= maxLatencyDueAt ? 'paragraph' : 'max-latency';
-            const dueAt = Math.min(paragraphDueAt, maxLatencyDueAt);
-            if (dueAt <= currentTime) { flushPending(reason); return; }
-            if (publishTimer !== null && publishTimerDueAt <= dueAt) return;
-            clearPublishTimer();
-            publishTimerDueAt = dueAt;
-            publishTimerReason = reason;
-            publishTimer = setTimeout(() => {
-                const scheduledReason = publishTimerReason;
-                publishTimer = null;
-                publishTimerDueAt = null;
-                publishTimerReason = null;
-                flushPending(scheduledReason);
-            }, Math.max(0, dueAt - currentTime));
-        };
         const accept = data => {
             receivedPayload = true;
             result.usage = getApiUsagePayload(data) || result.usage;
@@ -194,10 +79,6 @@
             result.finishReason = choice.finish_reason ?? result.finishReason;
             pendingContent += content;
             pendingReasoning += reasoning;
-            if (!result.isStream || (!content && !reasoning)) return;
-            if (pendingSince === null) pendingSince = performance.now();
-            if (contentBoundaries.scan(content) || reasoningBoundaries.scan(reasoning)) paragraphBoundaryPending = true;
-            schedulePublish();
         };
         try {
             return await withApiResponse({ ...options, body: {
@@ -219,6 +100,15 @@
                 let buffer = '';
                 let eventLines = [];
                 let done = false;
+                let flushPromise = Promise.resolve();
+                const flush = () => {
+                    if (!result.isStream || (!pendingContent && !pendingReasoning)) return;
+                    const delta = { content: pendingContent, reasoning: pendingReasoning };
+                    pendingContent = pendingReasoning = '';
+                    flushPromise = flushPromise.then(() => options.onDelta?.(delta));
+                    // 立即挂上处理器，最终仍由 await 抛出回调错误。
+                    flushPromise.catch(() => {});
+                };
                 const dispatch = () => {
                     if (!eventLines.length) return;
                     const payload = eventLines.join('\n');
@@ -245,6 +135,7 @@
                 };
                 const reader = rawText === undefined ? response.body.getReader() : null;
                 const decoder = new TextDecoder();
+                const interval = setInterval(flush, 60);
                 try {
                     if (reader) {
                         while (!done) {
@@ -258,19 +149,15 @@
                     // 兼容缺失最后换行的完整 JSON；损坏 JSON 必须报错，不能伪装成功。
                     if (!done) { readLine(buffer.replace(/\r$/, '')); dispatch(); }
                     if (!receivedPayload) throw new Error('API 未返回有效的模型响应');
-                    flushPending('final');
-                    await flushPromise;
                     return result;
-                } catch (error) {
-                    flushPending(error?.name === 'AbortError' ? 'abort' : 'error');
-                    await flushPromise;
-                    throw error;
                 } finally {
-                    clearPublishTimer();
+                    clearInterval(interval);
                     if (reader) {
                         try { await reader.cancel(); } catch (_) { }
                         reader.releaseLock();
                     }
+                    flush();
+                    await flushPromise;
                 }
             });
         } finally {

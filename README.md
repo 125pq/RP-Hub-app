@@ -25,7 +25,7 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 - 角色卡生成、万相广场与“墨韵 · 造梦”在线工具
 - Android / Capacitor 原生封装，支持安全区、系统返回、Share、外部 Browser 与系统下载
 - 通过 Android Storage Access Framework（SAF）导入导出文件，无需广泛存储权限
-- paragraph-aware 流式渲染与离屏复杂角色卡动画暂停，改善长回复和长聊天滚动性能
+- 离屏复杂角色卡动画暂停，改善长聊天滚动性能
 
 ## 快速开始 (Quick Start)
 

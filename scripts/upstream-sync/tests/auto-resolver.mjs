@@ -535,7 +535,7 @@ const real192Paths = [
   'index.html',
   'novel/index.html'
 ];
-const real192ConflictPaths = ['assets/js/app.js', 'assets/js/runtime-services.js', 'index.html', 'novel/index.html'];
+const real192ConflictPaths = ['assets/js/app.js', 'index.html', 'novel/index.html'];
 const real192Fixture = await createConflictFixture({
   baseFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, repoBlob('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath)])),
   localFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, relativePath === 'assets/js/app.js'
@@ -547,7 +547,7 @@ try {
   assert.deepEqual(
     gitText(real192Fixture, ['diff', '--name-only', '--diff-filter=U']).split('\n'),
     real192ConflictPaths,
-    'real upstream 1.9.2 fixture must expose four canonical content conflicts'
+    'retired legacy stream scheduler removes the runtime-services 1.9.2 conflict'
   );
   for (const relativePath of real192Paths.filter(relativePath => relativePath !== 'assets/js/app.js')) {
     assert.equal(
@@ -599,10 +599,12 @@ try {
 
   const upstreamApi192 = normalize(sourceText(stable192, 'assets/js/api-utils.js'));
   const patchedApi192 = transformOverlayText('assets/js/api-utils.js', upstreamApi192);
-  assert.equal(transformOverlayText('assets/js/api-utils.js', patchedApi192), patchedApi192, '1.9.2 API migration overlay idempotence');
+  assert.equal(patchedApi192, upstreamApi192, '1.9.2 API overlay is identity');
+  assert.equal(normalize(readFileSync(path.join(projectRoot, 'assets/js/api-utils.js'), 'utf8')), upstreamApi192, 'current API runtime is canonical stable 1.9.2');
+  assert.equal(transformOverlayText('assets/js/api-utils.js', patchedApi192), patchedApi192, '1.9.2 API identity overlay idempotence');
   assert.throws(
     () => transformOverlayText('assets/js/api-utils.js', upstreamApi192.replace('const accept = data => {', 'const acceptDrifted = data => {')),
-    /API stream request state|result content accumulation/,
+    /stable 1\.9\.2 stream accept handler/,
     '1.9.2 API request anchor drift must fail closed'
   );
   const patchedCore192 = transformOverlayText('assets/js/core-utils.js', normalize(sourceText(stable192, 'assets/js/core-utils.js')));
@@ -615,13 +617,75 @@ try {
     /safe sidebar footer/,
     '1.9.2 UI duplicate marker must fail closed'
   );
-  console.log('Real upstream 1.9.2 (a83d907) canonical conflict resolver + API migration + second reapply proof: PASS');
+  console.log('Real upstream 1.9.2 (a83d907) canonical conflict resolver + native API identity + second reapply proof: PASS');
 } finally {
   await rm(real192Fixture, { recursive: true, force: true });
 }
 
 const upstream193 = '4aef0bb46c9b3370faba174a20435e5989799727';
 const legacyDiagnosticBaseline = '9ce9ef0ff93fa4816fea309cfd541b5b33fca338';
+const endpointOnlyApi = normalize(sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', 'assets/js/api-utils.js'));
+assert.equal(transformOverlayText('assets/js/api-utils.js', endpointOnlyApi), endpointOnlyApi, 'endpoint-only API overlay is identity');
+const endpointWithChangedHeader = endpointOnlyApi.replace(
+  '// Shared API endpoint helpers used by the main app and the novel page.',
+  '// Endpoint construction shared by browser entry points.'
+);
+assert.equal(
+  transformOverlayText('assets/js/api-utils.js', endpointWithChangedHeader),
+  endpointWithChangedHeader,
+  'endpoint-only API overlay allows header wording changes'
+);
+const endpointWithTransportComment = endpointOnlyApi.replace(
+  '// Shared API endpoint helpers used by the main app and the novel page.',
+  '// requestChatCompletion is intentionally absent; window.RPHubApiClient is provided by later versions.'
+);
+assert.equal(
+  transformOverlayText('assets/js/api-utils.js', endpointWithTransportComment),
+  endpointWithTransportComment,
+  'endpoint-only API overlay ignores transport names in comments'
+);
+assert.throws(
+  () => transformOverlayText('assets/js/api-utils.js', endpointOnlyApi.replace('const apiRoot =', 'const changedApiRoot =')),
+  /endpoint helper implementation/,
+  'endpoint helper implementation drift is rejected'
+);
+assert.throws(
+  () => transformOverlayText('assets/js/api-utils.js', endpointOnlyApi.replace(
+    '    window.RPHubApiUtils = Object.freeze({ buildApiEndpoint });',
+    '    window.RPHubApiUtils = Object.freeze({ buildApiEndpoint });\n    window.RPHubApiUtils = Object.freeze({ buildApiEndpoint });'
+  )),
+  /Expected 1 endpoint helper export, found 2/,
+  'duplicate endpoint helper export is rejected'
+);
+assert.throws(
+  () => transformOverlayText(
+    'assets/js/api-utils.js',
+    endpointOnlyApi.replace('    window.RPHubApiUtils = Object.freeze({ buildApiEndpoint });\n', '')
+  ),
+  /Expected 1 endpoint helper export, found 0/,
+  'missing endpoint helper export is rejected'
+);
+assert.throws(
+  () => transformOverlayText(
+    'assets/js/api-utils.js',
+    `${endpointOnlyApi}\nconst requestChatCompletion = async options => options;\n`
+  ),
+  /endpoint-only chat transport declarations/,
+  'endpoint-only API rejects a real chat transport declaration'
+);
+assert.throws(
+  () => transformOverlayText(
+    'assets/js/api-utils.js',
+    `${endpointOnlyApi}\nwindow.RPHubApiClient = Object.freeze({});\n`
+  ),
+  /endpoint-only API client exports/,
+  'endpoint-only API rejects a real API client export'
+);
+assert.throws(
+  () => transformOverlayText('assets/js/api-utils.js', `${endpointOnlyApi}\nconst schedulePublish = () => {};\n`),
+  /Retired local stream scheduler marker remains/,
+  'endpoint-only API rejects retired local scheduler markers'
+);
 const legacyDiagnosticApp = normalize(sourceText(legacyDiagnosticBaseline, 'assets/js/app.js'));
 const cleanDiagnosticApp = removeAppDiagnostics(legacyDiagnosticApp);
 assert.equal(cleanDiagnosticApp, normalize(readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8')), 'complete legacy app diagnostics are removed exactly');
@@ -649,15 +713,30 @@ assert.throws(
 );
 const upstreamApi193 = sourceText(upstream193, 'assets/js/api-utils.js');
 const patchedApi193 = transformOverlayBlob('assets/js/api-utils.js', upstreamApi193);
+const retiredScheduledApi = sourceText('a96467eaa27412dae4d3443b5db5b654bc23fcd0', 'assets/js/api-utils.js');
+assert.throws(
+  () => transformOverlayBlob('assets/js/api-utils.js', retiredScheduledApi),
+  /Retired local stream scheduler marker remains/,
+  'retired paragraph scheduler is not accepted as a canonical API transport'
+);
+assert.equal(patchedApi193, upstreamApi193, '1.9.3 API overlay is byte-for-byte identity');
 assert.match(patchedApi193, /const requestChatCompletionOnce = async \(options, attempt\) => \{/, '1.9.3 retry implementation survives overlay');
 assert.match(patchedApi193, /toolCalls: toolSnapshot\(\)/, '1.9.3 streamed tool calls survive overlay');
-assert.match(patchedApi193, /const schedulePublish = \(accepted\) => \{/, '1.9.3 paragraph scheduler is installed');
-assert.doesNotMatch(patchedApi193, /__RPH_PERF__|setInterval\(flush, 60\)/, '1.9.3 overlay omits diagnostics and fixed interval');
+assert.match(patchedApi193, /const interval = setInterval\(flush, 60\)/, '1.9.3 upstream fixed stream interval survives overlay');
+assert.doesNotMatch(patchedApi193, /__RPH_PERF__/, '1.9.3 overlay omits retired diagnostics');
 assert.equal(transformOverlayBlob('assets/js/api-utils.js', patchedApi193), patchedApi193, '1.9.3 API overlay second pass');
 assert.throws(
   () => transformOverlayBlob('assets/js/api-utils.js', upstreamApi193.replace('                const flush = () => {', '                const flush = async () => {')),
-  /1\.9\.3 API stream flush scheduler/,
-  '1.9.3 API stream scheduler drift is rejected'
+  /stable 1\.9\.3 stream flush implementation/,
+  '1.9.3 upstream stream implementation drift is rejected'
+);
+assert.throws(
+  () => transformOverlayBlob('assets/js/api-utils.js', upstreamApi193.replace(
+    '                const interval = setInterval(flush, 60);',
+    '                const interval = setInterval(flush, 60);\n                const interval = setInterval(flush, 60);'
+  )),
+  /Expected 1 upstream fixed stream interval, found 2/,
+  'duplicate upstream timer anchor is rejected'
 );
 for (const variant of [
   upstreamApi193.replace(/\r\n/g, '\n'),
@@ -672,24 +751,27 @@ for (const variant of [
 
 const api193FixtureOptions = {
   baseFiles: { 'assets/js/api-utils.js': repoBlob(stable192, 'assets/js/api-utils.js') },
-  localFiles: { 'assets/js/api-utils.js': readFileSync(path.join(projectRoot, 'assets/js/api-utils.js')) },
+  localFiles: { '.local-marker': 'fork-only change\n' },
   upstreamFiles: { 'assets/js/api-utils.js': repoBlob(upstream193, 'assets/js/api-utils.js') }
 };
 const api193Fixture = await createConflictFixture(api193FixtureOptions);
 try {
-  assert.equal(gitText(api193Fixture, ['diff', '--name-only', '--diff-filter=U']), 'assets/js/api-utils.js');
-  assert.deepEqual(await resolveAutoConflicts({ cwd: api193Fixture }), ['assets/js/api-utils.js']);
+  assert.equal(gitText(api193Fixture, ['diff', '--name-only', '--diff-filter=U']), '', 'retired local API delta creates no 1.9.3 conflict');
   const actual = await readFile(path.join(api193Fixture, 'assets/js/api-utils.js'), 'utf8');
-  assert.equal(normalize(actual), normalize(patchedApi193), 'real 1.9.3 API conflict output');
+  assert.equal(normalize(actual), normalize(upstreamApi193), 'clean merge takes the real 1.9.3 API transport unchanged');
 } finally {
   await rm(api193Fixture, { recursive: true, force: true });
 }
 
 const unregisteredApi193Fixture = await createConflictFixture({
-  ...api193FixtureOptions,
+  baseFiles: api193FixtureOptions.baseFiles,
+  upstreamFiles: api193FixtureOptions.upstreamFiles,
   localFiles: {
     'assets/js/api-utils.js': readFileSync(path.join(projectRoot, 'assets/js/api-utils.js'), 'utf8')
-      .replace('// Shared model API transport', '// unregistered local delta\n// Shared model API transport')
+      .replace(
+        '    const requestChatCompletion = async (options) => {',
+        '    const requestChatCompletionUnregistered = async (options) => {'
+      )
   }
 });
 try {

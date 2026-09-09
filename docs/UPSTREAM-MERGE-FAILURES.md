@@ -16,6 +16,54 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-09：上游 `1.9.3`（`4aef0bb`）流式调度退役
+
+### 现场与根因
+
+- 本步骤本地父提交为 `a96467eaa27412dae4d3443b5db5b654bc23fcd0`，共同稳定基线为
+  `1.9.2/a83d907497106e401f0988b29b653422159e4c7f`，稳定 Release 目标仍为
+  `1.9.3/4aef0bb46c9b3370faba174a20435e5989799727`；没有改用移动的 `upstream/main`。
+- 真实预览合并中的 `assets/js/api-utils.js` 冲突首错仍为
+  `Unsupported endpoint-only API module drift`。本地从 1.9.2 API 的 `accept`、flush 与完成路径
+  周围插入了段落边界扫描、80 ms 最小发布间隔和 350 ms 最大可见延迟；上游 1.9.3 正在同一区域
+  加入 `requestChatCompletionOnce`、空工具回复重试、tool calls 和 finish 收尾，两边无法安全套用旧锚点。
+
+### 本步取舍与验证
+
+- 原方案基准提交为 `37395873c13861e22f260761193b59622556db31`，实现提交为
+  `4c7a4daf10b95233958e6e4244bf85af1db1c098`，并在 1.9.2 适配提交
+  `81fad6eaaddf20658d5c173c328657aa5e402780` 中迁移到 API 模块。它只扫描新增 delta：普通正文
+  的 LF/CRLF 空行触发段落边界，fenced code、`<think>`、`<cot>` 内空行被保护；安全边界最早
+  每 80 ms 发布一次，无边界时最迟 350 ms 发布，normal final、abort 和 error 均强制 flush，
+  并用单 timer 与串行 `flushPromise` 避免重叠。目标是不改变最终文本字节，同时减少 Markdown、
+  正则、净化与 Vue DOM 的中间重绘。
+- 退役本地段落感知调度，不以另一套本地调度替代。当前 1.9.2 的 `api-utils.js` 恢复为稳定上游
+  原生 60 ms interval + finally flush；对真实 1.9.3 blob 的 API overlay 为逐字节 identity，完整保留
+  上游重试、tool calls、finish、timer、abort 和 error 行为，不把 1.9.2 实现拼入 1.9.3。
+- overlay 只验证已审查的 endpoint-only、1.9.2 和 1.9.3 transport 形态并原样返回；关键 flush、
+  interval、清理、重试或工具调用锚点缺失时 fail closed，endpoint-only 允许不改变 helper/export
+  语义的上游注释漂移。真实 1.9.2→本地→1.9.3 隔离 fixture
+  证明 API 文件不再产生冲突；与上游同一区域重叠的未注册本地修改仍被 resolver proof 拒绝。
+- 删除已失去生产接线且绑定旧调度参数的浏览器 performance benchmark、Android runner 和 fixture
+  contract；`test:performance` 保留离屏生命周期与上游流式 transport 行为回归。本条记录只保存
+  历史决策，不参与自动重放。
+- 验证覆盖完整 `npm run test:upstream-sync`、`npm run test:performance`、`npm run test:syntax`、
+  EOL/fail-closed fixture、`git diff --check` 和连续 reapply；第二次必须明确
+  `REAPPLY_CHANGED_FILES=0`。本步骤没有修改 Web 入口，无需重建 dist。
+
+### 发布影响与剩余风险
+
+- 本步骤不改版本号，不正式合并 1.9.3，不 push、dispatch、构建 APK 或创建 Release，也不改变
+  GitHub/Gitee 更新源。后续步骤仍需处理 `app.js`、safe-area 和 `image###` 差异，并在最终全树
+  隔离合并中重新验证冲突集合。
+- 退役会放弃段落边界带来的中间重绘减少，长回复可能恢复为上游固定周期刷新；这是为降低同步
+  热点冲突而接受的性能取舍。若以后恢复，可用
+  `git show 4c7a4daf:docs/STREAMING_FLUSH_OPTIMIZATION.md` 查看原完整设备报告，并用
+  `git show 4c7a4daf -- assets/js/runtime-services.js` 查看最初实现；只能以届时稳定上游为基线
+  重新测量与设计，优先隔离在 transport 外，不能复用已删除的自动补丁，也不能把 1.9.2 请求
+  实现复制进新版本。恢复前必须重新覆盖 tool calls、重试、finish、final/abort/error、异步回调、
+  timer 清理、真实稳定 blob、冲突 fixture、EOL 和二次 reapply。
+
 ## 2026-09-08：上游 `1.9.3`（`4aef0bb`）API 重构与性能诊断退役
 
 ### 现场与根因
