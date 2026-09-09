@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { projectRoot } from '../lib.mjs';
+import { dominantEol, projectRoot, rebuildWithOriginalEol } from '../lib.mjs';
 import { resolveAutoConflicts } from '../auto-resolver.mjs';
 import { mergeWithAutoResolver } from '../sync-orchestration.mjs';
 import { transformOverlayBlob, transformOverlayText } from '../overlay-transformers.mjs';
@@ -50,6 +50,43 @@ function fixtureLogger() {
 const repoBlob = (commit, relativePath) => git(projectRoot, ['cat-file', 'blob', `${commit}:${relativePath}`]);
 const sourceText = (commit, relativePath) => repoBlob(commit, relativePath).toString('utf8');
 const normalize = value => value.replace(/\r\n/g, '\n');
+const preMergeAppRevision = '700e776';
+const legacyChatImporterDeclaration = [
+  '        const importCharacterChatJsonl = window.RPHubChatImport.createChatImporter({',
+  '            currentCharacterIndex,',
+  '            currentCharacter,',
+  '            showToast,',
+  '            stopCurrentCharacterWork,',
+  '            getCurrentStoryBranchScopeId,',
+  '            setApplyingCharacterScopedData: (value) => { _isApplyingCharacterScopedData = value; },',
+  '            storyBranches,',
+  '            activeStoryBranchId,',
+  '            selectedStoryBranchId,',
+  '            resetChatRenderWindow,',
+  '            chatHistory,',
+  '            prepareLoadedChatHistoryForDisplay,',
+  '            createInitialChatHistory,',
+  '            loadCharacterMemories,',
+  '            loadGlobalUiTemplateRuntimeForCharacter,',
+  '            clearStoryBranchTransientContext,',
+  '            finishApplyingCharacterScopedData,',
+  '            currentView,',
+  '            scrollChatToBottom,',
+  '            updateCurrentStoryBranchSummary,',
+  '            saveStoryBranchesForCharacter',
+  '        });'
+].join('\n');
+function buildRelocatedAppFromPreMergeRevision() {
+  const source = sourceText(preMergeAppRevision, 'assets/js/app.js');
+  const normalized = normalize(source);
+  assert.equal(normalized.split(legacyChatImporterDeclaration).length - 1, 1, 'pre-merge app has one reviewed importer declaration');
+  const withoutDeclaration = normalized.replace(`${legacyChatImporterDeclaration}\n\n`, '');
+  const returnAnchor = '\n        return {\n';
+  assert.equal(withoutDeclaration.split(returnAnchor).length - 1, 1, 'pre-merge app has one setup return anchor');
+  const relocated = withoutDeclaration.replace(returnAnchor, `\n${legacyChatImporterDeclaration}\n${returnAnchor}`);
+  assert.notEqual(relocated, normalized, 'pre-merge app importer declaration relocation changes the fixture');
+  return rebuildWithOriginalEol(source, relocated, dominantEol(source));
+}
 const squareFrameAnchor = `<div v-if="currentView === 'square'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
 const squareFrameExpected = `<div v-if="currentView === 'square'" data-safe-area="square-frame"
                 class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
@@ -70,11 +107,16 @@ function assertBlobProof(relativePath) {
   }
 }
 
-async function createConflictFixture({ localFiles, upstreamFiles, baseFiles = localFiles, startMerge = true }) {
+async function createConflictFixture({ localFiles, upstreamFiles, baseFiles = localFiles, startMerge = true, preserveEol = false }) {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'rphub-auto-resolver-'));
   const config = [['user.name', 'Resolver Test'], ['user.email', 'resolver@example.test']];
   git(fixture, ['init', '-q', '-b', 'main']);
   for (const [key, value] of config) git(fixture, ['config', key, value]);
+  if (preserveEol) {
+    // Preserve upstream blob bytes so CRLF/LF fixtures exercise the same
+    // conflict shape as the real repository (global autocrlf must not rewrite it).
+    git(fixture, ['config', 'core.autocrlf', 'false']);
+  }
   const initialFiles = Object.keys(baseFiles).length > 0 ? baseFiles : { '.fixture-base': '' };
   const writeFixtureFiles = async files => {
     for (const [relativePath, content] of Object.entries(files)) {
@@ -734,6 +776,37 @@ try {
   await rm(character193Fixture, { recursive: true, force: true });
 }
 
+const app193Fixture = await createConflictFixture({
+  baseFiles: { 'assets/js/app.js': repoBlob(stable192, 'assets/js/app.js') },
+  localFiles: { 'assets/js/app.js': buildRelocatedAppFromPreMergeRevision() },
+  upstreamFiles: { 'assets/js/app.js': repoBlob(upstream193, 'assets/js/app.js') },
+  preserveEol: true
+});
+try {
+  assert.equal(gitText(app193Fixture, ['diff', '--name-only', '--diff-filter=U']), '', 'relocated importer cleanly merges with upstream 1.9.3');
+  const mergedApp193 = normalize(await readFile(path.join(app193Fixture, 'assets/js/app.js'), 'utf8'));
+  assert.equal((mergedApp193.match(/importCharacterChatJsonl/g) || []).length, 2, 'merged app keeps one importer declaration and call');
+  assert.match(
+    mergedApp193,
+    /if \(file\.name\.toLowerCase\(\)\.endsWith\('\.jsonl'\)\) \{\n\s+importCharacterChatJsonl\(file\)\.catch\(/,
+    'merged app delegates JSONL import to the existing streaming module'
+  );
+  assert.doesNotMatch(
+    mergedApp193,
+    /const records = String\(e\.target\.result \|\| ''\)[\s\S]*?reader\.readAsText\(file\);/,
+    'merged app does not retain the upstream whole-file JSONL reader'
+  );
+  for (const marker of [
+    'CharacterDeck',
+    'const importCharacterData = async',
+    'WORKSHOP_IMPORT_AND_PLAY',
+    'syncNativeActiveToolUis(assistantMessage, toolCalls, requestToolUis, requestTools);'
+  ]) assert.ok(mergedApp193.includes(marker), `clean-merged 1.9.3 app marker: ${marker}`);
+  console.log('Real upstream 1.9.3 app importer relocation: PASS (clean merge; JSONL branch delegated)');
+} finally {
+  await rm(app193Fixture, { recursive: true, force: true });
+}
+
 const legacyDiagnosticBaseline = '9ce9ef0ff93fa4816fea309cfd541b5b33fca338';
 const endpointOnlyApi = normalize(sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', 'assets/js/api-utils.js'));
 assert.equal(transformOverlayText('assets/js/api-utils.js', endpointOnlyApi), endpointOnlyApi, 'endpoint-only API overlay is identity');
@@ -799,7 +872,9 @@ assert.throws(
 );
 const legacyDiagnosticApp = normalize(sourceText(legacyDiagnosticBaseline, 'assets/js/app.js'));
 const cleanDiagnosticApp = removeAppDiagnostics(legacyDiagnosticApp);
-assert.equal(cleanDiagnosticApp, normalize(readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8')), 'complete legacy app diagnostics are removed exactly');
+const currentApp = normalize(readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8'));
+assert.equal(cleanDiagnosticApp, normalize(sourceText(preMergeAppRevision, 'assets/js/app.js')), 'complete legacy app diagnostics are removed exactly');
+assert.equal(currentApp, normalize(buildRelocatedAppFromPreMergeRevision()), 'current app only relocates the readable streaming importer declaration');
 assert.equal(removeAppDiagnostics(cleanDiagnosticApp), cleanDiagnosticApp, 'clean app diagnostic removal is idempotent');
 assert.throws(
   () => removeAppDiagnostics(legacyDiagnosticApp.replace('                        perfObservedRevealElements?.add(el);\n', '')),

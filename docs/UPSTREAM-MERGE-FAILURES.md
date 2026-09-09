@@ -16,6 +16,37 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-09：上游 `1.9.3`（`4aef0bb`）聊天 JSONL 接入面收缩
+
+### 现场与根因
+
+- 本步骤本地父提交为 `700e776`，共同稳定基线为
+  `1.9.2/a83d907497106e401f0988b29b653422159e4c7f`，稳定 Release 目标为
+  `1.9.3/4aef0bb46c9b3370faba174a20435e5989799727`。真实三方预览的首个有效内容冲突仍是
+  `assets/js/app.js`，没有把未发布的 `upstream/main` 混入证明。
+- 冲突热点把本地聊天 JSONL importer 声明和上游新增的角色卡 `importCharacterData` 放在同一段；
+  importer 本身依赖很多已在 `setup` 内初始化的状态，导致 Git 把两个无关功能视为同一修改块。
+
+### 本步取舍与验证
+
+- 全部 JSONL 解析、UTF-8 分块、进度和错误处理继续留在 fork-owned
+  `assets/js/chat-import-streaming.js`；`app.js` 保留可读的依赖声明，但将其初始化迁移到
+  `setup` 返回对象前、所有依赖都已稳定的位置，导入分支只剩原有委托调用。真实
+  `700e776 + 1.9.3` fixture 在逐行保留原始 EOL 后无需 resolver 即可清洁合并，同时保留
+  `importCharacterData`、`CharacterDeck`、Workshop、native tool UI 和本地 JSONL 流式委托。
+- 本步不新增 1.9.3 app 冲突特判，不改流式模块的旧行为，也不扩展到 `image###` 或其它 app
+  行为。EOL churn guard 只统计既有 upstream-owned pathspec
+  （`index.html`、`assets/**`、`character/**`、`novel/**`），脚本、文档和 package 元数据由各自门禁负责。
+
+### 发布影响与剩余风险
+
+- 本步骤不改版本号，不正式合并 1.9.3，不 push、dispatch、构建 APK 或创建 Release，也不改变
+  GitHub/Gitee 更新源；预先存在的 `scripts/upstream-sync/patches/patch-android-hooks.mjs` 脏改动
+  保持未触碰、未暂存。上游角色卡导入、CharacterDeck、Workshop 和 native tool UI 保留，未改
+  `image###` 路径；未做实体设备视觉检查。
+- 后续完整同步仍需验证最终合并树、构建/dist 门禁和两次 reapply；未来若上游继续修改 JSONL
+  分支或其相邻代码，应重新检查清洁合并结果及语义兼容性。
+
 ## 2026-09-09：上游 `1.9.3`（`4aef0bb`）角色工坊安全区冲突面迁移
 
 ### 现场与根因

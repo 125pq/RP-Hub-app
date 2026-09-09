@@ -4,16 +4,17 @@ import { fileURLToPath } from 'node:url';
 import { projectRoot } from '../lib.mjs';
 import { runEolChurnGuardBehaviorTests } from './eol-churn-guard-behavior.mjs';
 
-// Guards against whole-file EOL/whitespace churn: a patch that rewrites line
-// endings (or trailing whitespace) inflates `git diff --stat` without changing
-// the real content. `--ignore-space-at-eol` folds those lines away, so the two
-// numstat totals diverge. This test fails loudly when that happens, instead of
-// letting a 2-line logic change silently balloon into hundreds of diff lines.
+// Guards against EOL/whitespace churn in upstream-owned files: a patch that
+// rewrites line endings (or trailing whitespace) inflates `git diff --stat`
+// without changing the real content. `--ignore-space-at-eol` folds those lines
+// away, so the two numstat totals diverge. Keep generated metadata, scripts,
+// and docs out of this guard; their own tests use their own EOL contracts.
 
 const guardRoot = process.env.RPHUB_EOL_CHURN_PROJECT_ROOT || projectRoot;
+const upstreamOwnedPathspec = ['index.html', 'assets/**', 'character/**', 'novel/**'];
 
 function numstatTotals(args) {
-  const out = execFileSync('git', ['diff', '--numstat', ...args], {
+  const out = execFileSync('git', ['diff', '--numstat', ...args, '--', ...upstreamOwnedPathspec], {
     cwd: guardRoot,
     encoding: 'utf8'
   });

@@ -8891,30 +8891,6 @@ const app = createApp({
             editingWorldInfo.data.keys = parseWorldInfoKeysText(worldInfoKeysText.value, editingWorldInfo.data.useRegex);
         };
 
-        const importCharacterChatJsonl = window.RPHubChatImport.createChatImporter({
-            currentCharacterIndex,
-            currentCharacter,
-            showToast,
-            stopCurrentCharacterWork,
-            getCurrentStoryBranchScopeId,
-            setApplyingCharacterScopedData: (value) => { _isApplyingCharacterScopedData = value; },
-            storyBranches,
-            activeStoryBranchId,
-            selectedStoryBranchId,
-            resetChatRenderWindow,
-            chatHistory,
-            prepareLoadedChatHistoryForDisplay,
-            createInitialChatHistory,
-            loadCharacterMemories,
-            loadGlobalUiTemplateRuntimeForCharacter,
-            clearStoryBranchTransientContext,
-            finishApplyingCharacterScopedData,
-            currentView,
-            scrollChatToBottom,
-            updateCurrentStoryBranchSummary,
-            saveStoryBranchesForCharacter
-        });
-
         const importCharacter = (event) => {
             const file = event.target.files[0];
             if (!file) return;
@@ -9692,6 +9668,30 @@ const app = createApp({
             if (secondPersonPreset) secondPersonPreset.enabled = user.person === 'second';
             if (thirdPersonPreset) thirdPersonPreset.enabled = user.person === 'third';
         };
+
+        const importCharacterChatJsonl = window.RPHubChatImport.createChatImporter({
+            currentCharacterIndex,
+            currentCharacter,
+            showToast,
+            stopCurrentCharacterWork,
+            getCurrentStoryBranchScopeId,
+            setApplyingCharacterScopedData: (value) => { _isApplyingCharacterScopedData = value; },
+            storyBranches,
+            activeStoryBranchId,
+            selectedStoryBranchId,
+            resetChatRenderWindow,
+            chatHistory,
+            prepareLoadedChatHistoryForDisplay,
+            createInitialChatHistory,
+            loadCharacterMemories,
+            loadGlobalUiTemplateRuntimeForCharacter,
+            clearStoryBranchTransientContext,
+            finishApplyingCharacterScopedData,
+            currentView,
+            scrollChatToBottom,
+            updateCurrentStoryBranchSummary,
+            saveStoryBranchesForCharacter
+        });
 
         return {
             switchProfile, createNewProfile, deleteProfile, userProfiles, activeProfileId, showProfileDropdown,
