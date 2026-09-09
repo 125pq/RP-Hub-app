@@ -70,7 +70,7 @@ assertAll(data, [
   "!imageTail.includes('###') && !/[\\r\\n]/.test(imageTail)"
 ], 'data-services.js contract');
 
-function callAppMainContentProcessor(mainText, isGeneratingState, truncationEnabled = false) {
+function callAppMainContentProcessor(mainText, isGeneratingState) {
   const normalizedApp = app.replace(/\r\n/g, '\n');
   const startMarker = '        const processMainContent = (mainText, isGeneratingState) => {';
   const endMarker = '\n\n        const switchProfile = ';
@@ -84,7 +84,6 @@ function callAppMainContentProcessor(mainText, isGeneratingState, truncationEnab
     mainText,
     isGeneratingState,
     result: null,
-    isTruncationEnabled: { value: truncationEnabled },
     stripUiTemplateUpdateBlock(value) {
       const source = String(value || '');
       const marker = source.indexOf('<ui_template_updates>');
@@ -152,11 +151,11 @@ assert.equal(inlineCode.showSpinner, false, 'HTML-looking inline code must not s
 const strippedUpdate = callAppMainContentProcessor('正文\n<ui_template_updates>{"score":42}</ui_template_updates>', false);
 assert.equal(strippedUpdate.text, '正文', '1.9.2 app must call the shared UI-update stripper before rendering');
 assert.equal(strippedUpdate.showSpinner, false, 'completed content must not show the UI spinner');
-const multilineImage = callAppMainContentProcessor('正文 image###unfinished\n后文', true, false);
-assert.equal(multilineImage.text, '正文 image###unfinished\n后文', '1.9.2 app must preserve multiline image text when truncation is disabled');
-const truncatedImage = callAppMainContentProcessor('正文 image###unfinished\n后文', true, true);
-assert.equal(truncatedImage.text, '正文 \n后文', '1.9.2 app must hide the incomplete image when truncation is enabled');
-assert.equal(truncatedImage.showSpinner, false, 'incomplete image handling must not use the UI spinner');
+const multilineImage = callAppMainContentProcessor('正文 image###unfinished\n后文', true);
+assert.equal(multilineImage.text, '正文 image###unfinished\n后文', '1.9.3 app must preserve multiline image text while streaming');
+const incompleteImage = callAppMainContentProcessor('正文 image###unfinished', true);
+assert.equal(incompleteImage.text, '正文 ', '1.9.3 app must hide an unclosed single-line image while streaming');
+assert.equal(incompleteImage.showSpinner, false, 'incomplete image handling must not use the UI spinner');
 
 const dataServicesContext = {
   window: {

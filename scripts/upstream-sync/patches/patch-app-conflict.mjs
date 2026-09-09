@@ -18,21 +18,9 @@ const aliasedProcessImport = `    stripUiTemplateUpdateBlock,
 const upstreamProcessImport192 = `    stripUiTemplateUpdateBlock
 } = window.RPHubUiTemplateUtils;`;
 const cachedProcessWrapper191 = `        // Keep the shared cached renderer while preserving upstream's
-        // prevent-truncation handling for incomplete image markers.
+        // streaming UI handling from the 1.9.1 app.
         const processMainContent = (mainText, isGeneratingState) => {
-            let normalizedMainText = mainText;
-            if (isGeneratingState && settings.preventTruncation) {
-                const imageStart = normalizedMainText.lastIndexOf('image###');
-                if (imageStart !== -1) {
-                    const imageTail = normalizedMainText.slice(imageStart + 'image###'.length);
-                    if (!imageTail.includes('###')) {
-                        const lineBreak = imageTail.search(/[\\r\\n]/);
-                        normalizedMainText = normalizedMainText.slice(0, imageStart)
-                            + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');
-                    }
-                }
-            }
-            return processMainContentCached(normalizedMainText, isGeneratingState);
+            return processMainContentCached(mainText, isGeneratingState);
         };
 
 `;
@@ -129,15 +117,11 @@ function validateStages(base, local, upstream) {
     requireCount(upstream, 'syncNativeActiveToolUis(assistantMessage, toolCalls, requestToolUis, requestTools);', 1, 'upstream native tool uis');
   } else if (is192) {
     requireCount(local, aliasedProcessImport, 1, 'local aliased shared main-content import');
-    requireCount(local, 'return processMainContentCached(normalizedMainText, isGeneratingState);', 1, 'local shared cached renderer');
     requireCount(local, uiTokensMarker, 0, 'local upstream UI parser');
-    requireCount(upstream, '&& (isTruncationEnabled.value || !/[\\r\\n]/.test(imageTail))', 1, 'upstream UI-aware truncation behavior');
     requireCount(upstream, uiTokensMarker, 1, 'upstream UI-aware truncation parser');
-    requireCount(base, '&& (settings.preventTruncation || !/[\\r\\n]/.test(imageTail))', 1, '1.9.1 base truncation behavior');
   } else {
     requireCount(local, sharedProcessImport, 1, 'local shared main-content import');
     requireCount(local, 'const processMainContent = (mainText, isGeneratingState) => {', 0, 'local inline main-content processor');
-    requireCount(upstream, '&& (settings.preventTruncation || !/[\\r\\n]/.test(imageTail))', 1, 'upstream prevent-truncation behavior');
     requireCount(local, 'exportMemories: async () => {', 1, 'local memory export handler');
     requireCount(local, 'importMemories: (event) =>', 1, 'local memory import handler');
   }

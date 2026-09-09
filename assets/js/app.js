@@ -2281,7 +2281,7 @@ const app = createApp({
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
             const sourceText = String(message?.content || '');
-            const imageMatches = cardUtils.findUnprotectedMatches(sourceText, getImageTagRegex(isTruncationEnabled.value));
+            const imageMatches = cardUtils.findUnprotectedMatches(sourceText, getImageTagRegex());
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
@@ -3340,7 +3340,7 @@ const app = createApp({
             if (isAutoImageGenEnabled.value) return text; // 生图开启时保留
             return String(text)
                 .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, '')
-                .replace(getImageTagRegex(isTruncationEnabled.value), '')
+                .replace(getImageTagRegex(), '')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -3400,7 +3400,7 @@ const app = createApp({
 
                     ({ pattern: regexPattern, flags } = cardUtils.normalizeRegexModifiers(regexPattern, flags));
                     const re = isImageGenScript
-                        ? getImageTagRegex(isTruncationEnabled.value)
+                        ? getImageTagRegex()
                         : new RegExp(regexPattern, flags);
 
                     // 普通正则保护 HTML/代码；明确匹配标签或代码围栏的规则仍直接执行。
@@ -3434,7 +3434,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, settings.styleFilterEnabled, isTruncationEnabled.value, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
@@ -9456,20 +9456,14 @@ const app = createApp({
             clearTimeout(mobileKeyboardBlurTimer);
             removePlatformBackListener();
         });
-        // Keep the shared cached renderer while preserving upstream's
-        // prevent-truncation handling for incomplete image markers.
+        // 解析并截断生成的包含 HTML UI 的正文，避免闪屏问题
         const processMainContent = (mainText, isGeneratingState) => {
             mainText = stripUiTemplateUpdateBlock(mainText);
             if (!isGeneratingState) return { text: mainText, showSpinner: false };
             const imageStart = cardUtils.findLastUnprotectedMatch(mainText, /image###/gi)?.index ?? -1;
             if (imageStart !== -1) {
                 const imageTail = mainText.slice(imageStart + 'image###'.length);
-                if (!imageTail.includes('###')
-                    && (isTruncationEnabled.value || !/[\r\n]/.test(imageTail))) {
-                    const lineBreak = imageTail.search(/[\r\n]/);
-                    mainText = mainText.slice(0, imageStart)
-                        + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');
-                }
+                if (!imageTail.includes('###') && !/[\r\n]/.test(imageTail)) mainText = mainText.slice(0, imageStart);
             }
             // 只暂存未闭合的 UI；完整面板及其后的正文可以继续流式展示。
             const uiTokens = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\r\n]*`|<!--[\s\S]*?(?:-->|$)|<(script|style)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>[\s\S]*?(?:<\/\1\s*>|$)|<!doctype\b[^>]*(?:>|$)|<\/?[a-z][\w:-]*(?:[^"'<>]|"[^"]*(?:"|$)|'[^']*(?:'|$))*(>|$)/gi;

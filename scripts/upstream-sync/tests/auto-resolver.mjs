@@ -87,6 +87,42 @@ function buildRelocatedAppFromPreMergeRevision() {
   assert.notEqual(relocated, normalized, 'pre-merge app importer declaration relocation changes the fixture');
   return rebuildWithOriginalEol(source, relocated, dominantEol(source));
 }
+function buildImageCleanAppFromPreMergeRevision() {
+  const source = buildRelocatedAppFromPreMergeRevision();
+  let normalized = normalize(source);
+  assert.equal(
+    normalized.split('getImageTagRegex(isTruncationEnabled.value)').length - 1,
+    3,
+    'relocated app has three truncation-dependent image regex calls'
+  );
+  normalized = normalized.replaceAll('getImageTagRegex(isTruncationEnabled.value)', 'getImageTagRegex()');
+  const replaceExpectedOnce = (before, after, label) => {
+    assert.equal(normalized.split(before).length - 1, 1, label);
+    normalized = normalized.replace(before, after);
+  };
+  replaceExpectedOnce(
+    'watch(() => [settings.disableImages, settings.styleFilterEnabled, isTruncationEnabled.value, regexScripts.value, user.name],',
+    'watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name],',
+    'relocated app has one image truncation render-cache dependency'
+  );
+  replaceExpectedOnce(
+    `        // Keep the shared cached renderer while preserving upstream's
+        // prevent-truncation handling for incomplete image markers.`,
+    '        // 解析并截断生成的包含 HTML UI 的正文，避免闪屏问题',
+    'relocated app has one local main-content processor comment'
+  );
+  replaceExpectedOnce(
+    `                if (!imageTail.includes('###')
+                    && (isTruncationEnabled.value || !/[\\r\\n]/.test(imageTail))) {
+                    const lineBreak = imageTail.search(/[\\r\\n]/);
+                    mainText = mainText.slice(0, imageStart)
+                        + (lineBreak >= 0 ? imageTail.slice(lineBreak) : '');
+                }`,
+    `                if (!imageTail.includes('###') && !/[\\r\\n]/.test(imageTail)) mainText = mainText.slice(0, imageStart);`,
+    'relocated app has one local image-tail handling block'
+  );
+  return rebuildWithOriginalEol(source, normalized, dominantEol(source));
+}
 const squareFrameAnchor = `<div v-if="currentView === 'square'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
 const squareFrameExpected = `<div v-if="currentView === 'square'" data-safe-area="square-frame"
                 class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
@@ -606,8 +642,7 @@ try {
   const resolvedApp = normalize(await readFile(path.join(real191Fixture, 'assets/js/app.js'), 'utf8'));
   for (const marker of [
     'processMainContent: processMainContentCached',
-    'return processMainContentCached(normalizedMainText, isGeneratingState);',
-    'isGeneratingState && settings.preventTruncation',
+    'return processMainContentCached(mainText, isGeneratingState);',
     'let removePlatformBackListener = () => {};',
     '// Wanxiang Square mirror preference hook.',
     '// Backup flush bridges (local full-backup export/restore).',
@@ -692,7 +727,6 @@ try {
   const resolvedApp192 = normalize(await readFile(path.join(real192Fixture, 'assets/js/app.js'), 'utf8'));
   for (const marker of [
     'const uiTokens = ',
-    '&& (isTruncationEnabled.value || !/[\\r\\n]/.test(imageTail))',
     'let removePlatformBackListener = () => {};',
     '// Wanxiang Square mirror preference hook.',
     '// Backup flush bridges (local full-backup export/restore).',
@@ -778,7 +812,7 @@ try {
 
 const app193Fixture = await createConflictFixture({
   baseFiles: { 'assets/js/app.js': repoBlob(stable192, 'assets/js/app.js') },
-  localFiles: { 'assets/js/app.js': buildRelocatedAppFromPreMergeRevision() },
+  localFiles: { 'assets/js/app.js': buildImageCleanAppFromPreMergeRevision() },
   upstreamFiles: { 'assets/js/app.js': repoBlob(upstream193, 'assets/js/app.js') },
   preserveEol: true
 });
@@ -874,7 +908,7 @@ const legacyDiagnosticApp = normalize(sourceText(legacyDiagnosticBaseline, 'asse
 const cleanDiagnosticApp = removeAppDiagnostics(legacyDiagnosticApp);
 const currentApp = normalize(readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8'));
 assert.equal(cleanDiagnosticApp, normalize(sourceText(preMergeAppRevision, 'assets/js/app.js')), 'complete legacy app diagnostics are removed exactly');
-assert.equal(currentApp, normalize(buildRelocatedAppFromPreMergeRevision()), 'current app only relocates the readable streaming importer declaration');
+assert.equal(currentApp, normalize(buildImageCleanAppFromPreMergeRevision()), 'current app only relocates the importer and removes reviewed image-tag differences');
 assert.equal(removeAppDiagnostics(cleanDiagnosticApp), cleanDiagnosticApp, 'clean app diagnostic removal is idempotent');
 assert.throws(
   () => removeAppDiagnostics(legacyDiagnosticApp.replace('                        perfObservedRevealElements?.add(el);\n', '')),
