@@ -55,10 +55,20 @@
     </svg>
     <div class="entry-transition" aria-hidden="true">
         <div class="entry-transition-brand">
+            <div class="entry-transition-book">
+                <svg viewBox="0 0 64 48" fill="none" aria-hidden="true">
+                    <path d="M4 8q14-6 28 0 14-6 28 0v34q-14-6-28 0-14-6-28 0Z" fill="#f6f9fe" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+                    <path d="M32 8v34" stroke="currentColor" stroke-width="1.5" />
+                    <path d="M10 16q8-3 16 0m-16 7q8-3 16 0m-16 7q8-3 12-1m16-13q8-3 16 0m-16 7q8-3 16 0m-16 7q8-3 12-1" stroke="currentColor" stroke-opacity=".3" stroke-linecap="round" />
+                </svg>
+                <svg class="entry-book-page" viewBox="0 0 28 48" fill="none" aria-hidden="true">
+                    <path d="M0 8q14-6 28 0v34q-14-6-28 0Z" fill="#f6f9fe" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+                    <path d="M6 16q8-3 16 0m-16 7q8-3 16 0m-16 7q8-3 12-1" stroke="currentColor" stroke-opacity=".3" stroke-linecap="round" />
+                </svg>
+            </div>
             <div class="entry-transition-logo">
                 <span class="entry-logo-rp">RP</span>
                 <span class="entry-logo-hub">HUB</span>
-                <i></i>
             </div>
         </div>
     </div>
@@ -129,7 +139,7 @@
                 <!-- Character Background Layer -->
                 <div v-if="settings.useCharacterBackground && currentCharacter && currentCharacter?.avatar"
                     class="absolute -inset-4 bg-cover bg-center bg-no-repeat pointer-events-none transition-opacity duration-500 z-0 blur-[2px] char-bg-blur"
-                    :style="{ backgroundImage: `url(${currentCharacter?.avatar})`, opacity: 0.9 }">
+                    :style="{ backgroundImage: `url(${JSON.stringify(currentCharacter.avatar)})`, opacity: 0.9 }">
                 </div>
 
                 <!-- Blur Overlay for Description Panel -->
@@ -466,7 +476,7 @@
                                                                                 </div>
                                                                                 <div v-else class="tool-call-detail flex flex-col gap-3 text-[13px]">
                                                                                     <div class="flex justify-between items-center text-[13px] border-b border-gray-200 pb-2">
-                                                                                        <span>调用标签: <code class="font-mono bg-white px-1 border rounded text-primary-600">&lt;{{ step.toolCall.callName }}&gt;</code></span>
+                                                                                        <span>调用工具: <code class="font-mono bg-white px-1 border rounded text-primary-600">&lt;{{ step.toolCall.callName }}&gt;</code></span>
                                                                                         <span class="text-gray-400 font-semibold">{{ getToolCallModeText(step.toolCall) }}</span>
                                                                                     </div>
                                                                                     <div class="flex flex-col gap-1.5">
@@ -549,6 +559,9 @@
                                                 class="ui-template-message-block ui-template-message-block-bottom">
                                                 <ui-template-pending></ui-template-pending>
                                             </div>
+                                            <div v-if="msg.responseError" class="response-error-text px-4 py-3"
+                                                :style="settings.fontSize ? { fontSize: settings.fontSize + 'px' } : {}"
+                                                role="alert">{{ msg.responseError }}</div>
                                         </div>
                                     </div>
 
@@ -879,7 +892,7 @@
                                                 </div>
                                                 <div v-if="isGeminiModel" class="rounded-xl bg-gray-50">
                                                     <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100">
-                                                        <span>抗Gemini截断</span>
+                                                        <span>Gemini抗截断</span>
                                                         <span class="relative inline-flex flex-none items-center">
                                                             <input v-model="settings.preventTruncation" type="checkbox" class="settings-toggle-input sr-only">
                                                             <span class="settings-toggle settings-toggle--compact settings-toggle--solid"></span>
@@ -940,9 +953,10 @@
             </div>
 
             <!-- Characters Management -->
-            <div v-if="hasOpenedCharacterManager" v-show="currentView === 'characters'" class="management-view">
+            <div v-if="hasOpenedCharacterManager" v-show="currentView === 'characters'" class="management-view"
+                :class="{ 'character-management--deck': useCharacterDeck && filteredCharacters.length }">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 md:mb-6 gap-3">
-                    <div class="flex items-center justify-between w-full md:w-auto">
+                    <div class="flex flex-wrap items-center justify-between gap-2 w-full md:w-auto">
                         <div class="flex items-center">
                             <button @click="toggleMobileMenu"
                                 class="md:hidden mr-3 p-2 bg-white border border-gray-200 rounded-xl text-gray-500 shadow-sm active:scale-95 transition-all flex-shrink-0">
@@ -960,7 +974,7 @@
                         </div>
 
                         <!-- Mobile Quick Actions -->
-                        <div class="flex md:hidden items-center space-x-2" v-if="!isBatchDeleteMode">
+                        <div class="flex md:hidden items-center space-x-2 ml-auto" v-if="!isBatchDeleteMode">
                             <button @click="toggleBatchDeleteMode"
                                 class="p-2.5 bg-white text-red-500 rounded-xl border border-gray-200 shadow-sm active:scale-95 transition-all"
                                 title="批量删除">
@@ -998,50 +1012,56 @@
                     </div>
 
                     <!-- Search Controls -->
-                    <div class="flex flex-1 w-full md:w-auto md:max-w-md gap-2" v-if="!isBatchDeleteMode">
-                        <div class="relative flex-1 group">
+                    <div class="flex flex-1 min-w-0 w-full md:w-auto md:max-w-md gap-2" v-if="!isBatchDeleteMode">
+                        <div class="relative flex-1 min-w-0 group">
                             <input v-model="characterSearchQuery" type="text" placeholder="检索角色卡名称或描述..."
-                                class="w-full bg-white/80 backdrop-blur-sm border border-gray-200 rounded-2xl pl-10 pr-4 py-2.5 text-sm focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 outline-none transition-all shadow-sm group-hover:border-gray-300">
+                                class="w-full bg-white/80 backdrop-blur-sm border border-gray-200 rounded-2xl pl-10 pr-12 py-2.5 text-sm focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 outline-none transition-all shadow-sm group-hover:border-gray-300">
                             <svg class="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2 transition-colors group-focus-within:text-primary-500"
                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                             </svg>
+                            <button type="button" @click="characterGridView = !characterGridView"
+                                class="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-xl text-gray-500 hover:bg-gray-100 hover:text-primary-600 active:scale-95 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+                                :title="useCharacterDeck ? '切换为网格布局' : '切换为叠卡布局'"
+                                :aria-label="useCharacterDeck ? '切换为网格布局' : '切换为叠卡布局'">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                                        :d="useCharacterDeck ? 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z' : 'M8 3h8v18H8zM5 5H3v14h2m14-14h2v14h-2'"></path>
+                                </svg>
+                            </button>
                         </div>
                     </div>
 
                     <div class="hidden md:flex space-x-2 md:space-x-3 w-full md:w-auto pb-1" v-if="!isBatchDeleteMode">
                         <button @click="toggleBatchDeleteMode"
-                            class="flex-1 md:flex-none justify-center px-3 md:px-5 py-2.5 bg-white hover:bg-gray-50 text-red-600 rounded-xl border border-gray-200 transition-all shadow-sm hover:shadow flex items-center text-sm font-bold">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
-                                </path>
-                            </svg>
-                            删除
+                            class="p-2.5 bg-white text-red-500 rounded-xl border border-gray-200 shadow-sm active:scale-95 transition-all"
+                            title="批量删除" aria-label="批量删除">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor"><use href="#icon-delete"></use></svg>
                         </button>
                         <button @click="showAddCharacterMenu = true"
-                            class="settings-create-button settings-create-button--labeled flex-1 md:flex-none">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            class="settings-create-button"
+                            title="添加角色卡" aria-label="添加角色卡">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M12 4v16m8-8H4"></path>
                             </svg>
-                            添加
                         </button>
                     </div>
                     <div class="hidden md:flex space-x-2 md:space-x-3 w-full md:w-auto" v-else>
                         <button @click="toggleBatchDeleteMode"
-                            class="flex-1 md:flex-none justify-center px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-700 rounded-xl border border-gray-200 transition-all shadow-sm hover:shadow flex items-center text-sm font-bold">
-                            取消选择
+                            class="p-2.5 bg-white text-gray-600 rounded-xl border border-gray-200 shadow-sm active:scale-95 transition-all"
+                            title="取消选择" aria-label="取消选择">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
                         </button>
                         <button @click="batchDeleteCharacters" :disabled="selectedCharacterIndices.size === 0"
-                            class="flex-1 md:flex-none justify-center px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all shadow-sm hover:shadow flex items-center text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
-                                </path>
-                            </svg>
-                            确认删除 ({{ selectedCharacterIndices.size }})
+                            class="relative p-2.5 bg-red-600 text-white rounded-xl shadow-sm active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="确认删除" :aria-label="'确认删除 ' + selectedCharacterIndices.size + ' 张角色卡'">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor"><use href="#icon-delete"></use></svg>
+                            <span v-if="selectedCharacterIndices.size > 0"
+                                class="absolute -top-1 -right-1 bg-white text-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-red-200 shadow-sm leading-none">{{ selectedCharacterIndices.size }}</span>
                         </button>
                     </div>
                 </div>
@@ -1074,7 +1094,15 @@
                     </div>
                 </div>
 
-                <div :class="isDesktopCharacterLayout
+                <character-deck ref="characterDeck" v-if="filteredCharacters.length" v-show="useCharacterDeck"
+                    :visible="currentView === 'characters' && useCharacterDeck"
+                    :items="filteredCharacters" :active-id="currentCharacter?.uuid" :loading-index="switchingCharacterIndex"
+                    :world-info-count="getCharacterWICount" :regex-count="getCharacterRegexCount"
+                    @select="selectCharacter" @edit="editCharacter" @export-card="openCharacterExportModal"
+                    @toggle-favorite="toggleCharacterFavorite" @delete-card="deleteCharacter">
+                </character-deck>
+
+                <div v-if="!useCharacterDeck" :class="isDesktopCharacterLayout
                     ? 'grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
                     : 'grid grid-cols-2 gap-4'">
                     <character-card v-for="char in displayedCharacters"
@@ -1096,7 +1124,7 @@
                 </div>
 
                 <!-- Load More Button -->
-                <div v-if="characterDisplayLimit < filteredCharacters.length" class="mt-8 flex justify-center">
+                <div v-if="!useCharacterDeck && characterDisplayLimit < filteredCharacters.length" class="mt-8 flex justify-center">
                     <button @click="loadMoreCharacters"
                         class="px-8 py-3 bg-white border border-gray-200 text-primary-600 font-bold rounded-2xl shadow-sm hover:shadow-md active:scale-95 transition-all flex items-center">
                         <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1925,7 +1953,7 @@
                         <div class="flex items-center space-x-4 flex-shrink-0">
                             <label class="relative inline-flex items-center"
                                 :class="preset.name === 'COT' && isTruncationEnabled ? 'cursor-not-allowed' : 'cursor-pointer'"
-                                :title="preset.name === 'COT' && isTruncationEnabled ? '抗Gemini截断已临时关闭 COT，关闭抗截断或切换模型后恢复原设置' : null">
+                                :title="preset.name === 'COT' && isTruncationEnabled ? 'Gemini抗截断已临时关闭 COT，关闭抗截断或切换模型后恢复原设置' : null">
                                 <input type="checkbox" :checked="isPresetEnabled(preset)"
                                     :disabled="preset.name === 'COT' && isTruncationEnabled"
                                     @change="preset.enabled = $event.target.checked" class="settings-toggle-input sr-only">
@@ -2043,7 +2071,9 @@
                 <div
                     class="bg-white/70 backdrop-blur-sm p-1 rounded-2xl border border-gray-200 shadow-sm mb-4 overflow-hidden">
                     <button @click="showActiveToolSettings = !showActiveToolSettings"
-                        :class="['w-full flex justify-between items-center px-4 py-3 rounded-xl transition-all font-bold',
+                        class="settings-collapse-trigger" aria-controls="active-tool-settings-panel"
+                        :aria-expanded="showActiveToolSettings"
+                        :class="['w-full flex justify-between items-center px-4 py-3 rounded-xl font-bold',
                                      showActiveToolSettings ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50']">
                         <span class="flex items-center min-w-0">
                             <div
@@ -2058,28 +2088,34 @@
                         </span>
                         <span class="flex items-center flex-shrink-0">
                             <svg :class="{'transform rotate-180': showActiveToolSettings}"
-                                class="w-5 h-5 transition-transform duration-300" fill="none" stroke="currentColor"
+                                class="settings-collapse-chevron w-5 h-5" fill="none" stroke="currentColor"
                                 viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7">
                                 </path>
                             </svg>
                         </span>
                     </button>
-                    <div v-show="showActiveToolSettings" class="px-3 pb-3 pt-2 border-t border-gray-100 animate-fade-in">
-                        <div class="bg-gray-50/60 p-2.5 rounded-xl border border-gray-100">
-                            <div class="flex items-center mb-2">
-                                <label class="text-xs font-medium text-gray-500">调用工具积极性</label>
-                            </div>
-                            <div class="grid grid-cols-3 gap-1 rounded-xl bg-white border border-gray-200 p-1">
-                                <button v-for="option in activeToolAggressivenessOptions" :key="option.value"
-                                    type="button"
-                                    @click="settings.activeToolAggressiveness = option.value"
-                                    :class="['h-8 rounded-lg text-[13px] font-bold transition-all active:scale-[0.98]',
-                                        settings.activeToolAggressiveness === option.value
-                                            ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-100'
-                                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50']">
-                                    {{ option.label }}
-                                </button>
+                    <div id="active-tool-settings-panel" class="settings-collapse"
+                        :class="{ 'is-open': showActiveToolSettings }"
+                        :aria-hidden="!showActiveToolSettings" :inert="!showActiveToolSettings">
+                        <div class="settings-collapse__inner">
+                            <div class="settings-collapse__content px-4 pb-4 pt-3 border-t border-gray-100">
+                                <div class="text-sm font-semibold text-gray-700 mb-2">调用工具积极性</div>
+                                <div class="segmented-switch segmented-switch--compact segmented-switch--three w-full"
+                                    role="group" aria-label="调用工具积极性">
+                                    <div class="segmented-switch__indicator" aria-hidden="true"
+                                        :class="{
+                                            'is-position-2': settings.activeToolAggressiveness === 'active',
+                                            'is-position-3': settings.activeToolAggressiveness === 'adaptive'
+                                        }"></div>
+                                    <button v-for="option in activeToolAggressivenessOptions" :key="option.value"
+                                        type="button" @click="settings.activeToolAggressiveness = option.value"
+                                        class="segmented-switch__option"
+                                        :class="{ 'is-active': settings.activeToolAggressiveness === option.value }"
+                                        :aria-pressed="settings.activeToolAggressiveness === option.value">
+                                        {{ option.label }}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2667,6 +2703,7 @@
 
         <add-character-modal :show="showAddCharacterMenu" @close="showAddCharacterMenu = false"
             @create="createNewCharacter(); showAddCharacterMenu = false"
+            @generate="showAddCharacterMenu = false; currentView = 'generator'"
             @import-character="importCharacter($event); showAddCharacterMenu = false"></add-character-modal>
 
         <character-editor-modal :show="showCharacterEditor" :character="editingCharacter.data"

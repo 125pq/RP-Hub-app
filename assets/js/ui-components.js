@@ -468,7 +468,7 @@
 
 // --- Reusable views and modals ---
 (function () {
-    const { onBeforeUnmount, ref } = Vue;
+    const { onBeforeUnmount, ref, computed, watch, nextTick } = Vue;
     const CustomSelect = window.RPHubCustomSelect;
 
     const UiTemplatePending = {
@@ -950,7 +950,7 @@
 
     const AddCharacterModal = {
         props: { show: Boolean },
-        emits: ['close', 'create', 'import-character'],
+        emits: ['close', 'create', 'generate', 'import-character'],
         template: `
             <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
                 overlay-class="z-[60] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
@@ -971,7 +971,18 @@
                                 </div>
                                 <div class="text-left">
                                     <div class="font-bold">新建角色卡</div>
-                                    <div class="text-xs text-gray-500">从零开始创建一个新角色</div>
+                                    <div class="text-xs text-gray-500">从零开始创建一个角色卡</div>
+                                </div>
+                            </button>
+                            <button @click="$emit('generate')" class="choice-card group">
+                                <div class="choice-card__icon">
+                                    <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 8a3 3 0 11-6 0 3 3 0 016 0zm-3 5c-4 0-7 2-7 5v1h8m5-6v6m-3-3h6"></path>
+                                    </svg>
+                                </div>
+                                <div class="text-left">
+                                    <div class="font-bold">生成角色卡</div>
+                                    <div class="text-xs text-gray-500">使用AI一键生成角色卡</div>
                                 </div>
                             </button>
                             <label class="choice-card group">
@@ -994,7 +1005,7 @@
                                 </div>
                                 <div class="text-left flex-1">
                                     <div class="font-bold">导入聊天记录</div>
-                                    <div class="text-xs text-gray-500">支持全部分支与旧版 .jsonl 聊天数据</div>
+                                    <div class="text-xs text-gray-500">支持全部分支与聊天数据</div>
                                 </div>
                                 <input type="file" accept=".jsonl" @change="$emit('import-character', $event)" class="hidden">
                             </label>
@@ -1922,7 +1933,8 @@
                                                         'bg-green-100 text-green-700 border border-green-200 shadow-sm': message.isMemory,
                                                         'bg-red-100 text-red-700 border border-red-200 shadow-sm': message.role === 'system' && !message.isMemory,
                                                         'bg-green-100 text-green-700 border border-green-200 shadow-sm': message.role === 'user',
-                                                        'bg-purple-100 text-purple-700 border border-purple-200 shadow-sm': message.role === 'assistant'
+                                                        'bg-purple-100 text-purple-700 border border-purple-200 shadow-sm': message.role === 'assistant',
+                                                        'bg-blue-100 text-blue-700 border border-blue-200 shadow-sm': message.role === 'tool'
                                                     }" class="px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wider flex items-center justify-center min-w-[70px] whitespace-nowrap">
                                                         <span v-if="message.floor" class="opacity-70 mr-1 font-bold">F{{ message.floor }}</span> {{ message.isMemory ? '记忆' : message.role }}
                                                     </span>
@@ -2443,6 +2455,7 @@
         props: {
             char: { type: Object, required: true },
             mobile: Boolean,
+            deck: Boolean,
             active: Boolean,
             loading: Boolean,
             batchMode: Boolean,
@@ -2502,12 +2515,12 @@
         template: `
             <div class="char-grid-item relative rounded-2xl overflow-hidden transition-[transform,shadow,border-color] duration-300"
                 :class="mobile
-                    ? ['aspect-[2/3] shadow-md border border-gray-100', active && !batchMode ? 'ring-4 ring-primary-500 ring-offset-2' : '']
+                    ? ['aspect-[2/3] shadow-md', deck ? 'character-card--deck' : 'border border-gray-100', active && !batchMode && !deck ? 'ring-4 ring-primary-500 ring-offset-2' : '']
                     : ['bg-white border border-gray-200 hover:border-primary-400 hover:shadow-xl cursor-pointer group shadow-sm flex flex-col', active && !batchMode ? 'ring-4 ring-primary-500 ring-offset-2' : '', batchMode && selected ? 'ring-2 ring-red-500 border-red-500' : '']"
                 :aria-busy="loading"
-                @pointerenter="beginCoverZoom" @pointerdown="beginPress" @pointerup="endPress"
+                @pointerenter="!deck && beginCoverZoom($event)" @pointerdown="!deck && beginPress($event)" @pointerup="endPress"
                 @pointercancel="endPress" @pointerleave="endPress($event); endCoverZoom($event)"
-                @click="!loading && $emit('select')">
+                @click="!deck && !loading && $emit('select')">
                 <div v-if="loading && !batchMode" @click.stop role="status" aria-live="polite"
                     class="absolute inset-0 z-40 flex items-center justify-center bg-gray-950/45 backdrop-blur-[2px]">
                     <div class="flex flex-col items-center gap-3 text-white drop-shadow-md">
@@ -2518,7 +2531,9 @@
                     </div>
                 </div>
                 <template v-if="mobile">
-                    <img :src="char?.avatar" class="absolute inset-0 w-full h-full object-cover" loading="lazy" decoding="async">
+                    <div v-if="deck" class="character-deck__placeholder" aria-hidden="true">{{ (char.name || '角').slice(0, 1) }}</div>
+                    <img v-if="!deck || char?.avatar" :src="char?.avatar" :alt="char.name" draggable="false"
+                        class="absolute inset-0 w-full h-full object-cover" :loading="deck ? 'eager' : 'lazy'" decoding="async">
                     <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
                     <div v-if="batchMode" class="absolute inset-0 bg-black/40 flex items-center justify-center z-20">
@@ -2531,20 +2546,22 @@
                     </div>
 
                     <div v-if="active && !batchMode" class="absolute top-3 left-3 z-10">
-                        <div class="flex items-center text-[10px] font-bold text-white bg-green-600/60 backdrop-blur-xl px-2 py-1 rounded-full border border-white/30 shadow-lg">
-                            <span class="w-1.5 h-1.5 bg-green-400 rounded-full mr-1.5 shadow-[0_0_5px_rgba(74,222,128,0.8)]"></span>
+                        <div class="flex items-center text-xs font-bold text-white bg-green-600/60 backdrop-blur-xl px-3 py-1.5 rounded-full border border-white/30 shadow-lg">
+                            <span class="w-2 h-2 bg-green-400 rounded-full mr-2 shadow-[0_0_5px_rgba(74,222,128,0.8)]"></span>
                             当前使用
                         </div>
                     </div>
 
                     <div v-if="!batchMode" class="absolute top-3 right-3 flex flex-col gap-2 z-20">
                         <button @click.stop="$emit('edit')"
+                            title="编辑角色" aria-label="编辑角色"
                             class="p-2 bg-white/20 backdrop-blur-md text-white rounded-full border border-white/20 active:bg-white/40 shadow-lg">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
                             </svg>
                         </button>
                         <button @click.stop="$emit('export-card')"
+                            title="导出角色" aria-label="导出角色"
                             class="p-2 bg-white/20 backdrop-blur-md text-white rounded-full border border-white/20 active:bg-white/40 shadow-lg">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
@@ -2556,10 +2573,14 @@
                             :title="favorite ? '取消收藏' : '收藏角色'" :aria-label="favorite ? '取消收藏' : '收藏角色'">
                             <svg class="w-4 h-4" :fill="favorite ? 'currentColor' : 'none'" stroke="currentColor" viewBox="0 0 24 24"><use href="#icon-star"></use></svg>
                         </button>
+                        <button v-if="deck" @click.stop="$emit('delete-card')" title="删除角色" aria-label="删除角色"
+                            class="p-2 bg-white/20 backdrop-blur-md text-white rounded-full border border-white/20 active:bg-white/40 shadow-lg">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><use href="#icon-delete"></use></svg>
+                        </button>
                     </div>
 
                     <div class="absolute bottom-0 left-0 right-0 p-3 z-10">
-                        <h3 class="text-white font-bold text-sm truncate mb-2 drop-shadow-md">{{ char.name }}</h3>
+                        <h3 class="character-card-name text-white font-bold text-sm truncate mb-2 drop-shadow-md" :title="char.name">{{ char.name }}</h3>
                         <div v-if="!batchMode" class="flex items-center justify-between">
                             <div class="flex flex-wrap gap-1">
                                 <span class="px-1.5 py-0.5 bg-white/20 backdrop-blur-md text-white text-[8px] rounded border border-white/10">{{ worldInfoCount }} 世界书</span>
@@ -2629,6 +2650,230 @@
             </div>`
     };
 
+    const CharacterDeck = {
+        components: { CharacterCard },
+        props: {
+            items: { type: Array, required: true },
+            visible: { type: Boolean, default: true },
+            activeId: String,
+            loadingIndex: { type: Number, default: null },
+            worldInfoCount: { type: Function, required: true },
+            regexCount: { type: Function, required: true }
+        },
+        emits: ['select', 'edit', 'export-card', 'toggle-favorite', 'delete-card'],
+        setup(props, { expose }) {
+            const focusedId = ref(props.activeId || '');
+            const opening = ref(false);
+            const importing = ref(false);
+            const stageRef = ref(null);
+            let importAnimation = null;
+            const dragOffset = ref(0);
+            const dragging = ref(false);
+            let gesture = null;
+            let suppressClickUntil = 0;
+            const busy = computed(() => importing.value || (props.loadingIndex !== null && props.loadingIndex >= 0));
+            const focusedIndex = computed(() => Math.max(0, props.items.findIndex(item => item.char.uuid === focusedId.value)));
+            const focused = computed(() => props.items[focusedIndex.value]);
+            const buttonColors = ref(null);
+            watch(() => focused.value?.char.avatar, avatar => { if (!avatar) buttonColors.value = null; });
+            const syncButtonColors = event => {
+                const image = event.currentTarget;
+                if (image.getAttribute('src') !== focused.value?.char.avatar) return;
+                buttonColors.value = null;
+                if (event.type === 'error') return;
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = canvas.height = 12;
+                    const context = canvas.getContext('2d', { willReadFrequently: true });
+                    context.drawImage(image, 0, 0, 12, 12);
+                    const pixels = context.getImageData(0, 0, 12, 12).data;
+                    const rgb = [0, 0, 0];
+                    let weight = 0;
+                    for (let i = 0; i < pixels.length; i += 4) {
+                        const alpha = pixels[i + 3] / 255;
+                        weight += alpha;
+                        rgb.forEach((_, channel) => { rgb[channel] += pixels[i + channel] * alpha; });
+                    }
+                    if (!weight) return;
+                    const color = rgb.map(value => Math.round(value / weight));
+                    const linear = color.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+                    const luminance = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+                    buttonColors.value = { '--deck-button-bg': `rgb(${color.join(',')})`, '--deck-button-text': luminance > 0.45 ? '#000' : '#fff' };
+                } catch {
+                    // 跨域封面无法取色时使用默认配色，不影响封面显示或切换。
+                }
+            };
+            watch(() => props.items.map(item => item.char.uuid), (ids, previous = []) => {
+                if (ids.includes(focusedId.value)) return;
+                const nextIndex = Math.max(0, Math.min(previous.indexOf(focusedId.value), ids.length - 1));
+                focusedId.value = ids.includes(props.activeId) ? props.activeId : (ids[nextIndex] || '');
+            }, { immediate: true });
+            watch(() => props.activeId, id => {
+                if (props.items.some(item => item.char.uuid === id)) focusedId.value = id;
+            });
+            // 最多渲染中间与左右各两张，收藏排序或筛选改变时仍跟随同一个角色。
+            const visibleItems = computed(() => {
+                const count = props.items.length;
+                const result = [];
+                const leftCount = Math.min(2, Math.floor((count - (dragOffset.value > 0 ? 0 : 1)) / 2));
+                for (let offset = -leftCount; offset <= Math.min(2, count - leftCount - 1); offset++) {
+                    if (!count) break;
+                    const index = (focusedIndex.value + offset + count) % count;
+                    const position = offset + dragOffset.value;
+                    result.push({ ...props.items[index], offset, position, depth: Math.abs(position) });
+                }
+                return result;
+            });
+            const move = direction => {
+                if (busy.value || props.items.length < 2) return;
+                opening.value = false;
+                const index = (focusedIndex.value + direction + props.items.length) % props.items.length;
+                focusedId.value = props.items[index].char.uuid;
+            };
+            const focusCard = item => {
+                if (busy.value) return;
+                opening.value = false;
+                focusedId.value = item.char.uuid;
+            };
+            const onKeydown = event => {
+                if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || event.target.closest('input, textarea, select')) return;
+                event.preventDefault();
+                move(event.key === 'ArrowLeft' ? -1 : 1);
+            };
+            const beginDrag = event => {
+                if (gesture || busy.value || props.items.length < 2 || !event.isPrimary
+                    || (event.pointerType === 'mouse' && event.button !== 0)
+                    || event.target.closest('button:not(.character-deck__peek)')) return;
+                const stage = event.currentTarget;
+                const cardWidth = stage.querySelector('.character-deck__item')?.offsetWidth || stage.clientWidth;
+                const spread = parseFloat(getComputedStyle(stage).getPropertyValue('--deck-spread')) || 50;
+                gesture = { id: event.pointerId, container: stage, x: event.clientX, y: event.clientY, time: event.timeStamp, step: Math.max(1, cardWidth * spread / 100) };
+                // 和分支拖拽一样提前接住手势；侧卡按钮保留轻点切换。
+                if (!event.target.closest('button')) stage.setPointerCapture(event.pointerId);
+            };
+            const resetDrag = () => {
+                const state = gesture;
+                gesture = null;
+                dragOffset.value = 0;
+                dragging.value = false;
+                if (state?.container.hasPointerCapture(state.id)) state.container.releasePointerCapture(state.id);
+            };
+            const updateDrag = event => {
+                if (!gesture || gesture.id !== event.pointerId) return;
+                const dx = event.clientX - gesture.x;
+                const dy = event.clientY - gesture.y;
+                if (!dragging.value) {
+                    if (Math.hypot(dx, dy) < 4) return;
+                    if (Math.abs(dy) > Math.abs(dx) * 1.25 && Math.abs(dy) > 8) { resetDrag(); return; }
+                    if (Math.abs(dx) < 4 || Math.abs(dx) < Math.abs(dy)) return;
+                    opening.value = false;
+                    dragging.value = true;
+                    gesture.container.setPointerCapture(event.pointerId);
+                }
+                dragOffset.value = Math.max(-1, Math.min(1, dx / gesture.step));
+                event.preventDefault();
+            };
+            const endDrag = event => {
+                if (!gesture || gesture.id !== event.pointerId) return;
+                if (event.type === 'pointerup') updateDrag(event);
+                if (!gesture) return;
+                const completed = event.type === 'pointerup' && dragging.value;
+                const distance = event.clientX - gesture.x;
+                const threshold = Math.max(20, Math.min(40, gesture.step * 0.25));
+                const quickSwipe = Math.abs(distance) >= 12 && Math.abs(distance) / Math.max(1, event.timeStamp - gesture.time) >= 0.4;
+                resetDrag();
+                if (completed) {
+                    suppressClickUntil = performance.now() + 250;
+                    if (Math.abs(distance) >= threshold || quickSwipe) move(distance < 0 ? 1 : -1);
+                }
+            };
+            const cancelImportAnimation = () => {
+                importAnimation?.cancel();
+                importAnimation = null;
+                importing.value = false;
+            };
+            const revealImportedCard = async id => {
+                if (!props.visible || !props.items.some(item => item.char.uuid === id)) return;
+                resetDrag();
+                cancelImportAnimation();
+                opening.value = false;
+                importing.value = true;
+                focusedId.value = id;
+                await nextTick();
+                const card = stageRef.value?.querySelector('.character-deck__item.is-focused');
+                if (!props.visible || !card?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    importing.value = false;
+                    return;
+                }
+                let animation = null;
+                try {
+                    animation = card.animate([
+                        { transform: 'translateX(-50%) translateY(-65%) scale(0.94)', opacity: 0 },
+                        { transform: 'translateX(-50%) translateY(0) scale(1)', opacity: 1 }
+                    ], { duration: 650, easing: 'cubic-bezier(0.22, 0.72, 0.18, 1)' });
+                    importAnimation = animation;
+                    await animation.finished;
+                } catch {
+                    // 离开页面或动画不受支持时，不阻断角色卡导入。
+                } finally {
+                    if (importAnimation === animation) cancelImportAnimation();
+                }
+            };
+            expose({ revealImportedCard });
+            watch(() => props.visible, visible => {
+                opening.value = visible;
+                if (!visible) { resetDrag(); cancelImportAnimation(); }
+            }, { immediate: true });
+            onBeforeUnmount(() => { resetDrag(); cancelImportAnimation(); });
+            const guardClick = event => {
+                if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
+            };
+            return { focused, visibleItems, busy, opening, importing, stageRef, dragging, buttonColors, syncButtonColors, move, focusCard, onKeydown, beginDrag, updateDrag, endDrag, guardClick };
+        },
+        template: `
+            <section class="character-deck" role="region" aria-roledescription="轮播" aria-label="角色卡浏览"
+                :class="{ 'character-deck--opening': opening }" tabindex="0" @keydown="onKeydown"
+                @animationend="$event.animationName === 'character-deck-open' && (opening = false)">
+                <div class="character-deck__backdrop" aria-hidden="true">
+                    <transition name="character-backdrop">
+                        <img v-if="focused?.char.avatar" :key="focused.char.uuid" :src="focused.char.avatar" alt="" decoding="async"
+                            @load="syncButtonColors" @error="syncButtonColors">
+                    </transition>
+                </div>
+                <div ref="stageRef" class="character-deck__stage" :class="{ 'is-dragging': dragging, 'is-importing': importing }" :inert="importing"
+                    @pointerdown="beginDrag" @pointermove="updateDrag" @pointerup="endDrag"
+                    @pointercancel="endDrag" @lostpointercapture="endDrag" @click.capture="guardClick" @dragstart.prevent>
+                    <transition-group name="character-deck">
+                        <article v-for="item in visibleItems" :key="item.char.uuid"
+                            class="character-deck__item" :class="{ 'is-focused': item.depth < 0.5 }"
+                            :style="{ '--deck-offset': item.position, '--deck-depth': item.depth, zIndex: 100 - Math.round(item.depth * 10) }">
+                            <character-card :char="item.char" mobile deck :active="activeId === item.char.uuid"
+                                :loading="loadingIndex === item.originalIndex" :favorite="Number(item.char.favoriteAt) > 0"
+                                :world-info-count="worldInfoCount(item.char)" :regex-count="regexCount(item.char)"
+                                :inert="item.offset !== 0" :aria-hidden="item.offset !== 0"
+                                @edit="$emit('edit', item.originalIndex)" @export-card="$emit('export-card', item.originalIndex)"
+                                @toggle-favorite="$emit('toggle-favorite', item.originalIndex)" @delete-card="$emit('delete-card', item.originalIndex)">
+                            </character-card>
+                            <button v-if="item.offset !== 0" class="character-deck__peek" :disabled="busy"
+                                :aria-label="'浏览角色：' + item.char.name" @click="focusCard(item)"></button>
+                        </article>
+                    </transition-group>
+                </div>
+                <div v-if="focused" class="character-deck__navigation">
+                    <button class="character-deck__arrow" aria-label="上一个角色" :disabled="items.length < 2 || busy" @click="move(-1)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <button class="character-deck__enter" :style="buttonColors" :disabled="busy" @click="$emit('select', focused.originalIndex)">
+                        {{ loadingIndex === focused.originalIndex ? '正在切换…' : activeId === focused.char.uuid ? '继续对话' : '进入对话' }}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <button class="character-deck__arrow" aria-label="下一个角色" :disabled="items.length < 2 || busy" @click="move(1)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m10 6 6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
+            </section>`
+    };
+
     window.RPHubComponents = {
         ActionConfirmModal,
         ActiveToolEditorModal,
@@ -2637,6 +2882,7 @@
         CharacterExportModal,
         CharacterEditorModal,
         CharacterCard,
+        CharacterDeck,
         ContextViewerModal,
         EmbeddedViewContent,
         GenerationTimer,
