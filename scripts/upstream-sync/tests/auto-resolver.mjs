@@ -134,14 +134,13 @@ const squareFrameExpected = `<div v-if="currentView === 'square'" data-safe-area
                 class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
 
 function assertBlobProof(relativePath) {
-  const stage1 = sourceText('a83d907497106e401f0988b29b653422159e4c7f', relativePath);
-  const stage2 = readFileSync(path.join(projectRoot, relativePath), 'utf8');
-  const stage3 = sourceText('4aef0bb46c9b3370faba174a20435e5989799727', relativePath);
-  assert.equal(normalize(transformOverlayBlob(relativePath, stage1)), normalize(stage2), `${relativePath} current canonical stage1 -> stage2 proof`);
-  const once = transformOverlayText(relativePath, normalize(stage3));
+  const upstream = sourceText('4aef0bb46c9b3370faba174a20435e5989799727', relativePath);
+  const current = readFileSync(path.join(projectRoot, relativePath), 'utf8');
+  assert.equal(normalize(transformOverlayBlob(relativePath, upstream)), normalize(current), `${relativePath} current tree is the registered overlay of stable upstream 1.9.3`);
+  const once = transformOverlayText(relativePath, normalize(upstream));
   assert.equal(transformOverlayText(relativePath, once), once, `${relativePath} transformer must be idempotent`);
 
-  const lf = normalize(stage3);
+  const lf = normalize(upstream);
   const crlf = lf.replace(/\n/g, '\r\n');
   const mixed = lf.split('\n').map((line, index) => `${line}${index % 2 ? '\n' : '\r\n'}`).join('');
   for (const variant of [lf, crlf, mixed]) {
@@ -743,7 +742,8 @@ try {
   const upstreamApi192 = normalize(sourceText(stable192, 'assets/js/api-utils.js'));
   const patchedApi192 = transformOverlayText('assets/js/api-utils.js', upstreamApi192);
   assert.equal(patchedApi192, upstreamApi192, '1.9.2 API overlay is identity');
-  assert.equal(normalize(readFileSync(path.join(projectRoot, 'assets/js/api-utils.js'), 'utf8')), upstreamApi192, 'current API runtime is canonical stable 1.9.2');
+  const currentApiRuntime = normalize(readFileSync(path.join(projectRoot, 'assets/js/api-utils.js'), 'utf8'));
+  assert.equal(currentApiRuntime, normalize(sourceText('4aef0bb46c9b3370faba174a20435e5989799727', 'assets/js/api-utils.js')), 'current API runtime is canonical stable 1.9.3');
   assert.equal(transformOverlayText('assets/js/api-utils.js', patchedApi192), patchedApi192, '1.9.2 API identity overlay idempotence');
   assert.throws(
     () => transformOverlayText('assets/js/api-utils.js', upstreamApi192.replace('const accept = data => {', 'const acceptDrifted = data => {')),
@@ -770,7 +770,7 @@ const upstreamCharacter193 = sourceText(upstream193, 'character/index.html');
 const legacyCharacter193Fixture = await createConflictFixture({
   baseFiles: { 'character/index.html': repoBlob(stable192, 'character/index.html') },
   localFiles: {
-    'character/index.html': readFileSync(path.join(projectRoot, 'character/index.html'), 'utf8')
+    'character/index.html': transformOverlayBlob('character/index.html', sourceText(stable192, 'character/index.html'))
       .replace(upstreamWorkshopUtility, localWorkshopUtility)
   },
   upstreamFiles: { 'character/index.html': repoBlob(upstream193, 'character/index.html') }
@@ -786,7 +786,7 @@ try {
 }
 const character193Fixture = await createConflictFixture({
   baseFiles: { 'character/index.html': repoBlob(stable192, 'character/index.html') },
-  localFiles: { 'character/index.html': readFileSync(path.join(projectRoot, 'character/index.html')) },
+  localFiles: { 'character/index.html': transformOverlayBlob('character/index.html', sourceText(stable192, 'character/index.html')) },
   upstreamFiles: { 'character/index.html': repoBlob(upstream193, 'character/index.html') }
 });
 try {
@@ -816,6 +816,7 @@ try {
   await rm(character193Fixture, { recursive: true, force: true });
 }
 
+let reviewedMergedApp193 = '';
 const app193Fixture = await createConflictFixture({
   baseFiles: { 'assets/js/app.js': repoBlob(stable192, 'assets/js/app.js') },
   localFiles: { 'assets/js/app.js': buildImageCleanAppFromPreMergeRevision() },
@@ -824,7 +825,8 @@ const app193Fixture = await createConflictFixture({
 });
 try {
   assert.equal(gitText(app193Fixture, ['diff', '--name-only', '--diff-filter=U']), '', 'relocated importer cleanly merges with upstream 1.9.3');
-  const mergedApp193 = normalize(await readFile(path.join(app193Fixture, 'assets/js/app.js'), 'utf8'));
+  reviewedMergedApp193 = await readFile(path.join(app193Fixture, 'assets/js/app.js'), 'utf8');
+  const mergedApp193 = normalize(reviewedMergedApp193);
   assert.equal((mergedApp193.match(/importCharacterChatJsonl/g) || []).length, 2, 'merged app keeps one importer declaration and call');
   assert.match(
     mergedApp193,
@@ -914,9 +916,8 @@ const legacyDiagnosticApp = normalize(sourceText(legacyDiagnosticBaseline, 'asse
 const cleanDiagnosticApp = removeAppDiagnostics(legacyDiagnosticApp);
 const currentAppBytes = readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8');
 const currentApp = normalize(currentAppBytes);
-const expectedCurrentAppBytes = buildImageCleanAppFromPreMergeRevision();
 assert.equal(cleanDiagnosticApp, normalize(sourceText(preMergeAppRevision, 'assets/js/app.js')), 'complete legacy app diagnostics are removed exactly');
-assert.equal(currentApp, normalize(expectedCurrentAppBytes), 'current app only relocates the importer and removes reviewed image-tag differences');
+assert.equal(currentApp, normalize(reviewedMergedApp193), 'current app matches the reviewed 1.9.3 merge replay');
 assert.ok(currentAppBytes.includes(`${upstreamImageTailLine}\n`), 'current app adopts upstream LF on the image-tail line');
 assert.ok(!currentAppBytes.includes(`${upstreamImageTailLine}\r\n`), 'current app does not retain local CRLF on the adopted image-tail line');
 assert.equal(removeAppDiagnostics(cleanDiagnosticApp), cleanDiagnosticApp, 'clean app diagnostic removal is idempotent');
@@ -997,7 +998,7 @@ const unregisteredApi193Fixture = await createConflictFixture({
   baseFiles: api193FixtureOptions.baseFiles,
   upstreamFiles: api193FixtureOptions.upstreamFiles,
   localFiles: {
-    'assets/js/api-utils.js': readFileSync(path.join(projectRoot, 'assets/js/api-utils.js'), 'utf8')
+    'assets/js/api-utils.js': sourceText(stable192, 'assets/js/api-utils.js')
       .replace(
         '    const requestChatCompletion = async (options) => {',
         '    const requestChatCompletionUnregistered = async (options) => {'

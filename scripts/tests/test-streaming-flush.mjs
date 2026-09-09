@@ -5,16 +5,18 @@ import vm from 'node:vm';
 import { projectRoot } from '../upstream-sync/lib.mjs';
 import { patchApiUtilsOverlay } from '../upstream-sync/patches/patch-api-utils.mjs';
 
-const stable192 = 'a83d907497106e401f0988b29b653422159e4c7f';
+const stableUpstream = '4aef0bb46c9b3370faba174a20435e5989799727';
 const normalize = source => source.replace(/\r\n/g, '\n');
-const upstreamApiSource = normalize(execFileSync('git', ['cat-file', 'blob', `${stable192}:assets/js/api-utils.js`], {
+const upstreamApiSource = normalize(execFileSync('git', ['cat-file', 'blob', `${stableUpstream}:assets/js/api-utils.js`], {
   cwd: projectRoot,
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'pipe']
 }));
 const currentApiSource = normalize(readFileSync(new URL('../../assets/js/api-utils.js', import.meta.url), 'utf8'));
-assert.equal(currentApiSource, upstreamApiSource, 'current 1.9.2 API transport is the stable upstream implementation');
-assert.equal(patchApiUtilsOverlay(upstreamApiSource), upstreamApiSource, '1.9.2 API overlay is identity');
+assert.equal(patchApiUtilsOverlay(upstreamApiSource), upstreamApiSource, '1.9.3 API overlay is identity');
+assert.match(currentApiSource, /const interval = setInterval\(flush, 60\);/, 'current API transport keeps the upstream 60 ms flush interval');
+assert.match(currentApiSource, /toolCalls: toolSnapshot\(\)/, 'current API transport keeps upstream streamed tool calls');
+assert.match(currentApiSource, /const requestChatCompletionOnce = async \(options, attempt\) =>/, 'current API transport keeps upstream retry transport');
 
 const flushes = [];
 let nextResponse = null;
@@ -45,7 +47,7 @@ vm.runInContext(currentApiSource, vm.createContext({
     return response;
   },
   console,
-}), { filename: 'stable-1.9.2-api-utils.js' });
+}), { filename: 'stable-1.9.3-api-utils.js' });
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const encodeEvent = event => {
@@ -125,5 +127,5 @@ for (const error of [new DOMException('Aborted', 'AbortError'), new Error('netwo
   assert.equal(flushes.length, countAfterCompletion, 'upstream interval is cleared after completion');
 }
 
-console.log('Stable upstream 1.9.2 streaming transport behavior: PASS');
-console.log('Covered: identity overlay, 60 ms flush, final flush, finish reason, abort/error, reasoning, interval cleanup');
+console.log('Stable upstream 1.9.3 streaming transport behavior: PASS');
+console.log('Covered: identity overlay, 60 ms flush, tool calls, retry transport, final flush, finish reason, abort/error, reasoning, interval cleanup');

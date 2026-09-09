@@ -35,9 +35,11 @@ const patchedSidebarCssFixture = patchSidebarHeaderPadding(sidebarCssFixture);
 assert.match(patchedSidebarCssFixture, /\.safe-sidebar-header\.px-6\s*\{[\s\S]*padding-right:\s*calc\(1\.5rem \+ var\(--safe-right\)\)[\s\S]*padding-left:\s*calc\(1\.5rem \+ var\(--safe-left\)\)/);
 assert.equal(patchSidebarHeaderPadding(patchedSidebarCssFixture), patchedSidebarCssFixture);
 
-const upstream192WorkshopClass = 'workshop-input-panel bg-base-100/95 backdrop-blur-lg border-t border-base-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-24 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-30 shrink-0';
+// Upstream 1.9.3 dropped md:pb-24 from the panel class; the bottom inset is
+// owned by the registered #app .workshop-input-panel rule in safe-area.css.
+const upstreamWorkshopClass = 'workshop-input-panel bg-base-100/95 backdrop-blur-lg border-t border-base-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-30 shrink-0';
 assert.equal((character.match(/class="workshop-input-panel [^"]+"/g) || []).length, 1);
-assert.match(character, new RegExp(`class="${upstream192WorkshopClass.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+assert.match(character, new RegExp(`class="${upstreamWorkshopClass.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
 assert.doesNotMatch(character, /class="workshop-input-panel [^"]*--safe-area-inset-bottom/);
 
 const workshopRule = css.match(/^#app \.workshop-input-panel \{([\s\S]*?)^\}/m)?.[1] || '';
