@@ -678,13 +678,18 @@ const real192Paths = [
   'index.html',
   'novel/index.html'
 ];
-const real192ConflictPaths = ['assets/js/app.js', 'index.html', 'novel/index.html'];
+// Upstream-owned files are intentionally mixed-EOL (CRLF + bare LF). With
+// core.autocrlf=false git treats the terminators as content, so this replay
+// also conflicts on ui-components.js and character/index.html; pin autocrlf
+// off so the conflict set is identical on Windows and Linux CI.
+const real192ConflictPaths = ['assets/js/app.js', 'assets/js/ui-components.js', 'character/index.html', 'index.html', 'novel/index.html'];
 const real192Fixture = await createConflictFixture({
   baseFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, repoBlob('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath)])),
   localFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, relativePath === 'assets/js/app.js'
     ? repoBlob(pre192Local, relativePath)
     : transformOverlayBlob(relativePath, sourceText('9c0611964a39ff8cca8831d97ecf18b04abb1990', relativePath))])),
-  upstreamFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, repoBlob(stable192, relativePath)]))
+  upstreamFiles: Object.fromEntries(real192Paths.map(relativePath => [relativePath, repoBlob(stable192, relativePath)])),
+  preserveEol: true
 });
 try {
   assert.deepEqual(

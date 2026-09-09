@@ -16,6 +16,29 @@
 
 不要通过放宽 proof、跳过锚点校验或扩大 EOL allowance 来换取表面通过。无法证明本地功能被完整保留时，解析器应继续 fail closed。
 
+## 2026-09-09：上游 `1.9.3`（`4aef0bb`）1.9.2 回放 fixture 的 EOL 平台敏感性
+
+### 现场与根因
+- 手动 `sync-upstream` run `34347810621`（本地 `f9ee81c`）在 `npm run test:upstream-sync` 失败：
+  `auto-resolver.mjs` 的 1.9.2 回放 fixture 期望冲突集合
+  `[assets/js/app.js, index.html, novel/index.html]`，而 CI（`core.autocrlf=false`）实际为
+  `[assets/js/app.js, assets/js/ui-components.js, character/index.html, index.html, novel/index.html]`。
+- 上游文件是混合 EOL（CRLF + 裸 LF）。1.9.3 重构后 `transformOverlayBlob(9c06119)` 对
+  `ui-components.js`、`character/index.html` 的行尾组合发生变化；fixture 仓库未固定 `core.autocrlf`，
+  在 CI 的 `false` 下 git 把行尾当内容，多出两个 EOL 型冲突，而本机默认 `autocrlf=true` 归一化后消失，
+  造成本地绿、CI 红。
+
+### 本步取舍与验证
+- `real192Fixture` 显式 `preserveEol: true`（即 `core.autocrlf false`），与 CI 一致以消除平台差异；
+  期望冲突集合更新为实际的 5 个文件。新增的 `ui-components.js`、`character/index.html` 仍由
+  `transform(stage1) == stage2` 直接证明解析，未放宽 proof。
+- 在合并树上以 `autocrlf=false` 与默认 `autocrlf=true` 分别运行 `auto-resolver.mjs` 均通过；
+  `npm run test:upstream-sync` 全绿，`REAPPLY_CHANGED_FILES=0`。
+
+### 发布影响与剩余风险
+- 仅测试 fixture 变更，未改业务代码、上游文件或 `.gitattributes`；1.9.3 真实合并仍为 clean。
+- 该 fixture 现已平台无关；若未来上游 EOL 组合再变，冲突集合断言需同步更新。
+
 ## 2026-09-09：上游 `1.9.3`（`4aef0bb`）聊天 JSONL 接入面收缩
 
 ### 现场与根因
