@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.9.3",
+  "versionCode": 1090300,
+  "tag": "v1.9.3-android",
+  "notes": "## 上游 RP-Hub 1.9.3 更新说明\n\n- 角色卡工坊与万相广场新增一键导入功能\r\n- 支持角色卡工坊抗截断模式\r\n- 大幅优化了Diff匹配与智能修改的成功率\r\n- 全面焕新角色卡管理页面\r\n- 优化了开屏动画\r\n- 优化了剧情UI面板的出现时机\r\n- 修复了沉浸模式下宽度异常的问题\n\n## APK 校验\n\nAPK SHA-256：`2d9ddbe4ea1d3dc0566f9a1b4a3e28dd6c9c909cef97af8c31ce9d784d646160`\n",
+  "apk": {
+    "name": "RP-Hub-1.9.3-release.apk",
+    "sources": [
+      [
+        "https://github.com/125pq/RP-Hub-app/releases/download/v1.9.3-android/RP-Hub-1.9.3-release.apk"
+      ],
+      [
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.3-release.apk.part-000",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.3-release.apk.part-001",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.3-release.apk.part-002",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.3-release.apk.part-003",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.3-release.apk.part-004"
+      ]
+    ],
+    "size": 17632290,
+    "sha256": "2d9ddbe4ea1d3dc0566f9a1b4a3e28dd6c9c909cef97af8c31ce9d784d646160"
+  }
+}
