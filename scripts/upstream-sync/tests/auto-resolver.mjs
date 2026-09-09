@@ -76,6 +76,7 @@ const legacyChatImporterDeclaration = [
   '            saveStoryBranchesForCharacter',
   '        });'
 ].join('\n');
+const upstreamImageTailLine = `                if (!imageTail.includes('###') && !/[\\r\\n]/.test(imageTail)) mainText = mainText.slice(0, imageStart);`;
 function buildRelocatedAppFromPreMergeRevision() {
   const source = sourceText(preMergeAppRevision, 'assets/js/app.js');
   const normalized = normalize(source);
@@ -121,7 +122,12 @@ function buildImageCleanAppFromPreMergeRevision() {
     `                if (!imageTail.includes('###') && !/[\\r\\n]/.test(imageTail)) mainText = mainText.slice(0, imageStart);`,
     'relocated app has one local image-tail handling block'
   );
-  return rebuildWithOriginalEol(source, normalized, dominantEol(source));
+  const rebuilt = rebuildWithOriginalEol(source, normalized, dominantEol(source));
+  const upstreamApp = sourceText('4aef0bb46c9b3370faba174a20435e5989799727', 'assets/js/app.js');
+  assert.ok(upstreamApp.includes(`${upstreamImageTailLine}\n`), '1.9.3 image-tail line uses LF');
+  assert.ok(!upstreamApp.includes(`${upstreamImageTailLine}\r\n`), '1.9.3 image-tail line is not CRLF');
+  assert.equal(rebuilt.split(upstreamImageTailLine).length - 1, 1, 'rebuilt app has one upstream image-tail line');
+  return rebuilt.replace(`${upstreamImageTailLine}\r\n`, `${upstreamImageTailLine}\n`);
 }
 const squareFrameAnchor = `<div v-if="currentView === 'square'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">`;
 const squareFrameExpected = `<div v-if="currentView === 'square'" data-safe-area="square-frame"
@@ -906,9 +912,13 @@ assert.throws(
 );
 const legacyDiagnosticApp = normalize(sourceText(legacyDiagnosticBaseline, 'assets/js/app.js'));
 const cleanDiagnosticApp = removeAppDiagnostics(legacyDiagnosticApp);
-const currentApp = normalize(readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8'));
+const currentAppBytes = readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8');
+const currentApp = normalize(currentAppBytes);
+const expectedCurrentAppBytes = buildImageCleanAppFromPreMergeRevision();
 assert.equal(cleanDiagnosticApp, normalize(sourceText(preMergeAppRevision, 'assets/js/app.js')), 'complete legacy app diagnostics are removed exactly');
-assert.equal(currentApp, normalize(buildImageCleanAppFromPreMergeRevision()), 'current app only relocates the importer and removes reviewed image-tag differences');
+assert.equal(currentApp, normalize(expectedCurrentAppBytes), 'current app only relocates the importer and removes reviewed image-tag differences');
+assert.ok(currentAppBytes.includes(`${upstreamImageTailLine}\n`), 'current app adopts upstream LF on the image-tail line');
+assert.ok(!currentAppBytes.includes(`${upstreamImageTailLine}\r\n`), 'current app does not retain local CRLF on the adopted image-tail line');
 assert.equal(removeAppDiagnostics(cleanDiagnosticApp), cleanDiagnosticApp, 'clean app diagnostic removal is idempotent');
 assert.throws(
   () => removeAppDiagnostics(legacyDiagnosticApp.replace('                        perfObservedRevealElements?.add(el);\n', '')),
