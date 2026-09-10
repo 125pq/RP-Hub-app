@@ -5,8 +5,11 @@ assets/vendor/
 assets/generated/
 npm-debug.log*
 
-# Local Word document workspace
-docs/
+# Local Word document workspace (仅挡 Word 临时稿，不忽略架构/协作文档)
+docs/*.docx
+docs/*.doc
+docs/*.tmp
+docs/~$*
 DEVELOPMENT_GUIDE.md
 
 # Local Android and Gradle state (the android project itself will be tracked)
