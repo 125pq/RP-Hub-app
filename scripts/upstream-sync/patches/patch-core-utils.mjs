@@ -41,6 +41,75 @@ const cardAdapterOverlay = `    const getPlatformAdapter = () => {
         return null;
     };
 
+    const tryStreamViaFileSystemAccess = async (stream, filename, mimeType) => {
+        if (typeof window.showSaveFilePicker !== 'function') return null;
+        let handle;
+        try {
+            handle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{ description: filename, accept: { [mimeType]: [] } }],
+            });
+        } catch (error) {
+            if (error && error.name === 'AbortError') {
+                return { supported: true, cancelled: true };
+            }
+            return null;
+        }
+        let writable;
+        try {
+            writable = await handle.createWritable();
+            let bytesWritten = 0;
+            const encoder = (typeof TextEncoder === 'function') ? new TextEncoder() : null;
+            for await (const part of stream) {
+                const text = String(part ?? '');
+                const chunk = encoder ? encoder.encode(text) : new Blob([text]);
+                bytesWritten += chunk.byteLength ?? text.length;
+                await writable.write(chunk);
+            }
+            await writable.close();
+            return { supported: true, cancelled: false, bytesWritten };
+        } catch (error) {
+            try { if (writable) await writable.abort(); } catch {}
+            throw error;
+        }
+    };
+
+    const saveGeneratedFile = async (data, filename, options = {}) => {
+        const mimeType = String(options.mimeType || data?.type || 'application/octet-stream');
+        const adapter = getPlatformAdapter();
+        const isChunkStream = data && typeof data[Symbol.asyncIterator] === 'function';
+        if (adapter?.exportFile && (!isChunkStream || adapter.isNative?.())) {
+            const result = await adapter.exportFile({ data, filename, mimeType });
+            if (result?.supported === false) throw new Error('当前平台不支持文件保存');
+            return result;
+        }
+        if (isChunkStream) {
+            const streamed = await tryStreamViaFileSystemAccess(data, filename, mimeType);
+            if (streamed !== null) return streamed;
+            const parts = [];
+            for await (const part of data) parts.push(String(part ?? ''));
+            data = new Blob(parts, { type: mimeType });
+        } else {
+            data = data && typeof data.arrayBuffer === 'function' && typeof data.slice === 'function'
+                ? data
+                : new Blob([data], { type: mimeType });
+        }
+        downloadBlob(data, filename, options);
+        return { supported: true, cancelled: false, bytesWritten: data.size };
+    };
+
+`;
+
+// 本切片(阶段 1)之前的 cardAdapterOverlay 旧实现。补丁需幂等升级:若检测到旧 overlay,
+// 先替换为新 overlay,再走 ensureBefore 兜底首次插入。仅匹配与本常量**完全一致**的旧文本。
+const cardAdapterOverlayLegacy = `    const getPlatformAdapter = () => {
+        if (window.platformAdapter) return window.platformAdapter;
+        try {
+            if (window.parent !== window && window.parent.platformAdapter) return window.parent.platformAdapter;
+        } catch {}
+        return null;
+    };
+
     const saveGeneratedFile = async (data, filename, options = {}) => {
         const mimeType = String(options.mimeType || data?.type || 'application/octet-stream');
         const adapter = getPlatformAdapter();
@@ -92,6 +161,13 @@ const cardAdapterExports = `
 
 export function patchCoreUtilsOverlay(source) {
   source = removeParseCotDiagnostics(source);
+  // 幂等升级:已有旧 overlay(阶段 1 前的 saveGeneratedFile)时替换为含流式支持的新 overlay。
+  // 仅当文件含旧实现且尚未升级时替换;全新上游原版(两者皆无)交给 ensureBefore 首次插入。
+  const hasLegacyCardAdapter = countOccurrences(source, cardAdapterOverlayLegacy) === 1;
+  const hasNewCardAdapter = countOccurrences(source, cardAdapterOverlay) === 1;
+  if (hasLegacyCardAdapter && !hasNewCardAdapter) {
+    source = replaceOnce(source, cardAdapterOverlayLegacy, cardAdapterOverlay, 'card file adapter overlay upgrade');
+  }
   source = ensureBefore(source, '    window.RPHubCardUtils = {', cardAdapterOverlay, 'card file adapter helpers');
   source = ensureAfter(source, '        injectPngTextChunk,', cardAdapterExports, 'card file adapter exports');
 

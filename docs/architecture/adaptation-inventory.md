@@ -58,10 +58,11 @@ overlay manifest 共 **8 个文件**（`scripts/upstream-sync/overlay-transforme
 | 能力 | 状态 | 验证证据 | 数据连续性依赖 |
 | --- | --- | --- | --- |
 | 原生分块导出（beginSave/appendChunk/finishSave/cancelSave） | 已证实 | NativeFilePlugin（android/…/NativeFilePlugin.java）+ test:platform「file chunks, cancellation」PASS | 文件 IO |
-| 浏览器文件下载 | 已证实 | android-download-bridge PASS | — |
-| 聊天 JSONL 流式导入/导出 | 已证实（能力存在，端到端内存有界性**待测**） | chat-import-streaming.js + backup-roundtrip「Streaming export yields async generator」「UTF-8/emoji across chunk boundary」PASS | 聊天数据 |
+| 非原生流式文件落地（File System Access API） | 已证实（能力探测+FSA 真流式/取消/失败传播，见 file-save-contract.md） | `supportsStreamingFileSave` + core-utils `tryStreamViaFileSystemAccess` + test-save-generated-file.mjs 五场景 PASS | 文件 IO |
+| 浏览器文件下载 | 已证实 | android-download-bridge PASS；聚合 fallback 保留（见 contract §7） | — |
+| 聊天 JSONL 流式导入/导出 | 已证实（导出侧经 FSA/原生真流式；旧浏览器聚合见 contract §7；**端到端内存有界实测待阶段 2**） | chat-import-streaming.js + backup-roundtrip + saveGeneratedFile FSA 路径 PASS | 聊天数据 |
 | 备份导入/导出（v5 兼容） | 已证实 | backup-v5-compat 三项 PASS | 备份格式 |
-| 取消导出 | 已证实（桥层）；业务层「取消不显示成功」**待测** | test:platform cancellation PASS；缺导出取消 UI 行为断言 | — |
+| 取消导出 | 已证实（桥层取消 + FSA AbortError→cancelled，见 test-save-generated-file 场景 3）；app.js 各调用点均 `if(result.cancelled) return;` 不显示成功 | test-platform cancellation + save-generated-file FSA-cancel PASS | — |
 | 返回键处理 | 已证实 | rphub-android-adapter.js + test:platform | 路由/面板状态 |
 | 安全区 | 已证实 | safe-area-layout / safe-area-insets 双 PASS | 布局 |
 | 广场镜像（square host） | 已证实 | mirror-square PASS + patchSquareMirrorApp | 广场数据 |

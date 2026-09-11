@@ -59,6 +59,7 @@ function loadPlatformServices(overrides = {}) {
   assert.equal(services.getPlatform(), 'web');
   assert.equal(services, window.PlatformServices, 'legacy PlatformServices alias must share the singleton');
   assert.equal((await services.share({ text: 'test' })).supported, false);
+  assert.equal(services.supportsStreamingFileSave(), false, 'plain web environment has no streaming file save');
   const downloads = [];
   window.RPHubCardUtils = { downloadBlob: (blob, filename) => downloads.push({ blob, filename }) };
   const webSave = await services.exportFile({ filename: '测试.json', mimeType: 'application/json', data: '{"ok":true}' });
@@ -155,6 +156,7 @@ function loadPlatformServices(overrides = {}) {
 
   assert.equal(services.isNative(), true);
   assert.equal(services.getPlatform(), 'android');
+  assert.equal(services.supportsStreamingFileSave(), true, 'Android native chunk bridge supports streaming file save');
   assert.equal((await services.invokeNative('MissingPlugin', 'missingMethod')).supported, false);
   const nativeImplementation = window.RPHubPlatform.getImplementation();
   vm.runInContext(androidSource, context, { filename: 'rphub-android-adapter.js' });

@@ -70,6 +70,13 @@
             return false;
         }
 
+        // 阶段 1 能力探测:浏览器环境是否支持流式文件落地(File System Access API)。
+        // 默认 web 无此能力 → false;原生 Android 由 AndroidAdapter 的分块桥覆盖(见 rphub-android-adapter.js)。
+        // 上层(core-utils.saveGeneratedFile)据此决定是否优先真流式写出,避免流式导出整体聚合驻留内存。
+        supportsStreamingFileSave() {
+            return typeof this.global.showSaveFilePicker === 'function';
+        }
+
         getPlatform() {
             return 'web';
         }
@@ -218,6 +225,9 @@
         __rphubAdapterMarker: ADAPTER_MARKER,
         isNative: () => implementation.isNative(),
         getPlatform: () => implementation.getPlatform(),
+        supportsStreamingFileSave: () => (typeof implementation.supportsStreamingFileSave === 'function'
+            ? implementation.supportsStreamingFileSave()
+            : (implementation.isNative() && implementation.getPlatform() === 'android')),
         openExternalUrl: value => call('openExternalUrl', value),
         share: options => call('share', options),
         exportFile: options => call('exportFile', options),

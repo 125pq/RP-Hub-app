@@ -33,6 +33,12 @@
             return 'android';
         }
 
+        // 原生 Android 通过 NativeFile 分块桥(beginSave/appendChunk/finishSave/cancelSave)流式写盘,
+        // 天生支持流式文件保存,无需 File System Access API。
+        supportsStreamingFileSave() {
+            return true;
+        }
+
         getPlugin(name) {
             return this.global.Capacitor?.Plugins?.[name] || null;
         }

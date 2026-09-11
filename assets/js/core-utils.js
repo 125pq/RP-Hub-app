@@ -921,6 +921,39 @@ window.RPHubUtils = {
         return null;
     };
 
+    const tryStreamViaFileSystemAccess = async (stream, filename, mimeType) => {
+        if (typeof window.showSaveFilePicker !== 'function') return null;
+        let handle;
+        try {
+            handle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{ description: filename, accept: { [mimeType]: [] } }],
+            });
+        } catch (error) {
+            if (error && error.name === 'AbortError') {
+                return { supported: true, cancelled: true };
+            }
+            return null;
+        }
+        let writable;
+        try {
+            writable = await handle.createWritable();
+            let bytesWritten = 0;
+            const encoder = (typeof TextEncoder === 'function') ? new TextEncoder() : null;
+            for await (const part of stream) {
+                const text = String(part ?? '');
+                const chunk = encoder ? encoder.encode(text) : new Blob([text]);
+                bytesWritten += chunk.byteLength ?? text.length;
+                await writable.write(chunk);
+            }
+            await writable.close();
+            return { supported: true, cancelled: false, bytesWritten };
+        } catch (error) {
+            try { if (writable) await writable.abort(); } catch {}
+            throw error;
+        }
+    };
+
     const saveGeneratedFile = async (data, filename, options = {}) => {
         const mimeType = String(options.mimeType || data?.type || 'application/octet-stream');
         const adapter = getPlatformAdapter();
@@ -931,6 +964,8 @@ window.RPHubUtils = {
             return result;
         }
         if (isChunkStream) {
+            const streamed = await tryStreamViaFileSystemAccess(data, filename, mimeType);
+            if (streamed !== null) return streamed;
             const parts = [];
             for await (const part of data) parts.push(String(part ?? ''));
             data = new Blob(parts, { type: mimeType });
