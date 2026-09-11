@@ -12,10 +12,11 @@ const toPlainObject = value => JSON.parse(JSON.stringify(value));
 
 function loadBridge(overrides = {}) {
   const listeners = new Map();
-  const window = {
+  const win = {
     indexedDB: overrides.indexedDB,
     localStorage: overrides.localStorage,
     platformAdapter: overrides.platformAdapter,
+    RPHubCardUtils: overrides.RPHubCardUtils,
     document: overrides.document || { querySelectorAll: () => [] },
     console,
     setTimeout,
@@ -25,10 +26,10 @@ function loadBridge(overrides = {}) {
     postMessage: () => {},
     ...overrides,
   };
-  window.window = window;
-  const context = vm.createContext({ window, document: window.document, console, setTimeout, clearTimeout });
+  win.window = win;
+  const context = vm.createContext({ window: win, document: win.document, console, setTimeout, clearTimeout });
   vm.runInContext(backupSource, context, { filename: 'rphub-backup.js' });
-  return { window, bridge: window.RPHubBackupBridge, listeners, context };
+  return { window: win, bridge: win.RPHubBackupBridge, listeners, context };
 }
 
 // 1) register/unregister 幂等与 names 枚举
@@ -94,4 +95,48 @@ function loadBridge(overrides = {}) {
   assert.equal(result, undefined, 'missing frame resolves immediately (no dangling listener/promise)');
 }
 
-console.log('RPHubBackupBridge flush contract: register/unregister, all-flush, failure aggregation, iframe ack, iframe-missing: PASS');
+// 6) P2 负向:iframe 回执 ok:false(落盘失败)→ 必须 reject,不能当成功继续备份
+{
+  const posts = [];
+  const frameWindow = {};
+  const document = {
+    querySelectorAll: () => [
+      { getAttribute: () => 'pages/novel.html', contentWindow: { postMessage: (msg) => posts.push(msg) } },
+    ],
+  };
+  const { bridge, listeners } = loadBridge({ document });
+  const p = bridge.flushEmbeddedFrame('novel');
+  const handler = listeners.get('message');
+  handler({ data: { type: 'RPHUB_BACKUP_FLUSHED', requestId: posts[0].requestId, ok: false } });
+  await assert.rejects(() => p, /落盘失败/, 'ok:false ack must reject (no silent success on failed iframe flush)');
+  assert.equal(listeners.has('message'), false, 'message listener must be cleaned up on failure');
+}
+
+// 7) P2 负向:postMessage 发送抛错 → reject(不把消息失败当成功)
+{
+  const document = {
+    querySelectorAll: () => [{
+      getAttribute: () => 'pages/character.html',
+      contentWindow: { postMessage: () => { throw new Error('cross-origin blocked'); } },
+    }],
+  };
+  const { bridge } = loadBridge({ document });
+  await assert.rejects(() => bridge.flushEmbeddedFrame('character'), /发送失败/, 'postMessage error must reject');
+}
+
+// 8) P2 负向:不回 ack → 超时 reject(不悬挂、不把超时当成功)。用短超时桩加速。
+{
+  const posts = [];
+  const document = {
+    querySelectorAll: () => [{
+      getAttribute: () => 'pages/novel.html',
+      contentWindow: { postMessage: (msg) => posts.push(msg) },
+    }],
+  };
+  const { bridge } = loadBridge({ document });
+  const start = Date.now();
+  await assert.rejects(() => bridge.flushEmbeddedFrame('novel'), /超时/, 'iframe flush timeout must reject');
+  assert.ok(Date.now() - start < 12000, 'timeout reject must fire around the configured deadline');
+}
+
+console.log('RPHubBackupBridge flush contract: register/unregister, all-flush, failure aggregation, iframe ack, iframe-missing, iframe ok:false reject, postMessage-fail reject, timeout reject: PASS');

@@ -629,4 +629,52 @@ function traceImport(env, fileLines) {
   console.log('Validate-only pass: PASS');
 }
 
+// ---- 8. P1 negative: 取消保存恢复备份 → importBackup 拒绝且不覆盖现有数据 ----
+// 修复前 createRecoveryBackup 对 result.cancelled 不误判时仍返回成功对象,导入会继续覆盖。
+{
+  const env = await setupSeed();
+  const { lines } = await runExport(env);
+  // 种一个「即将被导入的数据」标记,并记录恢复备份应被取消时的现状
+  env.localStorage.setItem('rp_hub_p1_guard', 'original-value');
+  // 让保存恢复备份被取消
+  env.window.RPHubCardUtils.saveGeneratedFile = async () => ({ supported: true, cancelled: true });
+  const { RPHubBackup } = await loadBackupModule(env);
+  const file = {
+    stream() {
+      let i = 0;
+      return new ReadableStream({
+        pull(controller) {
+          if (i >= lines.length) { controller.close(); return; }
+          controller.enqueue(new TextEncoder().encode(lines[i++]));
+        }
+      });
+    }
+  };
+  await assert.rejects(
+    () => RPHubBackup.importBackup(file, {}),
+    /恢复备份/,
+    'cancelled recovery backup must abort the import',
+  );
+  assert.equal(env.localStorage.getItem('rp_hub_p1_guard'), 'original-value', 'existing data must not be overwritten when recovery save is cancelled');
+  console.log('Import aborts on cancelled recovery backup: PASS');
+}
+
+// ---- 9. P1 negative: 取消普通备份导出 → exportBackup 返回 cancelled,不返回成功对象 ----
+{
+  const env = await setupSeed();
+  let exportRuns = 0;
+  env.window.RPHubCardUtils.saveGeneratedFile = async (stream) => {
+    // 消费流以便 saveGeneratedFile 语义一致,然后报告取消
+    for await (const _ of stream) { /* drain */ }
+    exportRuns += 1;
+    return { supported: true, cancelled: true };
+  };
+  const { RPHubBackup } = await loadBackupModule(env);
+  const result = await RPHubBackup.exportBackup({});
+  assert.equal(exportRuns, 1, 'export must reach the save step');
+  assert.equal(result.cancelled, true, 'cancelled export must report cancelled, not a success payload');
+  assert.equal(result.filename, undefined, 'cancelled export must not fabricate a filename');
+  console.log('Cancelled export reports cancelled (no false success): PASS');
+}
+
 console.log('\nAll backup roundtrip tests: PASS');

@@ -13,7 +13,7 @@
 | **原生保存** | `NativeFile.beginSave/appendChunk/finishSave/cancelSave`；单次锁、chunk 顺序、写失败关闭清场 | `RPHubCardUtils.saveGeneratedFile`(薄接入，唯一入口） | 分块写、取消返回 cancelled、写失败 cancelSave 兜底、FSA 真流式/聚合 fallback | file-save-contract.md |
 | **返回键** | `onBackButton(handler)->unregister fn`；未 handler 则 minimize | app.js `removePlatformBackListener`（由 patch-android-hooks 注入），面板优先级关闭 | handler 取消(不 minimize)、未处理→minimize、注销清理监听器 | test-platform 231-238 |
 | **生命周期** | `onAppStateChange(handler)->unregister fn`;active/background | app.js visibility/后台检测 | active/background 转换、注销后不再触发 | test-platform 78-81, 243-247 |
-| **保存前刷写** | `RPHubBackupBridge.register/unregister/flush/flushEmbeddedFrame` | app.js 注册 character-frame / novel-frame；patch-backup 注入 | 全注册者被调、单项失败聚合抛出（不静默）、iframe ack 即 resolve、frame 缺失立即 resolve、注销幂等 | test-backup-bridge.mjs |
+| **保存前刷写** | `RPHubBackupBridge.register/unregister/flush/flushEmbeddedFrame` | app.js 注册 character-frame / novel-frame；patch-backup 注入 | 全注册者被调、单项失败聚合抛出（不静默）、iframe ack(`ok!==false`)即 resolve、iframe 失败/发送错/超时 reject（不带脏快照）、frame 缺失立即 resolve、注销幂等 | test-backup-bridge.mjs 1-8 |
 | **更新检查** | 原生 AppUpdate 插件；settlement(AtomicBoolean)、源切换中断 | update-check.js `RPHubUpdateCheck.useUpdateCheck` | settlement 一次性、源切换中断正确结算 | test-android-update-flow |
 
 ## 关键语义（跨切片通用）

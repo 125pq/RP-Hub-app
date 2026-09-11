@@ -59,8 +59,16 @@
 
 ## 5. 当前失败清单（已知问题，不回退、不放宽断言）
 
-1. `verify:dist` — `assets/css/styles.css` source/dist 不一致。归因为 dist 陈旧。处理：阶段 1 开始前执行 `build:web` 重建 + 复跑 verify。
+1. ~~`verify:dist` — `assets/css/styles.css` source/dist 不一致~~ → **已解决（阶段 1)**：执行 `npm run build:web` 重建后 `verify:dist` 全 PASS（45/45 source matches)。属构建产物陈旧，非源码缺陷。
 2. （无其他失败。）
+
+### 5.1 阶段 1 修复的业务行为缺陷（审查 45e3ae9 后登记）
+
+| 缺陷 | 修复 | 验证 |
+| --- | --- | --- |
+| P1a：`exportBackup` 取消仍返回成功对象 | `rphub-backup.js`：取消返回 `{cancelled:true}`，不返回 filename/recordCount | backup-roundtrip 用例 9（负向）PASS |
+| P1b：`createRecoveryBackup` 取消不误判→导入继续覆盖现有数据 | 取消返回 null,`importBackup` 拒绝且现有数据不被覆盖 | backup-roundtrip 用例 8（负向）PASS |
+| P2:`flushEmbeddedFrame` 对 ok:false / 发送失败 / 超时都 resolve（可能带脏快照） | 校验 ack `ok!==false`，失败/发送错/超时均 reject（不静默成功） | test-backup-bridge 用例 6/7/8（负向）PASS |
 
 ## 6. 样本定义与阈值方案（骨架，待后续阶段填充）
 

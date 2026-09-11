@@ -62,29 +62,46 @@
             }
         },
         // Ask an embedded iframe to flush its pending debounced writes. Resolves
-        // when the frame acks (or after a timeout), so a snapshot is only taken
-        // after the iframe's data has landed in its own storage.
+        // only when the frame acks success (ok !== false). Failure ack, postMessage
+        // error, or timeout all REJECT so a snapshot is never taken before the
+        // iframe's data has actually landed in its own storage (P2 修复:失败可观察,
+        // 不再被当作成功).
         flushEmbeddedFrame(match) {
             const frame = Array.from(document.querySelectorAll('iframe'))
                 .find(iframe => iframe && iframe.contentWindow && String(iframe.getAttribute('src') || '').includes(match));
             if (!frame?.contentWindow) return Promise.resolve();
             const requestId = `${match}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
+                let settled = false;
+                const cleanup = () => { window.removeEventListener('message', onMessage); };
                 const onMessage = (event) => {
-                    if (event.data?.type !== 'RPHUB_BACKUP_FLUSHED' || event.data.requestId !== requestId) return;
-                    window.removeEventListener('message', onMessage);
+                    const data = event.data;
+                    if (data?.type !== 'RPHUB_BACKUP_FLUSHED' || data?.requestId !== requestId) return;
+                    if (data.ok === false) {
+                        // 校验来源与成功状态:iframe 上报落盘失败 → 明确拒绝,不带脏快照继续备份。
+                        settled = true;
+                        cleanup();
+                        reject(new Error(`iframe 数据落盘失败:${match}`));
+                        return;
+                    }
+                    settled = true;
+                    cleanup();
                     resolve();
                 };
                 window.addEventListener('message', onMessage);
                 try {
                     frame.contentWindow.postMessage({ type: 'RPHUB_BACKUP_FLUSH', requestId }, '*');
                 } catch (_) {
-                    window.removeEventListener('message', onMessage);
-                    resolve();
+                    settled = true;
+                    cleanup();
+                    reject(new Error(`iframe 刷写消息发送失败:${match}`));
+                    return;
                 }
                 setTimeout(() => {
-                    window.removeEventListener('message', onMessage);
-                    resolve();
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    reject(new Error(`iframe 刷写超时:${match}`));
                 }, 10000);
             });
         }
@@ -772,6 +789,7 @@
             { mimeType: 'application/jsonl' }
         );
         if (result?.supported === false) throw new Error('当前平台不支持文件保存。');
+        if (result?.cancelled) return { cancelled: true }; // 用户取消:不显式报成功,不返回数据
         return { filename, recordCount: stats.recordCount };
     }
 
@@ -789,6 +807,7 @@
                 { mimeType: 'application/jsonl' }
             );
             if (result?.supported === false) return null;
+            if (result?.cancelled) return null; // 用户取消保存恢复备份 → importBackup 视作失败,中断恢复不覆盖现有数据
             return { filename, recordCount: stats.recordCount };
         } catch (error) {
             return null;

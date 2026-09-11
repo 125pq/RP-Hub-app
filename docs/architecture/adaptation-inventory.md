@@ -62,7 +62,9 @@ overlay manifest 共 **8 个文件**（`scripts/upstream-sync/overlay-transforme
 | 浏览器文件下载 | 已证实 | android-download-bridge PASS；聚合 fallback 保留（见 contract §7） | — |
 | 聊天 JSONL 流式导入/导出 | 已证实（导出侧经 FSA/原生真流式；旧浏览器聚合见 contract §7；**端到端内存有界实测待阶段 2**） | chat-import-streaming.js + backup-roundtrip + saveGeneratedFile FSA 路径 PASS | 聊天数据 |
 | 备份导入/导出（v5 兼容） | 已证实 | backup-v5-compat 三项 PASS | 备份格式 |
-| 取消导出 | 已证实（桥层取消 + FSA AbortError→cancelled，见 test-save-generated-file 场景 3）；app.js 各调用点均 `if(result.cancelled) return;` 不显示成功 | test-platform cancellation + save-generated-file FSA-cancel PASS | — |
+| 取消导出 | 已证实（桥层取消 + FSA AbortError→cancelled，见 test-save-generated-file 场景 3；P1 修复后 exportBackup 取消显式 `cancelled:true`、不再返回成功对象） | test-platform cancellation + save-generated-file FSA-cancel + backup-roundtrip 用例 9 PASS | — |
+| 取消恢复备份→导入中断（不覆盖现有数据） | 已证实（P1 修复，createRecoveryBackup 取消→null，importBackup 拒绝且现有数据不被覆盖） | backup-roundtrip 用例 8 PASS（负向） | 用户数据 |
+| iframe 刷写失败可观察（不落脏快照） | 已证实（P2 修复，flushEmbeddedFrame ok:false/发送失败/超时→reject，不再当成功） | test-backup-bridge.mjs 用例 6/7/8 PASS（负向） | 备份一致性 |
 | 返回键处理 | 已证实 | rphub-android-adapter.js + test:platform | 路由/面板状态 |
 | 安全区 | 已证实 | safe-area-layout / safe-area-insets 双 PASS | 布局 |
 | 广场镜像（square host） | 已证实 | mirror-square PASS + patchSquareMirrorApp | 广场数据 |
