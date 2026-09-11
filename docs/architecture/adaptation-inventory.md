@@ -67,7 +67,7 @@ overlay manifest 共 **8 个文件**（`scripts/upstream-sync/overlay-transforme
 | 安全区 | 已证实 | safe-area-layout / safe-area-insets 双 PASS | 布局 |
 | 广场镜像（square host） | 已证实 | mirror-square PASS + patchSquareMirrorApp | 广场数据 |
 | 离屏 iframe 生命周期 | 已证实 | offscreen-iframe-lifecycle PASS（ACTIVE/NEAR/OFFSCREEN + cleanup） | iframe 状态 |
-| 保存前刷写（backup flush） | 已证实 | backup-patch + reapply 幂等 PASS | 备份一致性 |
+| 保存前刷写（backup flush） | 已证实 | backup-patch PASS + test-backup-bridge.mjs（注册/注销/全刷/失败聚合/iframe ack/缺失兜底）PASS | 备份一致性 |
 | 性能计数快路径（countOnly 与正常路径一致性） | **待测** | 实现存在（app.js），无 countOnly↔正常计数等价断言 | 统计正确性 |
 | 渲染缓存（filteredContentCache / timelineCharCountCache 缓存正确性/失效） | **待测** | 实现存在，无缓存陈旧/失效行为断言 | 渲染正确性 |
 | UI 模板（UI 更新块） | 已证实（存在性）/ 行为**待测** | merge-regressions `'findUiTemplateUpdateBlock'` needle PASS | 渲染 |
