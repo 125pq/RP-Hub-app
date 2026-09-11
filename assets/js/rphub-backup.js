@@ -1070,6 +1070,10 @@
             setStatus('正在导出...');
             try {
                 const result = await exportBackup({ onStatus: setStatus });
+                if (result.cancelled) {
+                    setStatus('已取消导出。');
+                    return;
+                }
                 setStatus(`已导出 ${result.filename}（${result.recordCount} 条记录）。`);
             } catch (error) {
                 setStatus(error?.message || '导出失败。', true);

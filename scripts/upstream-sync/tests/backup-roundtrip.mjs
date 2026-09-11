@@ -677,4 +677,62 @@ function traceImport(env, fileLines) {
   console.log('Cancelled export reports cancelled (no false success): PASS');
 }
 
+// ---- 10. Actual export click handler: cancellation, success and error ----
+{
+  const env = await setupSeed();
+  const { RPHubBackup } = await loadBackupModule(env);
+  const source = await readFile(new URL('../../../assets/js/rphub-backup.js', import.meta.url), 'utf8');
+  const startMarker = "anchorEl.querySelector('[data-action=\"export\"]').addEventListener";
+  const endMarker = "anchorEl.querySelector('[data-action=\"import\"]').addEventListener";
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, 'extract the production export click binding');
+  assert.equal(source.indexOf(startMarker, start + startMarker.length), -1, 'export binding must be unique');
+  let click;
+  const statuses = [];
+  const context = vm.createContext({
+    busy: false,
+    anchorEl: {
+      querySelector(selector) {
+        assert.equal(selector, '[data-action="export"]');
+        return { addEventListener(event, handler) { assert.equal(event, 'click'); click = handler; } };
+      }
+    },
+    exportBackup: options => RPHubBackup.exportBackup(options),
+    setStatus: (text, isError = false) => statuses.push({ text, isError })
+  });
+  vm.runInContext(source.slice(start, end), context);
+  let saves = 0;
+  env.window.RPHubCardUtils.saveGeneratedFile = async () => {
+    saves += 1;
+    return { supported: true, cancelled: true };
+  };
+  await click();
+  assert.equal(saves, 1, 'UI must reach the real backup export API');
+  assert.equal(statuses.at(-1).text, '已取消导出。', 'cancel must not leave progress or report success');
+  assert.equal(statuses.at(-1).isError, false, 'cancel is not an error');
+  assert.ok(statuses.every(({ text }) => !text.includes('已导出') && !text.includes('undefined')));
+  assert.equal(context.busy, false, 'cancel must release the busy guard');
+
+  statuses.length = 0;
+  env.window.RPHubCardUtils.saveGeneratedFile = async stream => {
+    saves += 1;
+    for await (const _ of stream) { /* complete the actual backup stream */ }
+    return { supported: true, cancelled: false };
+  };
+  await click();
+  assert.equal(saves, 2, 'export remains usable after cancellation');
+  assert.match(statuses.at(-1).text, /^已导出 .+（\d+ 条记录）。$/);
+  assert.equal(statuses.at(-1).isError, false);
+  assert.equal(context.busy, false);
+
+  statuses.length = 0;
+  env.window.RPHubCardUtils.saveGeneratedFile = async () => { throw new Error('save failed'); };
+  await click();
+  assert.equal(statuses.at(-1).text, 'save failed');
+  assert.equal(statuses.at(-1).isError, true, 'write errors must remain visible');
+  assert.equal(context.busy, false, 'errors must release the busy guard');
+  console.log('Backup export UI cancellation/success/error: PASS');
+}
+
 console.log('\nAll backup roundtrip tests: PASS');
