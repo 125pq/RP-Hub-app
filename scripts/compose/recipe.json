@@ -22,13 +22,14 @@
     "assets/js/rphub-io.js",
     "assets/js/safe-area.js",
     "assets/js/scroll-performance-diagnosis.js",
-    "assets/js/app-back-navigation.js"
+    "assets/js/app-back-navigation.js",
+    "assets/js/text-metrics.js"
   ],
   "legacyOverrides": [
     {
       "file": "assets/js/app.js",
       "upstreamSha256": "038861ade120a712a31a57719b21bfea884cfa47b5b2eaf98e18499e2fc72e83",
-      "localSha256": "a45828f53c9f9e0ab976b657cb3395cfeb928c067c313749c09ec6ae63f5c626",
+      "localSha256": "d87b27fe74ac40cf39cfb2ce16de4514ebb23cb49e87d51b0628467cc8d6e4e8",
       "reason": "Existing app adaptations are not yet reconstructible from pure overlays; migrate by feature."
     }
   ],

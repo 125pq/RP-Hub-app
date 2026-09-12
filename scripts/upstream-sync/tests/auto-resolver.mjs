@@ -1,3 +1,4 @@
+import { patchTextMetrics } from '../patches/patch-text-metrics.mjs';
 import { patchAppNavigation } from '../patches/patch-app-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -923,7 +924,7 @@ const cleanDiagnosticApp = removeAppDiagnostics(legacyDiagnosticApp);
 const currentAppBytes = readFileSync(path.join(projectRoot, 'assets/js/app.js'), 'utf8');
 const currentApp = normalize(currentAppBytes);
 assert.equal(cleanDiagnosticApp, normalize(sourceText(preMergeAppRevision, 'assets/js/app.js')), 'complete legacy app diagnostics are removed exactly');
-assert.equal(currentApp, patchAppNavigation(normalize(reviewedMergedApp193)), 'current app matches the reviewed 1.9.3 merge replay');
+assert.equal(currentApp, patchTextMetrics(patchAppNavigation(normalize(reviewedMergedApp193))), 'current app matches the reviewed 1.9.3 merge replay');
 assert.ok(currentAppBytes.includes(`${upstreamImageTailLine}\n`), 'current app adopts upstream LF on the image-tail line');
 assert.ok(!currentAppBytes.includes(`${upstreamImageTailLine}\r\n`), 'current app does not retain local CRLF on the adopted image-tail line');
 assert.equal(removeAppDiagnostics(cleanDiagnosticApp), cleanDiagnosticApp, 'clean app diagnostic removal is idempotent');

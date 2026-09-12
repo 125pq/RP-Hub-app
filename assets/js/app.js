@@ -6726,17 +6726,7 @@ const app = createApp({
             return `${modeText}: ${toolCall.query}`;
         };
 
-        const timelineCharCountCache = new Map();
-        const getTimelineCharCount = (text) => {
-            const key = String(text || '');
-            if (timelineCharCountCache.has(key)) return timelineCharCountCache.get(key);
-            const value = Array.from(key).length;
-            timelineCharCountCache.set(key, value);
-            if (timelineCharCountCache.size > 600) {
-                timelineCharCountCache.delete(timelineCharCountCache.keys().next().value);
-            }
-            return value;
-        };
+        const getTimelineCharCount = window.RPHubTextMetrics.createCharCounter();
 
         const getTimelineSteps = (message) => {
             const steps = [];
