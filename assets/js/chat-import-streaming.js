@@ -54,7 +54,6 @@
             const {
                 setScopedStoredValue,
                 getScopedStoredValue,
-                deleteScopedStoredValue,
                 cloneForStorage,
                 getMainDb,
                 initDB
@@ -72,16 +71,14 @@
             let importedActiveId = STORY_BRANCH_MAIN_ID;
             const legacyMessages = [];
             const seenBranchIds = new Set();
-            const writtenScopeIds = [];
             let totalMessages = 0;
             let firstLineSeen = false;
-            let aborted = false;
             let failure = null;
 
             showToast('正在导入聊天记录...', 'info', 5000);
 
             await readChatLines(file, async (line) => {
-                if (failure || aborted) return;
+                if (failure) return;
                 if (!firstLineSeen) {
                     firstLineSeen = true;
                     let first;
@@ -103,8 +100,6 @@
                         importedActiveId = importedIds.has(String(manifest.activeBranchId))
                             ? String(manifest.activeBranchId)
                             : STORY_BRANCH_MAIN_ID;
-                        if (!await stopCurrentCharacterWork()) { aborted = true; return; }
-                        if (!getMainDb()) await initDB();
                         return;
                     }
                     legacyMessages.push(first);
@@ -135,9 +130,6 @@
                     const messages = record.messages;
                     totalMessages += messages.length;
                     seenBranchIds.add(branchId);
-                    const scopeId = getStoryBranchScopeId(char.uuid, branchId);
-                    await setScopedStoredValue('chat', scopeId, messages, { clone: false });
-                    writtenScopeIds.push(scopeId);
                     // Yield to the event loop so the UI keeps painting during large imports.
                     await new Promise(resolve => setTimeout(resolve, 0));
                     return;
@@ -150,33 +142,57 @@
                 }
             });
 
-            if (aborted) return;
-            if (failure) {
-                if (writtenScopeIds.length) {
-                    await Promise.all(writtenScopeIds.map(scopeId => deleteScopedStoredValue('chat', scopeId)));
+            if (failure) throw failure;
+
+            // Validate the entire file before asking for recovery or touching storage.
+            if (isBranchFormat) {
+                importedBranches.forEach(branch => {
+                    if (!seenBranchIds.has(branch.id)) throw new Error(`缺少分支“${branch.name}”的聊天记录`);
+                });
+            } else {
+                if (!legacyMessages.length) throw new Error('文件中没有有效的聊天记录');
+                if (legacyMessages.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
+                    throw new Error('聊天记录包含无效消息');
                 }
-                throw failure;
             }
+            if (currentCharacter.value?.uuid !== char.uuid) throw new Error('当前角色已切换，请重新导入。');
+            if (!await stopCurrentCharacterWork()) return;
+            const backup = window.RPHubBackup;
+            if (!backup?.createRecoveryBackup) throw new Error('恢复备份接口不可用，已中止导入。');
+            const recovery = await backup.createRecoveryBackup();
+            if (!recovery) {
+                showToast('未保存恢复备份，已取消聊天导入。', 'info');
+                return;
+            }
+            if (currentCharacter.value?.uuid !== char.uuid) throw new Error('当前角色已切换，已中止导入。');
+            if (!getMainDb()) await initDB();
+            const writeWithRecovery = async (write) => {
+                try {
+                    await write();
+                } catch (error) {
+                    const failure = new Error(`聊天导入中断，部分本地数据可能已被覆盖。请导入恢复备份 ${recovery.filename} 以恢复导入前的数据。原始错误：${error?.message || String(error)}`);
+                    failure.partialWrite = true;
+                    failure.recovery = recovery;
+                    throw failure;
+                }
+            };
 
             if (isBranchFormat) {
-                try {
-                    importedBranches.forEach(branch => {
-                        if (!seenBranchIds.has(branch.id)) throw new Error(`缺少分支“${branch.name}”的聊天记录`);
+                await writeWithRecovery(async () => {
+                    let header = true;
+                    await readChatLines(file, async (line) => {
+                        if (header) { header = false; return; }
+                        const record = JSON.parse(line);
+                        const scopeId = getStoryBranchScopeId(char.uuid, String(record.branchId).trim());
+                        await setScopedStoredValue('chat', scopeId, record.messages, { clone: false });
+                        await new Promise(resolve => setTimeout(resolve, 0));
                     });
-
                     await setScopedStoredValue('branches', char.uuid, {
                         version: 1,
                         activeBranchId: importedActiveId,
                         branches: cloneForStorage(importedBranches)
                     }, { clone: false });
-                } catch (error) {
-                    // 分支元数据写入失败,或因截断/损坏导致声明分支缺失时,回滚
-                    // 已写入的分支聊天记录,不留下部分覆盖的半成品(阶段 2 失败处理)。
-                    if (writtenScopeIds.length) {
-                        await Promise.all(writtenScopeIds.map(scopeId => deleteScopedStoredValue('chat', scopeId)));
-                    }
-                    throw error;
-                }
+                });
 
                 setApplyingCharacterScopedData(true);
                 storyBranches.value = importedBranches;
@@ -198,20 +214,20 @@
                 return;
             }
 
-            if (!legacyMessages.length) throw new Error('文件中没有有效的聊天记录');
-            if (legacyMessages.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
-                throw new Error('聊天记录包含无效消息');
-            }
-            if (!await stopCurrentCharacterWork()) return;
             // 解析出的消息是全新的普通 JSON 对象,不经过响应式代理,无需再
             // cloneForStorage 复制一整份;prepare 同一数组后直接存储该引用
             // (IndexedDB 写入时自行结构化克隆),去掉一次全量重复驻留(阶段 2)。
             setApplyingCharacterScopedData(true);
             chatHistory.value = prepareLoadedChatHistoryForDisplay(legacyMessages);
-            await setScopedStoredValue('chat', getCurrentStoryBranchScopeId(), legacyMessages, { clone: false });
-            updateCurrentStoryBranchSummary();
-            await saveStoryBranchesForCharacter(char);
-            finishApplyingCharacterScopedData();
+            try {
+                await writeWithRecovery(async () => {
+                    await setScopedStoredValue('chat', getCurrentStoryBranchScopeId(), legacyMessages, { clone: false });
+                    updateCurrentStoryBranchSummary();
+                    await saveStoryBranchesForCharacter(char);
+                });
+            } finally {
+                finishApplyingCharacterScopedData();
+            }
             showToast(`成功为 ${char.name} 导入 ${legacyMessages.length} 条聊天记录`, 'success');
         };
     };

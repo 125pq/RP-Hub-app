@@ -45,16 +45,16 @@
 | 聊天分支 JSONL 导出（app.js） | 逐分支、逐消息生成器 → `saveGeneratedFile` | — | 是（原生/FSA） | 是（单条消息粒度）；每条消息有一次 `cloneForStorage` 瞬时副本 | [已证实] 生产流形状；行为见 merge-regressions |
 | 聊天分支 JSONL 导入（chat-import-streaming.js） | — | 共享行读取，逐分支写库 | 是 | 是（逐分支写；不堆积整文件） | [已证实] test-chat-import-streaming（逐字节喂入） |
 | 聊天 legacy JSONL 导入（chat-import-streaming.js） | — | 共享行读取，整段消息数组一次写库 | 是（读取/解析逐行） | 读取阶段逐行；**写入需要完整消息数组驻留（存储契约要求单条记录）** | [已证实] test-chat-import-streaming，且已去掉全量 clone |
-| 角色卡 JSON 导出（character 页，补丁注入） | `RPHubIO.jsonTextChunks(data,{space:2})` → `saveGeneratedFile` | — | 是（原生分块 / FSA） | 是（不再先建整串） | [已证实] test-rphub-io（字节等价）+ test-save-generated-file（路径契约） |
+| 角色卡 JSON 导出（character 页，补丁注入） | `RPHubIO.jsonTextChunks(data,{space:2})` → `saveGeneratedFile` | — | 是（原生分块 / FSA） | 按最大字段增长（避免整卡整串，但单个字符串仍整体编码） | [已证实] test-rphub-io（字节等价）+ test-save-generated-file（路径契约） |
 | 角色卡 JSON / PNG 导出（app.js 上游函数） | `JSON.stringify` / PNG 字节 → `saveGeneratedFile` | — | 否（PNG 字节固有；JSON 先建整串） | 否（既有行为） | [未迁移] app.js 上游函数，阶段 3+ 评估 |
 | 角色/小说/工坊/论坛导入 | 见各自页面 | 既有实现 | 视入口而定 | 视入口而定 | [未迁移] 阶段 2 后续子任务 |
 
 ## 4. 导出一致性与导入失败处理
 
-- **导出一致性**：备份导出前先 `RPHubBackupBridge.flush()`，确保去抖写入落盘；聊天分支导出对当前角色先 `flushPendingChatHistorySave()`。导出流为拉取式生成器，由 `saveGeneratedFile` 消费者驱动，天然背压（不预聚合）。
+- **导出前刷写（不等同于全局快照一致性）**：备份导出前先 `RPHubBackupBridge.flush()`，确保去抖写入落盘；聊天分支导出对当前角色先 `flushPendingChatHistorySave()`。导出流为拉取式生成器，由 `saveGeneratedFile` 消费者驱动，天然背压（不预聚合）。分批读库期间并发写入仍可能产生跨时刻数据；全局一致性策略尚未实现，恢复备份也继承此限制。操作期间应停止编辑和生成；这不是代码强制的全局写入锁。
 - **取消**：原生选择器/FSA `AbortError` → `{cancelled:true}`，业务层不报成功。备份与聊天导出均已验证。
 - **备份导入失败**：`restoreSnapshotFile` 在**完整校验通过后、首次写库前**通过 `onWriteStart` 标记。校验失败 → 不进入写阶段，原样抛错；写阶段异常 → 关闭数据库并抛出带 `partialWrite=true` 的错误，消息明确「部分本地数据可能已被覆盖」并给出恢复备份文件名（镜像恢复是分批写入、非单事务，不能谎称数据未被修改）。导入前强制生成恢复备份，取消恢复备份则整体中止。
-- **聊天导入失败**：解析/校验失败 → 回滚已写入的分支聊天 scope（`deleteScopedStoredValue('chat', scopeId)`）。**本阶段补齐**：分支元数据写入失败或「截断导致声明分支缺失」时同样回滚，不再留下部分覆盖的半成品。
+- **聊天导入失败**：完整校验通过前不写库；通过后停止当前角色工作并要求保存恢复备份，取消保存即中止。分支文件第二遍读取才写正式数据；写库或元数据提交异常明确报告可能部分覆盖，并指向恢复备份。不会删除原有分支冒充回滚。legacy 同样要求恢复备份。恢复依赖用户导入备份，不承诺自动回滚。
 - **未知字段政策**：两种 JSONL 均不新增自有 schema；分支格式未知 `branchId` 报错，legacy 格式原样存储，保持上游语义。
 
 ## 5. 额外复制消除与内存说明
@@ -74,9 +74,9 @@
 | --- | --- | --- |
 | 共享行读取正确性 | **已测（Node）** | UTF-8 逐字节分块、CRLF、无尾换行、空行策略、FileReader 回退全部 PASS |
 | legacy 导入额外全量副本 | **已消除（结构证明）** | test-chat-import-streaming 断言 `cloneForStorage` 0 次 |
-| 损坏/截断/取消不静默丢数据 | **已测（Node，负向）** | 聊天损坏截断回滚、备份坏文件/截断/记录数不符拒绝、恢复写入中断反馈、取消不返回成功 |
+| 损坏/截断/取消不静默丢数据 | **已测（Node，负向）** | 聊天损坏截断拒绝且保留原数据、备份坏文件/截断/记录数不符拒绝、恢复写入中断反馈、取消不返回成功 |
 | 备份大样本往返确定性 | **已测（Node）** | `backup-large-file.mjs`：552 条记录 / 5.08 MiB（含 30000 条消息的数组记录）导出→导入→再导出字节一致；导出生成器首个 yield 前 `indexedDB.open` 次数为 0（惰性，不整体物化） |
-| 角色卡 JSON 流式序列化字节等价 | **已测（Node）** | `test-rphub-io.mjs`：simple/nested/unicode/numbers/undefined 省略/数组空位/toJSON/转义键/大样本 等 fixture 与 `JSON.stringify(value,null,space)` 逐字节相等（space=2/0/4/tab），大样本分多块且每块≈32 KiB；`character/index.html` 实际接入断言 |
+| 角色卡 JSON 流式序列化字节等价 | **已测（Node）** | `test-rphub-io.mjs`：simple/nested/unicode/numbers/undefined 省略/数组空位/toJSON/转义键/大样本 等 fixture 与 `JSON.stringify(value,null,space)` 逐字节相等（space=2/0/4/tab），大样本分多块且普通小字段每块≈32 KiB；单个 5 MiB 字符串仍会产生约 5 MiB 输出块，目标不是硬上限；`character/index.html` 实际接入断言 |
 | 峰值进程内存（含原生桥） | **待测** | 需参考设备 + 大样本，按方案 §7.3；本阶段不做设备测量，不以单测绿代替（Node 堆含 mock IDB，不代表 WebView） |
 | 总耗时 / 吞吐 / 最大在途块数 | **待测** | 同上 |
 | 聊天导入进度回调 | **未实现** | 现有导出有 `onProgress`，聊天导入无；如需 UI 进度另开子任务 |
@@ -93,7 +93,7 @@
 ## 8. 未完成项与下一阶段入口
 
 未完成验收（不标「阶段 2 已完成」的原因）：
-- 已迁移/加固聊天 JSONL、备份 V5、角色页 JSON 三个格式；角色 PNG、app.js 内上游角色 JSON 导出、跨页面导入等仍按既有实现（未迁移）。
+- 本轮范围固定为聊天 JSONL、备份 V5、角色页 JSON 三个切片。其余入口按实测瓶颈立项，不作为阶段 3 的前置条件。
 - 设备端峰值内存/耗时未测。
 - 聊天导入进度回调未实现。
 - 备份镜像恢复仍是分批写入（非单事务）：写入中断已诚实反馈并指向恢复备份，但未做到事务级自动回滚（需 staged/事务存储改造，按方案 §6 属移出本阶段的部分）。
@@ -105,3 +105,21 @@
 - 代码：`assets/js/rphub-io.js`（新增）、`rphub-backup.js` / `chat-import-streaming.js` / `index.html` / `index-script-overlay.mjs` / `verify-dist.mjs` / `package.json` 的本轮改动；`docs` 与测试。
 - 数据：**未改动任何存储 schema、数据库名/版本、localStorage key 或备份格式**；回退代码不需要恢复数据库。
 - 上一稳定接入：阶段 1 的 `saveGeneratedFile` 契约与 `rphub-backup.js` 内联行读取（回退即恢复该内联实现与旧导出）。
+
+## 10. 收口决定（2026-09-12）
+
+阶段 2 不以全格式流式化为完成条件。先保障现有入口的数据安全，修正性能承诺，再测量。
+保留共享行读取与少一次深拷贝；不扩建通用序列化框架，不改数据库 schema。
+新增验证必须使用已有聊天和分支元数据，覆盖截断、损坏、恢复保存取消、分支写入失败与元数据写入失败。
+角色 JSON 仅承诺避免完整整卡字符串；内存仍取决于最大字段，尚无真机性能收益结论。
+阶段 3 可开展独立候选组合构建，不要求所有性能项完成；正式切换仍受阶段 4/6 验收约束。
+
+## 11. 本轮验证记录（2026-09-12）
+
+- 完整 `test:upstream-sync`（含备份、实际版本合并夹具、reapply=0）、`test:platform`、`build:web`、`verify:dist`（46/46）通过。
+- debug 构建成功，ADB 覆盖安装 `io.github.pq125.rphub.debug` 成功；正式包未替换。
+- V2505A / Android 16 / WebView 152.0.7977.66；debug 页面实际 origin 为 `https://localhost`。
+- 通过 WebView 调试接口执行已加载的 `RPHubIO.readTextFileLines`：内存中构造的 File 为 52,424,000 字节，800 行，逐行 JSON 解析和 emoji 校验通过，单次读取/解析约 162 ms。
+- 上述数字不含文件选择、文件构造、写库和原生保存，不代表完整导入耗时；没有旧版对照或进程峰值内存数据，不能作为性能收益结论。
+- 原生恢复保存的取消验证未完成，不计入通过项。整体导入导出用户反馈正常，本轮不扩改该流程。
+- 按用户要求未使用子代理审查；主代理检查了先校验后写入、取消路径、失败提示和变更边界。未修改上游文件、数据库 schema 或备份格式。

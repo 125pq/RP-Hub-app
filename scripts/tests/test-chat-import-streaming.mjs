@@ -52,6 +52,13 @@ function loadFactory() {
   vm.runInContext(ioSource, sandbox, { filename: 'rphub-io.js' });
   vm.runInContext(chatSource, sandbox, { filename: 'chat-import-streaming.js' });
   const storage = makeStorage();
+  win.RPHubBackup = {
+    async createRecoveryBackup() {
+      storage.recoveryCalls = (storage.recoveryCalls || 0) + 1;
+      storage.recoverySnapshot = structuredClone([...storage.store]);
+      return storage.cancelRecovery ? null : { filename: 'recovery-test.jsonl' };
+    }
+  };
   win.RPHubStorage = storage;
   win.RPHubStoryBranches = storyBranchesUtil;
   return { storage, createImporter: win.RPHubChatImport.createChatImporter };
@@ -94,9 +101,9 @@ function makeDeps(char) {
 }
 
 function streamBytes(chunks) {
-  let index = 0;
   return {
     stream() {
+      let index = 0;
       return new ReadableStream({
         pull(controller) {
           if (index >= chunks.length) { controller.close(); return; }
@@ -153,7 +160,7 @@ function byteChunkedFile(text) {
   assert.match(toasts.at(-1).message, /2 个分支/);
 }
 
-// 3) Corrupt branch record mid-stream: reject and roll back the already-written branch.
+// 3) Corrupt branch record: reject before writing any branch.
 {
   const { storage, createImporter } = loadFactory();
   const char = { uuid: 'u3', name: 'Carol' };
@@ -165,11 +172,12 @@ function byteChunkedFile(text) {
     'not-json'
   ].join('\n') + '\n';
   await assert.rejects(() => createImporter(deps)(textFile(text)), /分支聊天数据不完整/);
-  assert.ok(storage.deletes.includes('chat:u3::main'), 'partial branch write must be rolled back on corrupt data');
+  assert.equal(storage.deletes.length, 0, 'validation must never delete existing chat');
+  assert.equal(storage.recoveryCalls || 0, 0, 'invalid files must not ask for a recovery export');
   assert.equal(storage.store.has('branches:u3'), false, 'no branch metadata on failed import');
 }
 
-// 4) Truncated branch file (declared branch missing at a clean line boundary): reject and roll back.
+// 4) Truncated branch file: reject without touching the existing branches.
 {
   const { storage, createImporter } = loadFactory();
   const char = { uuid: 'u4', name: 'Dave' };
@@ -180,7 +188,8 @@ function byteChunkedFile(text) {
     JSON.stringify({ branchId: 'main', messages: [{ role: 'user', content: 'm0' }] })
   ].join('\n') + '\n';
   await assert.rejects(() => createImporter(deps)(textFile(text)), /缺少分支/);
-  assert.ok(storage.deletes.includes('chat:u4::main'), 'missing-branch truncation must roll back the partial write');
+  assert.equal(storage.deletes.length, 0, 'truncation must not write or delete chat');
+  assert.equal(storage.recoveryCalls || 0, 0);
 }
 
 // 5) Corrupt legacy JSON: reject with no writes.
@@ -199,9 +208,41 @@ function byteChunkedFile(text) {
   const { deps } = makeDeps(char);
   deps.stopCurrentCharacterWork = async () => false;
   const manifest = { type: STORY_BRANCH_CHAT_EXPORT_TYPE, version: 1, branches: [{ id: 'main', name: '主线' }], activeBranchId: 'main' };
-  await createImporter(deps)(textFile(JSON.stringify(manifest) + '\n'));
+  await createImporter(deps)(textFile(JSON.stringify(manifest) + '\n' + JSON.stringify({ branchId: 'main', messages: [] }) + '\n'));
   assert.equal(storage.store.size, 0, 'aborted import must not write');
   assert.equal(storage.deletes.length, 0, 'abort is not an error rollback');
 }
 
-console.log('chat JSONL import (actual createChatImporter call path): legacy/branch success, corrupt & truncated rollback, abort, no-full-clone storage contract: PASS');
+// Existing data is the essential fixture: a failed import must not erase it.
+for (const mode of ['truncated', 'corrupt', 'cancel', 'write', 'metadata']) {
+  const { storage, createImporter } = loadFactory();
+  const { deps } = makeDeps({ uuid: 'old', name: 'Existing' });
+  storage.store.set('chat:old::main', [{ role: 'user', content: 'original main' }]);
+  storage.store.set('chat:old::b2', [{ role: 'user', content: 'original branch' }]);
+  storage.store.set('branches:old', { branches: [{ id: 'main' }, { id: 'b2' }] });
+  const before = structuredClone([...storage.store]);
+  const manifest = { type: STORY_BRANCH_CHAT_EXPORT_TYPE, version: 1, branches: [{ id: 'main' }, { id: 'b2' }], activeBranchId: 'main' };
+  const records = [manifest, { branchId: 'main', messages: [{ role: 'user', content: 'new' }] }];
+  if (mode !== 'truncated') records.push({ branchId: 'b2', messages: [] });
+  let text = records.map(record => JSON.stringify(record)).join('\n');
+  if (mode === 'corrupt') text += '\nnot-json';
+  storage.cancelRecovery = mode === 'cancel';
+  const put = storage.setScopedStoredValue;
+  storage.setScopedStoredValue = async (name, id, value) => {
+    if ((mode === 'write' && id === 'old::b2') || (mode === 'metadata' && name === 'branches')) throw new Error('injected storage failure');
+    return put(name, id, value);
+  };
+  if (mode === 'cancel') await createImporter(deps)(textFile(text));
+  else await assert.rejects(() => createImporter(deps)(textFile(text)), error => {
+    if (mode === 'write' || mode === 'metadata') {
+      assert.equal(error.partialWrite, true);
+      assert.match(error.message, /recovery-test.jsonl/);
+      assert.deepEqual(storage.recoverySnapshot, before, 'recovery must contain the old data before any overwrite');
+    }
+    return true;
+  });
+  assert.equal(storage.deletes.length, 0, 'deletion is not rollback');
+  if (['truncated', 'corrupt', 'cancel'].includes(mode)) assert.deepEqual([...storage.store], before);
+}
+
+console.log('chat JSONL import: success, full validation, existing-data preservation, recovery cancellation and write failure: PASS');

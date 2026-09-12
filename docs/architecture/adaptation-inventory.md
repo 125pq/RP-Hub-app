@@ -61,11 +61,11 @@ overlay manifest 共 **8 个文件**（`scripts/upstream-sync/overlay-transforme
 | 原生分块导出（beginSave/appendChunk/finishSave/cancelSave） | 已证实 | NativeFilePlugin（android/…/NativeFilePlugin.java）+ test:platform「file chunks, cancellation」PASS | 文件 IO |
 | 非原生流式文件落地（File System Access API） | 已证实（能力探测+FSA 真流式/取消/失败传播，见 file-save-contract.md） | `supportsStreamingFileSave` + core-utils `tryStreamViaFileSystemAccess` + test-save-generated-file.mjs 五场景 PASS | 文件 IO |
 | 浏览器文件下载 | 已证实 | android-download-bridge PASS；聚合 fallback 保留（见 contract §7） | — |
-| 聊天 JSONL 流式导入（分支/legacy） | 已证实（阶段 2：共用 `rphub-io.js` 流式行读取；分支逐条写、legacy 去掉全量 clone；损坏/截断回滚） | test-chat-import-streaming.mjs（真实 `createChatImporter` 调用路径 + 逐字节分块）PASS | 聊天数据 |
+| 聊天 JSONL 流式导入（分支/legacy） | 已证实（阶段 2：共用 `rphub-io.js` 流式行读取；分支逐条写、legacy 去掉全量 clone；损坏/截断先校验拒绝；覆盖前保存恢复备份） | test-chat-import-streaming.mjs（真实 `createChatImporter` 调用路径 + 逐字节分块）PASS | 聊天数据 |
 | 聊天 JSONL 流式导出 | 已证实（导出侧经 FSA/原生真流式；旧浏览器聚合见 file-save-contract §7；**端到端峰值内存实测待设备**） | app.js 生成器 + backup-roundtrip + saveGeneratedFile FSA 路径 PASS | 聊天数据 |
 | 共享流式行读取组件 | 已证实（阶段 2 新增，backup/chat 单一实现） | test-rphub-io.mjs（UTF-8 逐字节、CRLF、空行策略、FileReader 回退、无私有副本）PASS | 无 |
 | 共享流式 JSON 写入组件 | 已证实（阶段 2 新增，角色页 JSON 导出使用） | test-rphub-io.mjs（与原生 `JSON.stringify` 跨 fixture 逐字节等价、分块、BigInt/循环抛错）PASS | 无 |
-| 角色卡 JSON 流式导出（character 页） | 已证实（阶段 2：`RPHubIO.jsonTextChunks`，不再先建整串） | test-rphub-io.mjs 页面接入断言（加载 `rphub-io.js`、无 `downloadFile(JSON.stringify(...))`）PASS | 角色卡数据 |
+| 角色卡 JSON 流式导出（character 页） | 已证实（阶段 2：`RPHubIO.jsonTextChunks`，不再先建整卡整串，单个字符串仍整体编码） | test-rphub-io.mjs 页面接入断言（加载 `rphub-io.js`、无 `downloadFile(JSON.stringify(...))`）PASS | 角色卡数据 |
 | 备份导入/导出（v5 兼容） | 已证实（阶段 2 补大样本确定性 + 惰性流式证据） | backup-v5-compat 三项 PASS；backup-large-file（552 条/5.08 MiB 字节一致、首 yield 前 0 次 open）PASS | 备份格式 |
 | 备份导入写入中断的可观察反馈 | 已证实（阶段 2：`onWriteStart` 区分校验失败与写入中失败，partialWrite 错误指向恢复备份） | backup-large-file 第 5 用例 PASS | 用户数据 |
 | 取消导出 | 已证实（桥层取消 + FSA AbortError→cancelled，见 test-save-generated-file 场景 3；P1 修复后 exportBackup 取消显式 `cancelled:true`、不再返回成功对象） | test-platform cancellation + save-generated-file FSA-cancel + backup-roundtrip 用例 9 PASS | — |

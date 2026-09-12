@@ -168,3 +168,13 @@ function streamFile(chunks) {
 }
 
 console.log('rphub-io: streaming line reader + byte-exact streaming JSON writer: PASS');
+
+// A single large string is still encoded whole: the chunk target is not a cap.
+{
+  const io = loadIO();
+  const value = { description: 'x'.repeat(5 * 1024 * 1024) };
+  const chunks = [];
+  for await (const chunk of io.jsonTextChunks(value)) chunks.push(chunk);
+  assert.equal(chunks.join(''), JSON.stringify(value, null, 2));
+  assert.ok(chunks.some(chunk => chunk.length > 5 * 1024 * 1024));
+}
