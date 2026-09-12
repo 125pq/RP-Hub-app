@@ -213,6 +213,23 @@ export function patchAndroidCharacter(source) {
   return source;
 }
 
+// Shared by filesystem reapply and the isolated composition build.
+export function patchAndroidUpdateCheck(source) {
+  const dispatch = `                    window.dispatchEvent(new CustomEvent('rphub:update-available', {\n                        detail: { versionId: latestVersionId }\n                    }));`;
+  const guardedDispatch = `                    // The native APK checks GitHub Releases through AppUpdateManager. A\n                    // WebView reload cannot update the installed APK, so keep this web-only prompt\n                    // out of native builds while preserving browser update notifications.\n                    const isNativeApp = window.platformAdapter?.isNative?.() === true;\n                    if (!isNativeApp) {\n                        window.dispatchEvent(new CustomEvent('rphub:update-available', {\n                            detail: { versionId: latestVersionId }\n                        }));\n                    }`;
+  const rawCount = countOccurrences(source, dispatch);
+  const guardedCount = countOccurrences(source, guardedDispatch);
+  const eventCount = countOccurrences(source, "new CustomEvent('rphub:update-available'");
+  if (eventCount !== 1 || !((rawCount === 1 && guardedCount === 0) || (rawCount === 0 && guardedCount === 1))) {
+    throw new Error('Ambiguous or drifted update-check native guard: expected exactly one raw or guarded notification');
+  }
+  if (rawCount === 1) {
+    source = replaceOnce(source, dispatch, guardedDispatch, 'update-check native update guard');
+  }
+  requireContains(source, guardedDispatch, 'update-check native guard');
+  return source;
+}
+
 export async function applyAndroidHooks() {
   const changes = [];
 
@@ -222,15 +239,7 @@ export async function applyAndroidHooks() {
 
   changes.push(await editText('assets/js/core-utils.js', category, patchCoreUtilsOverlay));
 
-  changes.push(await editText('assets/js/update-check.js', category, source => {
-    const dispatch = `                    window.dispatchEvent(new CustomEvent('rphub:update-available', {\n                        detail: { versionId: latestVersionId }\n                    }));`;
-    const guardedDispatch = `                    // The native APK checks GitHub Releases through AppUpdateManager. A\n                    // WebView reload cannot update the installed APK, so keep this web-only prompt\n                    // out of native builds while preserving browser update notifications.\n                    const isNativeApp = window.platformAdapter?.isNative?.() === true;\n                    if (!isNativeApp) {\n                        window.dispatchEvent(new CustomEvent('rphub:update-available', {\n                            detail: { versionId: latestVersionId }\n                        }));\n                    }`;
-    if (!source.includes(guardedDispatch)) {
-      source = replaceOnce(source, dispatch, guardedDispatch, 'update-check native update guard');
-    }
-    requireContains(source, guardedDispatch, 'update-check native guard');
-    return source;
-  }));
+  changes.push(await editText('assets/js/update-check.js', category, patchAndroidUpdateCheck));
 
   changes.push(await editText('character/index.html', category, patchAndroidCharacter));
 

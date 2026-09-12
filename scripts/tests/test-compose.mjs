@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFile, readdir, cp, mkdtemp, appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import vm from 'node:vm';
+import { patchAndroidUpdateCheck } from '../upstream-sync/patches/patch-android-hooks.mjs';
 import { repositoryRoot } from '../web/paths.mjs';
 import { hash, git, filesIn, transform, classifyUpstream, assertLegacy, compareBytes, safeRelative } from '../compose/compose-lib.mjs';
 
@@ -44,6 +46,56 @@ assert.throws(() => safeRelative('../dist'), /Unsafe/);
 assert.throws(() => transform('assets/css/styles.css', Buffer.from('.unknown {}')), /anchor|rule/);
 assert.throws(() => compareBytes('index.html', Buffer.from('new feature\r\n'), Buffer.from('old feature\n'), ['index.html']), /Unexplained/);
 assert.throws(() => compareBytes('assets/js/app.js', Buffer.from('x\r\n'), Buffer.from('x\n'), ['index.html']), /Unexplained/);
+
+// Reconstruct the update guard without copying the local file. Unrelated new
+// upstream content survives; ambiguous/partial notification hooks stop the build.
+const updateFile = 'assets/js/update-check.js';
+const updateUpstream = git(repositoryRoot, ['show', `${lock.commit}:${updateFile}`]);
+const updateOutput = transform(updateFile, updateUpstream);
+assert.ok(updateOutput.equals(await readFile(path.join(repositoryRoot, updateFile))));
+assert.ok(transform(updateFile, updateOutput).equals(updateOutput));
+const upstreamLf = updateUpstream.toString().replace(/\r\n/g, '\n');
+const guardedLf = patchAndroidUpdateCheck(upstreamLf);
+assert.equal(patchAndroidUpdateCheck(upstreamLf + '\n// unrelated upstream addition\n'), guardedLf + '\n// unrelated upstream addition\n');
+assert.throws(() => patchAndroidUpdateCheck(upstreamLf + upstreamLf), /Ambiguous or drifted/);
+assert.throws(() => patchAndroidUpdateCheck(guardedLf + upstreamLf), /Ambiguous or drifted/);
+assert.throws(() => patchAndroidUpdateCheck(guardedLf.replace('if (!isNativeApp)', 'if (isNativeApp)')), /Ambiguous or drifted/);
+assert.throws(() => patchAndroidUpdateCheck(upstreamLf.replace('rphub:update-available', 'rphub:changed')), /Ambiguous or drifted/);
+
+// Execute the generated script: browsers notify once; Android delegates to its
+// native updater. Timer and visibility cleanup stay in upstream's implementation.
+for (const native of [true, false, undefined]) {
+  let mounted, unmounted, tick;
+  let removed = 0, cleared = 0;
+  const events = [];
+  const window = {
+    RPHubLatestUpdate: { id: 10903 },
+    ...(native === undefined ? {} : { platformAdapter: { isNative: () => native } }),
+    dispatchEvent: event => events.push(event),
+  };
+  vm.runInNewContext(updateOutput.toString(), {
+    window,
+    Vue: { onMounted: fn => { mounted = fn; }, onBeforeUnmount: fn => { unmounted = fn; } },
+    document: { querySelector: () => ({ content: 'https://example.invalid' }), hidden: false,
+      addEventListener() {}, removeEventListener() { removed++; } },
+    fetch: async () => ({ ok: true, json: async () => ({ updateAvailable: true, latestVersionId: 10904 }) }),
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    setInterval: fn => { tick = fn; return 123; },
+    clearInterval: id => { assert.equal(id, 123); cleared++; },
+  });
+  window.RPHubUpdateCheck.useUpdateCheck();
+  mounted();
+  await new Promise(resolve => setImmediate(resolve));
+  await tick();
+  assert.equal(events.length, native === true ? 0 : 1);
+  if (events.length) {
+    assert.equal(events[0].type, 'rphub:update-available');
+    assert.equal(events[0].detail.versionId, 10904);
+  }
+  unmounted();
+  assert.equal(removed, 1);
+  assert.equal(cleared, 1);
+}
 
 // Reject output deletion outside the disposable workspace, before touching a file.
 assert.match(cli('scripts/web/build-web.mjs', ['--output-dir', path.dirname(repositoryRoot)], false).stderr, /Custom output/);

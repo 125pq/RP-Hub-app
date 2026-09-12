@@ -4,6 +4,7 @@ import { readdir, readFile, lstat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { overlayManifest, transformOverlayBlob } from '../upstream-sync/overlay-transformers.mjs';
 import { dominantEol, rebuildWithOriginalEol } from '../upstream-sync/lib.mjs';
+import { patchAndroidUpdateCheck } from '../upstream-sync/patches/patch-android-hooks.mjs';
 import { patchChatLayoutCss } from '../upstream-sync/patches/patch-chat-layout.mjs';
 import { patchSidebarRenderingCss } from '../upstream-sync/patches/patch-sidebar-rendering.mjs';
 
@@ -40,14 +41,17 @@ export async function write(root, file, bytes) {
 export function transform(file, bytes) {
   const source = bytes.toString('utf8');
   if (overlayManifest.includes(file)) return Buffer.from(transformOverlayBlob(file, source));
-  if (file === 'assets/css/styles.css') {
-    const changed = patchSidebarRenderingCss(patchChatLayoutCss(source.replace(/\r\n/g, '\n')));
+  if (file === 'assets/css/styles.css' || file === 'assets/js/update-check.js') {
+    const normalized = source.replace(/\r\n/g, '\n');
+    const changed = file === 'assets/js/update-check.js'
+      ? patchAndroidUpdateCheck(normalized)
+      : patchSidebarRenderingCss(patchChatLayoutCss(normalized));
     return Buffer.from(rebuildWithOriginalEol(source, changed, dominantEol(source)));
   }
   return bytes;
 }
 
-export const transformedFiles = [...overlayManifest, 'assets/css/styles.css'];
+export const transformedFiles = [...overlayManifest, 'assets/css/styles.css', 'assets/js/update-check.js'];
 
 export function classifyUpstream(file, recipe) {
   safeRelative(file);
