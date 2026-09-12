@@ -30,7 +30,8 @@ export function patchAppNavigation(source) {
     }
     source = source.slice(0, start) + hook + source.slice(end);
   } else {
-    source = ensureBefore(source, '        const confirmCharacterExport = (type) => {', hook, 'app navigation binding');
+    const anchor = source.includes('        const initializePlatformAdapters =') ? '        const initializePlatformAdapters =' : '        const confirmCharacterExport = (type) => {';
+    source = ensureBefore(source, anchor, hook, 'app navigation binding');
   }
   if (countOccurrences(source, 'const handlePlatformBackButton =') !== 1) {
     throw new Error('App back navigation binding is ambiguous');

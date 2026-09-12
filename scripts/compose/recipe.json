@@ -24,17 +24,12 @@
     "assets/js/scroll-performance-diagnosis.js",
     "assets/js/app-back-navigation.js",
     "assets/js/text-metrics.js",
-    "assets/js/chat-export-streaming.js"
+    "assets/js/chat-export-streaming.js",
+    "assets/js/text-filter-cache.js"
   ],
-  "legacyOverrides": [
-    {
-      "file": "assets/js/app.js",
-      "upstreamSha256": "038861ade120a712a31a57719b21bfea884cfa47b5b2eaf98e18499e2fc72e83",
-      "localSha256": "efbbab0f7a46ef0bd4a4ca514975e0a134f5df36de386ca8cf4bd465d2cd2073",
-      "reason": "Existing app adaptations are not yet reconstructible from pure overlays; migrate by feature."
-    }
-  ],
+  "legacyOverrides": [],
   "allowedBaselineEolDifferences": [
-    "index.html"
+    "index.html",
+    "assets/js/app.js"
   ]
 }

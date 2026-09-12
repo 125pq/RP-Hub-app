@@ -32,6 +32,13 @@ async function candidate() {
   return { run, report: JSON.parse(await readFile(path.join(run, 'report.json'))) };
 }
 
+assert.deepEqual(recipe.legacyOverrides, [], 'No full-file app override may return');
+const appOriginal = git(repositoryRoot, ['show', `${lock.commit}:assets/js/app.js`]);
+const appRebuilt = transform('assets/js/app.js', appOriginal);
+assert.equal(compareBytes('assets/js/app.js', appRebuilt, await readFile(path.join(repositoryRoot, 'assets/js/app.js')), recipe.allowedBaselineEolDifferences), 'eol-only');
+assert.ok(transform('assets/js/app.js', appRebuilt).equals(appRebuilt));
+assert.throws(() => transform('assets/js/app.js', Buffer.from(appOriginal.toString().replace('const getPostprocessedChatMessages =', 'const changedProcessor ='))), /drifted|anchor/);
+
 // Drift must be rejected, even where a whole-file legacy fallback is still needed.
 for (const entry of recipe.legacyOverrides) {
   const upstream = git(repositoryRoot, ['show', `${lock.commit}:${entry.file}`]);

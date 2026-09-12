@@ -42,7 +42,7 @@ const report = {
   dependencyLockSha256: hash(await readFile(path.join(repositoryRoot, 'package-lock.json'))),
   files: [], buildInputs: [], comparison: [],
   limitations: ['Parallel candidate only; official sync/build unchanged.',
-    'Pinned legacy overrides remain; no automatic compatibility claim for new upstream versions.',
+    'Registered adaptations still require compatibility checks for new upstream versions.',
     'Byte comparison is not device or runtime behavior validation.'],
 };
 

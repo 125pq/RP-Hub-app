@@ -24,8 +24,8 @@ assertAll(app, [
   // 1.8.4 quoted-dialogue protection + local filter cache
   'quotedDialoguePattern',
   '.split(quotedDialoguePattern)',
-  'filteredContentCache',
-  'FILTERED_CONTENT_CACHE_MAX',
+  'RPHubTextFilterCache.create',
+  'filterBlockedStyleTextUncached',
   // countOnly fast path (local performance overlay)
   'countOnly',
   // UI template update block finder (imported from data-services)

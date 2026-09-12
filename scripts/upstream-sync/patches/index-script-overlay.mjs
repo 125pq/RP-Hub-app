@@ -77,6 +77,7 @@ function assertScriptOrder(lines) {
     'app-back-navigation.js',
     'text-metrics.js',
     'chat-export-streaming.js',
+    'text-filter-cache.js',
     'app.js'
   ];
   const indexes = assets.map(asset => {
@@ -130,6 +131,7 @@ export function patchIndexScriptOverlay(source) {
   lines = ensureBefore(lines, app, scriptLine('app-back-navigation.js'), 'app navigation entry');
   lines = ensureBefore(lines, app, scriptLine('text-metrics.js'), 'text metrics entry');
   lines = ensureBefore(lines, app, scriptLine('chat-export-streaming.js'), 'chat export entry');
+  lines = ensureBefore(lines, app, scriptLine('text-filter-cache.js'), 'filter cache entry');
   assertScriptOrder(lines);
 
   const replacement = `    <script>\n${lines.join('\n')}\n    </script>`;

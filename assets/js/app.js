@@ -1069,21 +1069,10 @@ const app = createApp({
             if (lastIndex < text.length) segments.push({ text: text.slice(lastIndex), matched: false });
             return segments.length ? segments : [{ text, matched: false }];
         };
-        // Per-message memoization of the blocked-style filter. filterBlockedStyleText is a pure
-        // function of its input (all patterns are constants), so caching by content string is
-        // byte-exact. This avoids re-filtering the whole stable history on every streaming flush:
-        // only messages whose content actually changed miss the cache. The `log` path is excluded
-        // from the cache so its diagnostic side effects (console + fragment dedup) stay intact.
-        const filteredContentCache = new Map();
-        const FILTERED_CONTENT_CACHE_MAX = 2000;
-        const filterBlockedStyleText = (text, { log = false, collect = null } = {}) => {
+        const filterBlockedStyleTextUncached = (text, { log = false, collect = null } = {}) => {
             const source = String(text || '');
             if (!settings.styleFilterEnabled) return source;
             if (isStandaloneRenderedContent(source)) return source;
-            if (!log) {
-                const cached = filteredContentCache.get(source);
-                if (cached !== undefined) return cached;
-            }
             const removedFragments = [];
             const updateBlock = findUiTemplateUpdateBlock(source);
             const filterEnd = updateBlock?.index ?? source.length;
@@ -1104,7 +1093,6 @@ const app = createApp({
                     .replace(/[ \t]+\n/g, '\n')
                     .replace(/\n{3,}/g, '\n\n'))
                 .join(''));
-            const result = filtered + source.slice(filterEnd);
             if (Array.isArray(collect)) {
                 collect.push(...removedFragments.map(normalizeStyleFilterHit).filter(Boolean));
             }
@@ -1112,14 +1100,10 @@ const app = createApp({
                 const newFragments = removedFragments.filter(fragment => fragment && !loggedBlockedStyleFragments.has(fragment));
                 newFragments.forEach(fragment => loggedBlockedStyleFragments.add(fragment));
                 if (newFragments.length) console.info(`[文风过滤] 已过滤 ${newFragments.length} 处`, newFragments);
-            } else {
-                if (filteredContentCache.size >= FILTERED_CONTENT_CACHE_MAX) {
-                    filteredContentCache.delete(filteredContentCache.keys().next().value);
-                }
-                filteredContentCache.set(source, result);
             }
-            return result;
+            return filtered + source.slice(filterEnd);
         };
+        const filterBlockedStyleText = window.RPHubTextFilterCache.create(filterBlockedStyleTextUncached, () => settings.styleFilterEnabled);
         const getPostprocessedChatMessages = (messages = chatHistory.value, options = {}) => {
             const merged = postprocessChatHistory(messages, options);
             // countOnly: callers that only need the merged-message count (e.g. floor stats)
@@ -4236,7 +4220,6 @@ const app = createApp({
             return removed;
         };
 
-
         const removeVectorMemoriesForConversationTurn = async (snapshot, turn) => {
             if (!Number.isFinite(turn) || turn <= 0) return 0;
             const turnInfo = snapshot?.turns?.find(item => item.turn === turn);
@@ -5349,7 +5332,6 @@ const app = createApp({
                 : snapshot;
         };
 
-
         const hasClassicMemoryForJob = (job) => {
             const targetIds = new Set(job.sourceAssistantIds || []);
             return classicMemories.value.some(memory => {
@@ -5422,7 +5404,6 @@ const app = createApp({
                 requestMessages.push({ role: 'user', content: `${marker}\n${turnInfo.userContent}` });
                 requestMessages.push({ role: 'assistant', content: `${marker}\n${turnInfo.assistantContent}` });
             });
-
             requestMessages.push({
                 role: 'user',
                 content: BUILTIN_PROMPTS.buildClassicSummaryFinalInstruction(job.turn)
@@ -7058,7 +7039,6 @@ const app = createApp({
                     if (isConversationBusy.value) {
                         await waitForMemoryConversationIdle(batchController.signal);
                         continue;
-
                     }
                     const currentTurnCount = buildConversationTurnSnapshot(chatHistory.value, { includeSystem: false }).turns.length;
                     if (jobs.length > 0 || _classicBatchRescanRequested || currentTurnCount !== safeTurnCount) continue;
@@ -8951,7 +8931,6 @@ const app = createApp({
                 );
             }
         });
-
         const classicMemoryPageCount = computed(() => Math.max(1, Math.ceil(classicMemories.value.length / LIST_PAGE_SIZE)));
         watch(classicMemoryPageCount, pageCount => { classicMemoryPage.value = Math.min(classicMemoryPage.value, pageCount); });
         watch(() => currentCharacter.value?.uuid, () => { classicMemoryPage.value = 1; });

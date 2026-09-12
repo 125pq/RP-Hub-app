@@ -1,3 +1,5 @@
+import { removeAppMergeArtifacts } from './patch-app-artifacts.mjs';
+import { patchAppFilterCache } from './patch-app-filter-cache.mjs';
 import { patchAppChatImport } from './patch-app-chat-import.mjs';
 import { patchAppOffscreen } from './patch-app-offscreen.mjs';
 import { patchChatExport } from './patch-chat-export.mjs';
@@ -162,6 +164,7 @@ export async function applyPerformanceHooks() {
   const changes = [];
   changes.push(await editText('index.html', category, patchIndexScriptOverlay));
   changes.push(await editText('assets/js/app.js', category, source => {
+    source = removeAppMergeArtifacts(patchAppFilterCache(source));
     source = patchAppOffscreen(patchAppChatImport(patchChatExport(patchTextMetrics(removeAppDiagnostics(source)))));
     requireContains(source, 'window.RPHubOffscreenIframeLifecycle?.attach(container);', 'offscreen attach hook');
     requireContains(source, 'window.RPHubOffscreenIframeLifecycle?.detach();', 'offscreen cleanup hook');
