@@ -6,6 +6,8 @@
     "prepare:vendor": "node scripts/web/prepare-vendor.mjs",
     "build:css": "node scripts/web/build-css.mjs",
     "build:web": "npm run prepare:vendor && npm run build:css && node scripts/web/build-web.mjs",
+    "build:candidate": "node scripts/compose/build-candidate.mjs",
+    "test:compose": "node scripts/tests/test-compose.mjs",
     "verify:dist": "node scripts/web/verify-dist.mjs",
     "test:syntax": "node --check assets/js/platform-services.js && node --check assets/js/rphub-android-adapter.js && node --check assets/js/rphub-backup.js && node --check assets/js/core-utils.js && node --check assets/js/app.js",
     "test:platform": "npm run test:syntax && node scripts/tests/test-rphub-io.mjs && node scripts/tests/test-platform-services.mjs && node scripts/tests/test-save-generated-file.mjs && node scripts/tests/test-chat-import-streaming.mjs && node scripts/tests/test-safe-area-layout.mjs && node scripts/tests/test-safe-area-insets.mjs && node scripts/tests/test-android-build-scripts.mjs && node scripts/tests/test-android-download-bridge.mjs && node scripts/tests/test-android-update-flow.mjs",

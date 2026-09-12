@@ -1,22 +1,8 @@
 import { cp, mkdir, rm, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { webPaths, publishRoots as publishAllowlist, publishExclusions } from './paths.mjs';
 import path from 'node:path';
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(scriptDirectory, '..', '..');
-const outputDirectory = path.join(projectRoot, 'dist');
-
-const publishAllowlist = [
-  'index.html',
-  'LICENSE',
-  'assets',
-  'character',
-  'novel',
-];
-
-const publishExclusions = new Set([
-  'assets/css/tailwind.input.css',
-]);
+const { sourceRoot: projectRoot, outputDirectory } = webPaths({ output: true });
 
 function shouldPublish(sourcePath) {
   const relativePath = path.relative(projectRoot, sourcePath).split(path.sep).join('/');
@@ -52,8 +38,8 @@ for (const relativePath of publishAllowlist) {
 }
 
 console.log('RP-Hub web build complete');
-console.log('Output: dist/');
+console.log('Output:', outputDirectory);
 console.log('Entrypoints:');
-console.log('- dist/index.html');
-console.log('- dist/character/index.html');
-console.log('- dist/novel/index.html');
+for (const entry of ['index.html', 'character/index.html', 'novel/index.html']) {
+  console.log('-', path.join(outputDirectory, entry));
+}

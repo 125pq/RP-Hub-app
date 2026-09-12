@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "publishRoots": [
+    "index.html",
+    "LICENSE",
+    "assets",
+    "character",
+    "novel"
+  ],
+  "excludedUpstreamRoots": [
+    "README.md",
+    "presence-server"
+  ],
+  "localFiles": [
+    "assets/css/safe-area.css",
+    "assets/css/tailwind.input.css",
+    "assets/js/chat-import-streaming.js",
+    "assets/js/offscreen-iframe-lifecycle.js",
+    "assets/js/platform-services.js",
+    "assets/js/rphub-android-adapter.js",
+    "assets/js/rphub-backup.js",
+    "assets/js/rphub-io.js",
+    "assets/js/safe-area.js",
+    "assets/js/scroll-performance-diagnosis.js"
+  ],
+  "legacyOverrides": [
+    {
+      "file": "assets/js/app.js",
+      "upstreamSha256": "038861ade120a712a31a57719b21bfea884cfa47b5b2eaf98e18499e2fc72e83",
+      "localSha256": "be2c1308e61e053f2ef05277857823edc27fadfd8e5aa5a625d27385612b9a9e",
+      "reason": "Existing app adaptations are not yet reconstructible from pure overlays; migrate by feature."
+    },
+    {
+      "file": "assets/js/update-check.js",
+      "upstreamSha256": "7594e2c46af88017558e061ddcd87f7cffa6d804fc637b0061e571119fde8ba3",
+      "localSha256": "67fcca6a591d0be6209c27cb71e36890ca72cc868f3488cebe8ccb8f7b8d4163",
+      "reason": "Existing Android update guard still uses a filesystem hook; extract before removing this override."
+    }
+  ],
+  "allowedBaselineEolDifferences": [
+    "index.html"
+  ]
+}

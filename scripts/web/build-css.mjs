@@ -1,13 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { mkdir, rm, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { repositoryRoot, webPaths } from './paths.mjs';
 import path from 'node:path';
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(scriptDirectory, '..', '..');
+const { sourceRoot: projectRoot } = webPaths();
 const inputPath = path.join(projectRoot, 'assets', 'css', 'tailwind.input.css');
 const outputDirectory = path.join(projectRoot, 'assets', 'generated');
-const cliPath = path.join(projectRoot, 'node_modules', 'tailwindcss', 'lib', 'cli.js');
+const cliPath = path.join(repositoryRoot, 'node_modules', 'tailwindcss', 'lib', 'cli.js');
 
 const builds = [
   ['tailwind.main.config.cjs', 'main.css'],
@@ -22,7 +21,7 @@ for (const [configName, outputName] of builds) {
   const outputPath = path.join(outputDirectory, outputName);
   const result = spawnSync(process.execPath, [
     cliPath,
-    '--config', path.join(projectRoot, configName),
+    '--config', path.join(repositoryRoot, configName),
     '--input', inputPath,
     '--output', outputPath,
     '--minify',

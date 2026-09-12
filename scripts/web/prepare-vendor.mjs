@@ -1,10 +1,9 @@
 import { copyFile, mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { repositoryRoot, webPaths } from './paths.mjs';
 import path from 'node:path';
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(scriptDirectory, '..', '..');
-const nodeModules = path.join(projectRoot, 'node_modules');
+const { sourceRoot: projectRoot } = webPaths();
+const nodeModules = path.join(repositoryRoot, 'node_modules');
 const vendorDirectory = path.join(projectRoot, 'assets', 'vendor');
 
 const browserBundles = [

@@ -1,23 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { webPaths, publishRoots as publishAllowlist, publishExclusions } from './paths.mjs';
 import path from 'node:path';
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(scriptDirectory, '..', '..');
-const outputDirectory = path.join(projectRoot, 'dist');
-
-const publishAllowlist = [
-  'index.html',
-  'LICENSE',
-  'assets',
-  'character',
-  'novel',
-];
-
-const publishExclusions = new Set([
-  'assets/css/tailwind.input.css',
-]);
+const { sourceRoot: projectRoot, outputDirectory } = webPaths({ output: true });
 
 const requiredFiles = [
   'index.html',

@@ -35,3 +35,6 @@ keystore.properties
 .codex/
 .opencode/
 opencode.jsonc
+
+# Isolated composition candidates (never release directly)
+.work/compose/
