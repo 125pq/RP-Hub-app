@@ -9,7 +9,7 @@
             showWorldInfoEditor, showRegexEditor, showUiTemplateEditor, showPresetEditor,
             showCharacterEditor, showAddCharacterMenu, showModelSelector, showNoMemoryNeededModal,
             showUserSetupModal, showAutoImageGenModal, showChatModelSelector, showProfileDropdown,
-            showApiProviderSelector, showInstructionPanel, showTokenUsageTimeFilter, showDescriptionPanel,
+            showApiProviderSelector, showTokenUsageTimeFilter, showDescriptionPanel,
             settingsHelpTopic, showWorldInfoSettings, showMemorySettings, showActiveToolSettings,
             showUiTemplateSettings, handleCancel, isMobileSidebarOpen, closeMobileMenu,
             setMobileSidebarOpen
@@ -66,7 +66,6 @@
                 showChatModelSelector,
                 showProfileDropdown,
                 showApiProviderSelector,
-                showInstructionPanel,
                 showTokenUsageTimeFilter,
                 showDescriptionPanel
             ];

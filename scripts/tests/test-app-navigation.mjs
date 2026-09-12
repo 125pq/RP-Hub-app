@@ -4,10 +4,23 @@ import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
 import { patchAndroidApp } from '../upstream-sync/patches/patch-android-hooks.mjs';
 const previous = execFileSync('git', ['show', '6d66da9:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
-const legacy = previous.slice(previous.indexOf('        const closeBooleanPanel ='), previous.indexOf('        const initializePlatformAdapters ='));
+// Ignore the retired panel in the legacy oracle; it no longer exists in upstream setup.
+const legacy = previous.slice(previous.indexOf('        const closeBooleanPanel ='), previous.indexOf('        const initializePlatformAdapters =')).replace('                showInstructionPanel,\n', '');
 const current = readFileSync('assets/js/app.js', 'utf8').replace(/\r\n/g, '\n');
 const bindingStart = current.indexOf('        const handlePlatformBackButton =');
 const binding = current.slice(bindingStart, current.indexOf('        const initializePlatformAdapters =', bindingStart));
+// Verify bindings against declarations, before constructing any fake state.
+const declared = new Set([...current.matchAll(/\b(?:const|let)\s+([A-Za-z_$][\w$]*)/g)].map(match => match[1]));
+for (const match of current.matchAll(/\b(?:const|let)\s*\{([^}]+)\}\s*=/g)) {
+  for (const name of match[1].split(',')) declared.add(name.trim());
+}
+const boundNames = binding.match(/handleBack\(\{([\s\S]*?)\}\)/)[1].split(',').map(name => name.trim());
+const assertDeclared = names => {
+  for (const name of names) assert.ok(declared.has(name), 'Back binding references undeclared app state: ' + name);
+};
+assertDeclared(boundNames);
+assert.throws(() => assertDeclared([...boundNames, 'showInstructionPanel']), /undeclared app state/);
+assert.ok(!binding.includes('showInstructionPanel'));
 const moduleSource = readFileSync('assets/js/app-back-navigation.js', 'utf8');
 const names = [...new Set(legacy.match(/\b(?:show\w+|globalConfirmModal|settingsHelpTopic)\b/g))];
 const upstream = execFileSync('git', ['show', '4aef0bb:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');

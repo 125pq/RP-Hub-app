@@ -29,7 +29,7 @@
     {
       "file": "assets/js/app.js",
       "upstreamSha256": "038861ade120a712a31a57719b21bfea884cfa47b5b2eaf98e18499e2fc72e83",
-      "localSha256": "d87b27fe74ac40cf39cfb2ce16de4514ebb23cb49e87d51b0628467cc8d6e4e8",
+      "localSha256": "d04ef2c27cc08ceaead770712995069614ee799b65b196d55eb0ae712e6b8f9c",
       "reason": "Existing app adaptations are not yet reconstructible from pure overlays; migrate by feature."
     }
   ],

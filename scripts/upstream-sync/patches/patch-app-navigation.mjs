@@ -7,7 +7,7 @@ const hook = `        const handlePlatformBackButton = async () => window.RPHubA
             showWorldInfoEditor, showRegexEditor, showUiTemplateEditor, showPresetEditor,
             showCharacterEditor, showAddCharacterMenu, showModelSelector, showNoMemoryNeededModal,
             showUserSetupModal, showAutoImageGenModal, showChatModelSelector, showProfileDropdown,
-            showApiProviderSelector, showInstructionPanel, showTokenUsageTimeFilter, showDescriptionPanel,
+            showApiProviderSelector, showTokenUsageTimeFilter, showDescriptionPanel,
             settingsHelpTopic, showWorldInfoSettings, showMemorySettings, showActiveToolSettings,
             showUiTemplateSettings, handleCancel, isMobileSidebarOpen, closeMobileMenu,
             setMobileSidebarOpen
@@ -16,6 +16,9 @@ const hook = `        const handlePlatformBackButton = async () => window.RPHubA
 `;
 
 export function patchAppNavigation(source) {
+  // Migrate the first extracted binding, which still referenced a retired upstream panel.
+  const oldHook = hook.replace('showApiProviderSelector, showTokenUsageTimeFilter', 'showApiProviderSelector, showInstructionPanel, showTokenUsageTimeFilter');
+  if (countOccurrences(source, oldHook) === 1) source = source.replace(oldHook, hook);
   const startMarker = '        const closeBooleanPanel =';
   if (source.includes(startMarker)) {
     const start = source.indexOf(startMarker);
