@@ -115,12 +115,19 @@ function Invoke-Adb([string[]]$arguments, [switch]$AllowFail) {
     return @{ Output = ($out -join "`n"); ExitCode = $code }
 }
 
-function Invoke-Native([scriptblock]$Script) {
+function Invoke-Native([scriptblock]$Script, [switch]$StreamOutput) {
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & $Script 2>&1
-        return @{ Output = ($out -join "`n"); ExitCode = $LASTEXITCODE }
+        $lines = New-Object 'System.Collections.Generic.List[string]'
+        & $Script 2>&1 | ForEach-Object {
+            $line = if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $_.Exception.Message
+            } else { $_.ToString() }
+            $lines.Add($line)
+            if ($StreamOutput) { Write-Host $line }
+        }
+        return @{ Output = ($lines -join "`n"); ExitCode = $LASTEXITCODE }
     } finally {
         $ErrorActionPreference = $prevEap
     }
@@ -153,8 +160,9 @@ if (-not $SkipBuild) {
             Start-Sleep -Seconds 3
         }
         Write-Host "  构建中 (attempt $($attempt+1)/$($BuildRetries+1)) ..."
+        $buildOutput = $null
         try {
-            $build = Invoke-Native { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript }
+            $build = Invoke-Native -StreamOutput { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript }
             $code = $build.ExitCode
             $buildOutput = $build.Output
             $apkLine = ($buildOutput -split "`n" | Where-Object { $_ -match '^APK=' }) | Select-Object -Last 1
@@ -268,7 +276,7 @@ for ($attempt = 0; $attempt -le $installRetries; $attempt++) {
 if ($installed) {
     Write-Result '安装成功'
     $version = Invoke-Adb @('-s', $device, 'shell', 'dumpsys', 'package', $appId) -AllowFail
-    $verLine = ($version.Output | Where-Object { $_ -match 'versionName=' } | Select-Object -First 1)
+    $verLine = ($version.Output -split "`n" | Where-Object { $_ -match 'versionName=' } | Select-Object -First 1)
     if ($verLine) {
         $verName = ($verLine -replace '.*versionName=([^\s]+).*', '$1')
         Write-Host "  已安装版本: $verName" -ForegroundColor DarkGray
