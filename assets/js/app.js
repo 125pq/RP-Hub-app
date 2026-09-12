@@ -8433,26 +8433,7 @@ const app = createApp({
                 }
 
                 const chatByBranch = new Map(branchChats.map(branch => [branch.branchId, branch.messages]));
-                const countFloors = (messages) => {
-                    let count = 0;
-                    let previousRole = null;
-                    for (const message of messages) {
-                        if (!message || typeof message !== 'object') continue;
-                        const role = message.role;
-                        if (role === 'system') continue;
-                        const isMergeable = role === 'user' || role === 'assistant';
-                        if (previousRole === null || previousRole !== role || !isMergeable) count += 1;
-                        previousRole = role;
-                    }
-                    return count;
-                };
-                const countMessages = (messages) => {
-                    let count = 0;
-                    for (const message of messages) {
-                        if (message?.role === 'user' || message?.role === 'assistant') count += 1;
-                    }
-                    return count;
-                };
+                const { countFloors, countMessages } = window.RPHubChatExport;
                 const branchMetadata = branches.map(branch => {
                     const messages = chatByBranch.get(branch.id) || [];
                     return {
@@ -8472,18 +8453,7 @@ const app = createApp({
                         : STORY_BRANCH_MAIN_ID,
                     branches: branchMetadata
                 };
-                const chatLinesStream = (async function* streamChatExport() {
-                    yield JSON.stringify(manifest);
-                    for (const branch of branchChats) {
-                        yield '\n{"branchId":' + JSON.stringify(branch.branchId) + ',"messages":[';
-                        const messages = branch.messages;
-                        for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
-                            if (messageIndex > 0) yield ',';
-                            yield JSON.stringify(cloneForStorage(messages[messageIndex]));
-                        }
-                        yield ']}';
-                    }
-                })();
+                const chatLinesStream = window.RPHubChatExport.stream(manifest, branchChats, cloneForStorage);
                 const result = await cardUtils.saveGeneratedFile(
                     chatLinesStream,
                     (char.name || 'character') + '_全部分支_chat.jsonl',
