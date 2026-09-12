@@ -1,3 +1,5 @@
+import { patchAppChatImport } from './patch-app-chat-import.mjs';
+import { patchAppOffscreen } from './patch-app-offscreen.mjs';
 import { patchChatExport } from './patch-chat-export.mjs';
 import { patchTextMetrics } from './patch-text-metrics.mjs';
 import { countOccurrences, editText, requireContains } from '../lib.mjs';
@@ -160,7 +162,7 @@ export async function applyPerformanceHooks() {
   const changes = [];
   changes.push(await editText('index.html', category, patchIndexScriptOverlay));
   changes.push(await editText('assets/js/app.js', category, source => {
-    source = patchChatExport(patchTextMetrics(removeAppDiagnostics(source)));
+    source = patchAppOffscreen(patchAppChatImport(patchChatExport(patchTextMetrics(removeAppDiagnostics(source)))));
     requireContains(source, 'window.RPHubOffscreenIframeLifecycle?.attach(container);', 'offscreen attach hook');
     requireContains(source, 'window.RPHubOffscreenIframeLifecycle?.detach();', 'offscreen cleanup hook');
     return source;

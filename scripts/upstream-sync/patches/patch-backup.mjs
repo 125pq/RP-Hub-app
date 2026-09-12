@@ -256,7 +256,18 @@ export async function applyBackupHooks() {
   changes.push(await editText('index.html', category, patchIndexScriptOverlay));
 
   // --- app.js: register flush bridges ---------------------------------------
-  changes.push(await editText('assets/js/app.js', category, source => {
+  changes.push(await editText('assets/js/app.js', category, patchBackupApp));
+
+  // --- character/index.html: flush handler -----------------------------------
+  changes.push(await editText('character/index.html', category, patchBackupCharacter));
+
+  // --- novel/index.html: flush handler ---------------------------------------
+  changes.push(await editText('novel/index.html', category, patchBackupNovel));
+
+  return changes.filter(Boolean);
+}
+
+export function patchBackupApp(source) {
     source = patchSquareMirrorApp(source);
     if (!source.includes('// Backup flush bridges (local full-backup export/restore).')) {
       source = ensureBefore(
@@ -288,13 +299,4 @@ export async function applyBackupHooks() {
     }
     requireContains(source, '// Backup flush bridges (local full-backup export/restore).', 'app backup registration');
     return source;
-  }));
-
-  // --- character/index.html: flush handler -----------------------------------
-  changes.push(await editText('character/index.html', category, patchBackupCharacter));
-
-  // --- novel/index.html: flush handler ---------------------------------------
-  changes.push(await editText('novel/index.html', category, patchBackupNovel));
-
-  return changes.filter(Boolean);
 }
