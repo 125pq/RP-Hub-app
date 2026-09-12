@@ -286,8 +286,9 @@ function makeIndexedDBV2(seed) {
 }
 
 function loadBackupModule(env) {
+  const ioPromise = readFile(new URL('../../../assets/js/rphub-io.js', import.meta.url), 'utf8');
   const sourcePromise = readFile(new URL('../../../assets/js/rphub-backup.js', import.meta.url), 'utf8');
-  return sourcePromise.then(source => {
+  return Promise.all([ioPromise, sourcePromise]).then(([ioSource, source]) => {
     const sandbox = {
       window: env.window,
       document: env.document,
@@ -310,6 +311,7 @@ function loadBackupModule(env) {
     };
     sandbox.globalThis = sandbox;
     vm.createContext(sandbox);
+    vm.runInContext(ioSource, sandbox, { filename: 'rphub-io.js' });
     vm.runInContext(source, sandbox, { filename: 'rphub-backup.js' });
     return {
       RPHubBackup: sandbox.window.RPHubBackup,

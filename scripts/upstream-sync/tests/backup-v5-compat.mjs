@@ -233,11 +233,12 @@ function makeIdb(seed) {
   };
 }
 async function loadBackup(env){
+  const ioSrc=await readFile(new URL('../../../assets/js/rphub-io.js',import.meta.url),'utf8');
   const src=await readFile(new URL('../../../assets/js/rphub-backup.js',import.meta.url),'utf8');
   const win={window:null,document:env.document,indexedDB:env.indexedDB,localStorage:env.localStorage,RPHubCardUtils:{async saveGeneratedFile(stream){for await(const p of stream){}return{supported:true,cancelled:false,bytesWritten:0}}}};
   win.window=win;
   const sb={window:win,document:env.document,indexedDB:env.indexedDB,localStorage:env.localStorage,console,setTimeout,clearTimeout,TextDecoder,TextEncoder,IDBKeyRange:{lowerBound:()=>({})},JSON,Promise,Date,Math,Uint8Array,ArrayBuffer};sb.globalThis=sb;
-  vm.createContext(sb);vm.runInContext(src,sb,{filename:'rphub-backup.js'});
+  vm.createContext(sb);vm.runInContext(ioSrc,sb,{filename:'rphub-io.js'});vm.runInContext(src,sb,{filename:'rphub-backup.js'});
   return win.RPHubBackup;
 }
 

@@ -422,41 +422,6 @@
         });
     }
 
-    // --- Line reader (streaming, chunk-safe incl. UTF-8/emoji across chunks) --
-    class SnapshotLineReader {
-        constructor(onLine) {
-            this.onLine = onLine;
-            this.pendingParts = [];
-        }
-        async push(text) {
-            let start = 0;
-            while (true) {
-                const newlineIndex = text.indexOf('\n', start);
-                if (newlineIndex === -1) break;
-                const segment = text.slice(start, newlineIndex);
-                let line;
-                if (this.pendingParts.length > 0) {
-                    this.pendingParts.push(segment);
-                    line = this.pendingParts.join('');
-                    this.pendingParts = [];
-                } else {
-                    line = segment;
-                }
-                if (line.endsWith('\r')) line = line.slice(0, -1);
-                if (line) await this.onLine(line);
-                start = newlineIndex + 1;
-            }
-            if (start < text.length) this.pendingParts.push(text.slice(start));
-        }
-        async finish() {
-            if (this.pendingParts.length === 0) return;
-            let line = this.pendingParts.join('');
-            this.pendingParts = [];
-            if (line.endsWith('\r')) line = line.slice(0, -1);
-            if (line) await this.onLine(line);
-        }
-    }
-
     // --- Restorer (mirror semantics, validate-only or real) -------------------
     class StreamSnapshotRestorer {
         constructor(expectedRecordCount, { validateOnly = false } = {}) {
@@ -711,33 +676,12 @@
     }
 
     // --- Streaming file line reading (no await file.text()) ------------------
-    async function readTextFileLines(file, onLine) {
-        if (typeof file?.stream === 'function') {
-            const reader = file.stream().getReader();
-            const decoder = new TextDecoder('utf-8', { fatal: false });
-            const lineReader = new SnapshotLineReader(onLine);
-            try {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    await lineReader.push(decoder.decode(value, { stream: true }));
-                }
-                await lineReader.push(decoder.decode());
-                await lineReader.finish();
-            } finally {
-                try { reader.releaseLock(); } catch (_) { }
-            }
-            return;
-        }
-        const text = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ''));
-            reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
-            reader.readAsText(file);
-        });
-        const lineReader = new SnapshotLineReader(onLine);
-        await lineReader.push(text);
-        await lineReader.finish();
+    // Chunk assembly / UTF-8 boundary handling lives in assets/js/rphub-io.js so
+    // the backup and chat importers share one implementation (阶段 2).
+    function readTextFileLines(file, onLine) {
+        const io = window.RPHubIO;
+        if (!io?.readTextFileLines) throw new Error('RPHubIO 未加载，无法流式读取文件。');
+        return io.readTextFileLines(file, onLine);
     }
 
     async function parseSnapshotFile(file, consumer, options = {}) {
@@ -1150,7 +1094,8 @@
         readTextFileLines,
         restoreSnapshotFile,
         StreamSnapshotRestorer,
-        SnapshotLineReader,
+        // Back-compat alias: the shared reader now lives in rphub-io.js.
+        SnapshotLineReader: window.RPHubIO?.LineReader,
         getMirrorSquarePreference,
         onMirrorSquareChange,
         bridge: RPHubBackupBridge,

@@ -5,59 +5,15 @@
 // Storage and branch utilities are read lazily from window.RPHubStorage and
 // window.RPHubStoryBranches (defined by data-services.js).
 (function () {
-    // Stream a File line-by-line without loading the whole file into memory.
-    // Buffered parts are only joined when a newline completes a line, keeping large
-    // multi-chunk lines O(n) instead of O(n^2) string concatenation.
-    const readTextFileLines = async (file, onLine) => {
-        if (typeof file?.stream === 'function') {
-            const reader = file.stream().getReader();
-            const decoder = new TextDecoder('utf-8');
-            let parts = [];
-            const emitLine = async (raw) => {
-                const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-                if (line.trim()) await onLine(line);
-            };
-            const processChunk = async (chunkText) => {
-                let searchFrom = 0;
-                while (true) {
-                    const newlineIndex = chunkText.indexOf('\n', searchFrom);
-                    if (newlineIndex < 0) {
-                        if (searchFrom < chunkText.length) parts.push(chunkText.slice(searchFrom));
-                        return;
-                    }
-                    const line = parts.length
-                        ? parts.join('') + chunkText.slice(searchFrom, newlineIndex)
-                        : chunkText.slice(searchFrom, newlineIndex);
-                    parts = [];
-                    await emitLine(line);
-                    searchFrom = newlineIndex + 1;
-                }
-            };
-            try {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    await processChunk(decoder.decode(value, { stream: true }));
-                }
-                await processChunk(decoder.decode());
-                if (parts.length) {
-                    await emitLine(parts.join(''));
-                    parts = [];
-                }
-            } finally {
-                try { reader.releaseLock(); } catch (_) {}
-            }
-            return;
-        }
-        const text = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ''));
-            reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
-            reader.readAsText(file);
-        });
-        for (const line of text.split(/\r?\n/)) {
+    // Streaming line reads are provided by the shared assets/js/rphub-io.js
+    // module (阶段 2). The chat importer keeps its own policy of skipping blank
+    // (whitespace-only) lines, which the generic reader does not impose.
+    const readChatLines = async (file, onLine) => {
+        const io = window.RPHubIO;
+        if (!io?.readTextFileLines) throw new Error('RPHubIO 未加载，无法流式读取文件。');
+        await io.readTextFileLines(file, async (line) => {
             if (line.trim()) await onLine(line);
-        }
+        });
     };
 
     const createChatImporter = (deps) => {
@@ -124,7 +80,7 @@
 
             showToast('正在导入聊天记录...', 'info', 5000);
 
-            await readTextFileLines(file, async (line) => {
+            await readChatLines(file, async (line) => {
                 if (failure || aborted) return;
                 if (!firstLineSeen) {
                     firstLineSeen = true;
@@ -203,15 +159,24 @@
             }
 
             if (isBranchFormat) {
-                importedBranches.forEach(branch => {
-                    if (!seenBranchIds.has(branch.id)) throw new Error(`缺少分支“${branch.name}”的聊天记录`);
-                });
+                try {
+                    importedBranches.forEach(branch => {
+                        if (!seenBranchIds.has(branch.id)) throw new Error(`缺少分支“${branch.name}”的聊天记录`);
+                    });
 
-                await setScopedStoredValue('branches', char.uuid, {
-                    version: 1,
-                    activeBranchId: importedActiveId,
-                    branches: cloneForStorage(importedBranches)
-                }, { clone: false });
+                    await setScopedStoredValue('branches', char.uuid, {
+                        version: 1,
+                        activeBranchId: importedActiveId,
+                        branches: cloneForStorage(importedBranches)
+                    }, { clone: false });
+                } catch (error) {
+                    // 分支元数据写入失败,或因截断/损坏导致声明分支缺失时,回滚
+                    // 已写入的分支聊天记录,不留下部分覆盖的半成品(阶段 2 失败处理)。
+                    if (writtenScopeIds.length) {
+                        await Promise.all(writtenScopeIds.map(scopeId => deleteScopedStoredValue('chat', scopeId)));
+                    }
+                    throw error;
+                }
 
                 setApplyingCharacterScopedData(true);
                 storyBranches.value = importedBranches;
@@ -238,14 +203,16 @@
                 throw new Error('聊天记录包含无效消息');
             }
             if (!await stopCurrentCharacterWork()) return;
-            const importedChat = cloneForStorage(legacyMessages);
+            // 解析出的消息是全新的普通 JSON 对象,不经过响应式代理,无需再
+            // cloneForStorage 复制一整份;prepare 同一数组后直接存储该引用
+            // (IndexedDB 写入时自行结构化克隆),去掉一次全量重复驻留(阶段 2)。
             setApplyingCharacterScopedData(true);
-            chatHistory.value = prepareLoadedChatHistoryForDisplay(importedChat);
-            await setScopedStoredValue('chat', getCurrentStoryBranchScopeId(), importedChat, { clone: false });
+            chatHistory.value = prepareLoadedChatHistoryForDisplay(legacyMessages);
+            await setScopedStoredValue('chat', getCurrentStoryBranchScopeId(), legacyMessages, { clone: false });
             updateCurrentStoryBranchSummary();
             await saveStoryBranchesForCharacter(char);
             finishApplyingCharacterScopedData();
-            showToast(`成功为 ${char.name} 导入 ${importedChat.length} 条聊天记录`, 'success');
+            showToast(`成功为 ${char.name} 导入 ${legacyMessages.length} 条聊天记录`, 'success');
         };
     };
 

@@ -38,6 +38,7 @@ const requiredFiles = [
   'assets/js/platform-services.js',
   'assets/js/rphub-android-adapter.js',
   'assets/js/safe-area.js',
+  'assets/js/rphub-io.js',
   'assets/js/chat-import-streaming.js',
   'assets/js/rphub-backup.js',
   'assets/js/app.js',

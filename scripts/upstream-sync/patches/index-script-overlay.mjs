@@ -71,6 +71,7 @@ function assertScriptOrder(lines) {
     'platform-services.js',
     'rphub-android-adapter.js',
     'safe-area.js',
+    'rphub-io.js',
     'chat-import-streaming.js',
     'rphub-backup.js',
     'app.js'
@@ -114,11 +115,15 @@ export function patchIndexScriptOverlay(source) {
     'platform-services.js',
     'rphub-android-adapter.js',
     'safe-area.js',
-    'chat-import-streaming.js',
-    'rphub-backup.js'
+    'chat-import-streaming.js'
   ]) {
     lines = ensureBefore(lines, app, scriptLine(asset), `${asset} entry`);
   }
+  // rphub-io.js must load before its consumers (chat importer / backup), so anchor
+  // it to the chat loader: anchoring to app.js (the pattern for the other local
+  // assets) would place it after chat/backup because those already existed.
+  lines = ensureBefore(lines, scriptLine('chat-import-streaming.js'), scriptLine('rphub-io.js'), 'rphub-io.js entry');
+  lines = ensureBefore(lines, app, scriptLine('rphub-backup.js'), 'rphub-backup.js entry');
   assertScriptOrder(lines);
 
   const replacement = `    <script>\n${lines.join('\n')}\n    </script>`;

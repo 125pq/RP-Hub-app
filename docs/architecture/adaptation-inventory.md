@@ -31,6 +31,7 @@ overlay manifest 共 **8 个文件**（`scripts/upstream-sync/overlay-transforme
 | `assets/js/chat-import-streaming.js` | 聊天流式读取/解析/导入委托 | 已核实（index.html） | 聊天 IO |
 | `assets/js/rphub-backup.js` | 备份/恢复/刷写桥/流式记录 | 已核实（index.html） | 备份 IO |
 | `assets/js/offscreen-iframe-lifecycle.js` | 离屏 iframe 生命周期 | 已核实（index.html） | iframe 状态 |
+| `assets/js/rphub-io.js` | 共享流式 UTF-8 行读取（`LineReader`/`readTextFileLines`），阶段 2 新增，供 backup 与 chat 导入共用 | 已核实（index.html reapply 注入，位于 chat/backup 之前） | 无（IO 原语，不含业务语义） |
 | `assets/js/safe-area.js` | 安全区（+89 行，本地新增，`git diff 4aef0bb..HEAD`） | 已核实（index.html） | 布局/安全区 |
 | `assets/js/scroll-performance-diagnosis.js` | 滚动性能诊断（+375 行，本地新增） | 待核实（index.html script 列表未见，疑动态/诊断注入） | 诊断 |
 | `assets/js/update-check.js` | 更新检查（与上游差 12 行，有 reapply 钩子但不在 manifest → 人工） | 已核实（index.html） | 更新源 |
@@ -60,7 +61,9 @@ overlay manifest 共 **8 个文件**（`scripts/upstream-sync/overlay-transforme
 | 原生分块导出（beginSave/appendChunk/finishSave/cancelSave） | 已证实 | NativeFilePlugin（android/…/NativeFilePlugin.java）+ test:platform「file chunks, cancellation」PASS | 文件 IO |
 | 非原生流式文件落地（File System Access API） | 已证实（能力探测+FSA 真流式/取消/失败传播，见 file-save-contract.md） | `supportsStreamingFileSave` + core-utils `tryStreamViaFileSystemAccess` + test-save-generated-file.mjs 五场景 PASS | 文件 IO |
 | 浏览器文件下载 | 已证实 | android-download-bridge PASS；聚合 fallback 保留（见 contract §7） | — |
-| 聊天 JSONL 流式导入/导出 | 已证实（导出侧经 FSA/原生真流式；旧浏览器聚合见 contract §7；**端到端内存有界实测待阶段 2**） | chat-import-streaming.js + backup-roundtrip + saveGeneratedFile FSA 路径 PASS | 聊天数据 |
+| 聊天 JSONL 流式导入（分支/legacy） | 已证实（阶段 2：共用 `rphub-io.js` 流式行读取；分支逐条写、legacy 去掉全量 clone；损坏/截断回滚） | test-chat-import-streaming.mjs（真实 `createChatImporter` 调用路径 + 逐字节分块）PASS | 聊天数据 |
+| 聊天 JSONL 流式导出 | 已证实（导出侧经 FSA/原生真流式；旧浏览器聚合见 file-save-contract §7；**端到端峰值内存实测待设备**） | app.js 生成器 + backup-roundtrip + saveGeneratedFile FSA 路径 PASS | 聊天数据 |
+| 共享流式行读取组件 | 已证实（阶段 2 新增，backup/chat 单一实现） | test-rphub-io.mjs（UTF-8 逐字节、CRLF、空行策略、FileReader 回退、无私有副本）PASS | 无 |
 | 备份导入/导出（v5 兼容） | 已证实 | backup-v5-compat 三项 PASS | 备份格式 |
 | 取消导出 | 已证实（桥层取消 + FSA AbortError→cancelled，见 test-save-generated-file 场景 3；P1 修复后 exportBackup 取消显式 `cancelled:true`、不再返回成功对象） | test-platform cancellation + save-generated-file FSA-cancel + backup-roundtrip 用例 9 PASS | — |
 | 取消恢复备份→导入中断（不覆盖现有数据） | 已证实（P1 修复，createRecoveryBackup 取消→null，importBackup 拒绝且现有数据不被覆盖） | backup-roundtrip 用例 8 PASS（负向） | 用户数据 |
@@ -95,3 +98,4 @@ overlay manifest 共 **8 个文件**（`scripts/upstream-sync/overlay-transforme
 3. WebView origin 实际值 → 最终配置 + 设备确认。
 4. countOnly / 渲染缓存行为等价断言缺失 → 建议阶段 4/5 补真实行为测试。
 5. `1.8.8` tag 远端/本地分歧原因。
+6. 阶段 2 仅迁移「聊天 JSONL」一个格式并抽出共享行读取组件；备份 V5、角色 JSON/PNG 等仍按既有实现，逐项迁移与内存实测见 `docs/architecture/large-file-io-contract.md`。
