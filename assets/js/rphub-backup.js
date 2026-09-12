@@ -695,7 +695,10 @@
     }
 
     // --- Public import (validate-only then mirror restore) --------------------
-    async function restoreSnapshotFile(file, { validateOnly = false, onProgress } = {}) {
+    // onWriteStart fires only after the full validation pass succeeded and just
+    // before the first store write, so callers can distinguish "rejected, nothing
+    // written" from "write pass began and may have partially overwritten" (阶段 2).
+    async function restoreSnapshotFile(file, { validateOnly = false, onProgress, onWriteStart } = {}) {
         // First pass always validates structure fully. expectedRecordCount is
         // null here so the capture pass only reads the count (no external
         // comparison); the authoritative count comes from snapshotEnd/recordCount.
@@ -709,6 +712,7 @@
 
         if (validateOnly) return { recordCount: expectedRecordCount };
 
+        if (typeof onWriteStart === 'function') onWriteStart();
         const restorer = new StreamSnapshotRestorer(expectedRecordCount);
         try {
             await parseSnapshotFile(file, restorer, { onProgress });
@@ -720,17 +724,27 @@
     }
 
     // --- Top-level operations -------------------------------------------------
-    async function exportBackup({ onStatus } = {}) {
+    // Single save boundary shared by the manual export and the pre-import recovery
+    // export: build the streaming snapshot and hand it to saveGeneratedFile, which
+    // owns chunking / backpressure / cancel for the format (阶段 2).
+    async function saveSnapshotStream(filename, { onStatus, label = '正在导出' } = {}) {
         await RPHubBackupBridge.flush();
         const stats = { recordCount: 0, totalBytes: 0 };
-        const filename = `rp-hub-backup-${timestampToken()}.jsonl`;
-        onStatus?.(`正在导出 ${filename} ...`);
+        onStatus?.(`${label} ${filename} ...`);
         const cardUtils = window.RPHubCardUtils;
         if (!cardUtils?.saveGeneratedFile) throw new Error('文件保存接口不可用。');
         const result = await cardUtils.saveGeneratedFile(
             buildExportStream(stats),
             filename,
             { mimeType: 'application/jsonl' }
+        );
+        return { result, stats, filename };
+    }
+
+    async function exportBackup({ onStatus } = {}) {
+        const { result, stats, filename } = await saveSnapshotStream(
+            `rp-hub-backup-${timestampToken()}.jsonl`,
+            { onStatus }
         );
         if (result?.supported === false) throw new Error('当前平台不支持文件保存。');
         if (result?.cancelled) return { cancelled: true }; // 用户取消:不显式报成功,不返回数据
@@ -739,16 +753,9 @@
 
     async function createRecoveryBackup({ onStatus } = {}) {
         try {
-            await RPHubBackupBridge.flush();
-            const stats = { recordCount: 0, totalBytes: 0 };
-            const filename = `rp-hub-recovery-${timestampToken()}.jsonl`;
-            onStatus?.(`正在导出恢复备份 ${filename} ...`);
-            const cardUtils = window.RPHubCardUtils;
-            if (!cardUtils?.saveGeneratedFile) throw new Error('文件保存接口不可用。');
-            const result = await cardUtils.saveGeneratedFile(
-                buildExportStream(stats),
-                filename,
-                { mimeType: 'application/jsonl' }
+            const { result, stats, filename } = await saveSnapshotStream(
+                `rp-hub-recovery-${timestampToken()}.jsonl`,
+                { onStatus, label: '正在导出恢复备份' }
             );
             if (result?.supported === false) return null;
             if (result?.cancelled) return null; // 用户取消保存恢复备份 → importBackup 视作失败,中断恢复不覆盖现有数据
@@ -769,11 +776,27 @@
         onStatus?.('正在校验备份文件...');
         const { recordCount } = await restoreSnapshotFile(file, { validateOnly: true });
 
-        // 3. Real mirror restore.
+        // 3. Real mirror restore. Batched writes are not one transaction, so a
+        //    runtime failure after the write pass starts can leave some stores
+        //    overwritten; feedback must not claim the local data is untouched and
+        //    must point at the recovery backup taken above (阶段 2 失败处理).
         onStatus?.(`备份校验通过（${recordCount} 条记录），正在恢复本地数据...`);
-        await restoreSnapshotFile(file, {
-            onProgress: (lines) => onProgress?.(lines)
-        });
+        let writeStarted = false;
+        try {
+            await restoreSnapshotFile(file, {
+                onProgress: (lines) => onProgress?.(lines),
+                onWriteStart: () => { writeStarted = true; }
+            });
+        } catch (error) {
+            if (!writeStarted) throw error; // 校验阶段失败:未写入,保持原始错误
+            const reason = error?.message || String(error);
+            const failure = new Error(
+                `数据恢复中断，部分本地数据可能已被覆盖。请导入恢复备份 ${recovery.filename} 以回到导入前状态。原始错误：${reason}`
+            );
+            failure.partialWrite = true;
+            failure.recovery = recovery;
+            throw failure;
+        }
 
         return { recordCount, recovery };
     }
@@ -1048,7 +1071,10 @@
                 setStatus(`恢复完成（${result.recordCount} 条记录）。页面即将刷新...`);
                 setTimeout(() => { location.reload(); }, 300);
             } catch (error) {
-                setStatus(error?.message || '导入失败，本地数据未被修改。', true);
+                // partialWrite errors already carry an explicit message naming the
+                // recovery backup; keep the fallback neutral rather than promising
+                // the data is untouched.
+                setStatus(error?.message || '导入失败。', true);
             } finally {
                 busy = false;
             }

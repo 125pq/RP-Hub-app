@@ -4,7 +4,11 @@
 
 本文件同时作为阶段 2 的交付物与阶段报告。遵循与 `baseline.md` 相同的原则：**已知事实**（有代码/测试证据）、**待验证事项**（未测即写「待测」）严格区分，不虚构内存或性能数字。上游稳定版本为 tag `1.9.3` = `4aef0bb46c9b3370faba174a20435e5989799727`。
 
-本轮按方案 §6「一次只迁移一个格式/入口」只完成 **聊天 JSONL 格式**（导出在 app.js、导入在 chat-import-streaming.js）与**可复用流式行读取组件**；备份 V5、角色 JSON/PNG 等格式的逐项迁移仍列为后续子任务。
+本轮按方案 §6「一次只迁移一个格式/入口」完成两个切片：
+- **切片 1**：聊天 JSONL 格式（导出在 app.js、导入在 chat-import-streaming.js）+ **可复用流式行读取组件**。
+- **切片 2**：备份 V5 格式的导出 IO 边界收拢（`saveSnapshotStream`）与**导入失败处理**（区分「校验失败、未写入」与「恢复写入中断、可能部分覆盖」，后者指向恢复备份）；并补大样本往返/异常/失败注入证据。
+
+角色 JSON/PNG 等格式的逐项迁移仍列为后续子任务。
 
 ## 1. 本轮范围与实际文件
 
@@ -47,7 +51,7 @@
 
 - **导出一致性**：备份导出前先 `RPHubBackupBridge.flush()`，确保去抖写入落盘；聊天分支导出对当前角色先 `flushPendingChatHistorySave()`。导出流为拉取式生成器，由 `saveGeneratedFile` 消费者驱动，天然背压（不预聚合）。
 - **取消**：原生选择器/FSA `AbortError` → `{cancelled:true}`，业务层不报成功。备份与聊天导出均已验证。
-- **备份导入失败**：校验失败 → 不进入写阶段；写阶段异常 → `restorer.abort()` 关闭事务；导入前强制生成恢复备份，取消恢复备份则整体中止（不覆盖现有数据）。
+- **备份导入失败**：`restoreSnapshotFile` 在**完整校验通过后、首次写库前**通过 `onWriteStart` 标记。校验失败 → 不进入写阶段，原样抛错；写阶段异常 → 关闭数据库并抛出带 `partialWrite=true` 的错误，消息明确「部分本地数据可能已被覆盖」并给出恢复备份文件名（镜像恢复是分批写入、非单事务，不能谎称数据未被修改）。导入前强制生成恢复备份，取消恢复备份则整体中止。
 - **聊天导入失败**：解析/校验失败 → 回滚已写入的分支聊天 scope（`deleteScopedStoredValue('chat', scopeId)`）。**本阶段补齐**：分支元数据写入失败或「截断导致声明分支缺失」时同样回滚，不再留下部分覆盖的半成品。
 - **未知字段政策**：两种 JSONL 均不新增自有 schema；分支格式未知 `branchId` 报错，legacy 格式原样存储，保持上游语义。
 
@@ -66,8 +70,9 @@
 | --- | --- | --- |
 | 共享行读取正确性 | **已测（Node）** | UTF-8 逐字节分块、CRLF、无尾换行、空行策略、FileReader 回退全部 PASS |
 | legacy 导入额外全量副本 | **已消除（结构证明）** | test-chat-import-streaming 断言 `cloneForStorage` 0 次 |
-| 损坏/截断/取消不静默丢数据 | **已测（Node，负向）** | 聊天损坏截断回滚、备份坏文件拒绝、取消不返回成功 |
-| 峰值进程内存（含原生桥） | **待测** | 需参考设备 + 大样本，按方案 §7.3；本阶段不做设备测量，不以单测绿代替 |
+| 损坏/截断/取消不静默丢数据 | **已测（Node，负向）** | 聊天损坏截断回滚、备份坏文件/截断/记录数不符拒绝、恢复写入中断反馈、取消不返回成功 |
+| 备份大样本往返确定性 | **已测（Node）** | `backup-large-file.mjs`：552 条记录 / 5.08 MiB（含 30000 条消息的数组记录）导出→导入→再导出字节一致；导出生成器首个 yield 前 `indexedDB.open` 次数为 0（惰性，不整体物化） |
+| 峰值进程内存（含原生桥） | **待测** | 需参考设备 + 大样本，按方案 §7.3；本阶段不做设备测量，不以单测绿代替（Node 堆含 mock IDB，不代表 WebView） |
 | 总耗时 / 吞吐 / 最大在途块数 | **待测** | 同上 |
 | 聊天导入进度回调 | **未实现** | 现有导出有 `onProgress`，聊天导入无；如需 UI 进度另开子任务 |
 
@@ -75,7 +80,7 @@
 
 - `npm run test:platform`：PASS（含 `test-rphub-io.mjs`、`test-chat-import-streaming.mjs`）。
 - `npm run test:upstream-sync`：PASS（含 auto-resolver、EOL churn、EOL baseline `4aef0bb`、reapply idempotence `REAPPLY_CHANGED_FILES=0`）。
-- `npm run test:backup`：PASS（backup-roundtrip、backup-v5-compat、backup-patch、bridge）。
+- `npm run test:backup`：PASS（backup-roundtrip、backup-v5-compat、`backup-large-file`、backup-patch、bridge）。
 - `npm run test:performance`：PASS。
 - `npm run build:web` + `npm run verify:dist`：PASS（46/46 source matches，`rphub-io.js` 在 dist 且 index 引用 1 次）。
 - `index.html` 仅新增 1 行；`git diff --numstat` 与 `--ignore-space-at-eol` 相等（EOL 噪声 0）；reapply 两次 `REAPPLY_CHANGED_FILES=0`。
@@ -83,9 +88,10 @@
 ## 8. 未完成项与下一阶段入口
 
 未完成验收（不标「阶段 2 已完成」的原因）：
-- 仅迁移了聊天 JSONL 一个格式；备份 V5、角色 JSON/PNG 等仍按既有实现（未迁移）。
+- 已迁移/加固聊天 JSONL 与备份 V5 两个格式；角色 JSON/PNG、跨页面导入等仍按既有实现（未迁移）。
 - 设备端峰值内存/耗时未测。
 - 聊天导入进度回调未实现。
+- 备份镜像恢复仍是分批写入（非单事务）：写入中断已诚实反馈并指向恢复备份，但未做到事务级自动回滚（需 staged/事务存储改造，按方案 §6 属移出本阶段的部分）。
 
 阶段 3 入口条件：已有薄接入样例与差异台账（阶段 0）。本阶段新增 `rphub-io.js` 属本地扩展，不改变上游输入，可直接作为组合构建中的本地扩展模块登记。
 

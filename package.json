@@ -18,7 +18,7 @@
     "android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android/build-android-debug.ps1",
     "android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android/build-android-release.ps1",
     "android:open": "npx cap open android",
-    "test:backup": "node scripts/upstream-sync/tests/backup-roundtrip.mjs && node scripts/upstream-sync/tests/backup-v5-compat.mjs && node scripts/upstream-sync/tests/backup-patch.mjs && node scripts/tests/test-backup-bridge.mjs && node scripts/upstream-sync/tests/eol-preservation.mjs && node scripts/upstream-sync/tests/reapply-idempotence.mjs"
+    "test:backup": "node scripts/upstream-sync/tests/backup-roundtrip.mjs && node scripts/upstream-sync/tests/backup-v5-compat.mjs && node scripts/upstream-sync/tests/backup-large-file.mjs && node scripts/upstream-sync/tests/backup-patch.mjs && node scripts/tests/test-backup-bridge.mjs && node scripts/upstream-sync/tests/eol-preservation.mjs && node scripts/upstream-sync/tests/reapply-idempotence.mjs"
   },
   "dependencies": {
     "@capacitor/android": "8.5.0",
