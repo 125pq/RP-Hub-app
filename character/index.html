@@ -12,6 +12,7 @@
     <script src="../assets/vendor/localforage/localforage.min.js"></script>
     <script src="../assets/js/built-in-content.js"></script>
     <script src="../assets/js/core-utils.js"></script>
+    <script src="../assets/js/rphub-io.js"></script>
     <script src="../assets/js/api-utils.js"></script>
     <style>
         :root {
@@ -3917,7 +3918,7 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                 const exportJSON = async () => {
                     const data = getCardData();
                     const filename = sanitizeFilename(currentCharacter.value.name) + '.json';
-                    await downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');
+                    await downloadFile(window.RPHubIO.jsonTextChunks(data, { space: 2 }), filename, 'application/json');
                 };
 
                 const exportPNG = async () => {
@@ -4014,7 +4015,7 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                     const selectedItems = selectedMeta.map(item => config.source[item.index]);
                     const data = config.build(selectedItems);
                     const filename = buildSelectiveExportFilename(exportPicker.type, selectedItems, selectedMeta);
-                    const result = await downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');
+                    const result = await downloadFile(window.RPHubIO.jsonTextChunks(data, { space: 2 }), filename, 'application/json');
                     if (result.cancelled) return;
                     exportPicker.show = false;
                     showToast(`已导出 ${selectedItems.length} 个${config.title}`, 'success');

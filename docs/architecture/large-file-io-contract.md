@@ -4,11 +4,12 @@
 
 本文件同时作为阶段 2 的交付物与阶段报告。遵循与 `baseline.md` 相同的原则：**已知事实**（有代码/测试证据）、**待验证事项**（未测即写「待测」）严格区分，不虚构内存或性能数字。上游稳定版本为 tag `1.9.3` = `4aef0bb46c9b3370faba174a20435e5989799727`。
 
-本轮按方案 §6「一次只迁移一个格式/入口」完成两个切片：
+本轮按方案 §6「一次只迁移一个格式/入口」完成三个切片：
 - **切片 1**：聊天 JSONL 格式（导出在 app.js、导入在 chat-import-streaming.js）+ **可复用流式行读取组件**。
 - **切片 2**：备份 V5 格式的导出 IO 边界收拢（`saveSnapshotStream`）与**导入失败处理**（区分「校验失败、未写入」与「恢复写入中断、可能部分覆盖」，后者指向恢复备份）；并补大样本往返/异常/失败注入证据。
+- **切片 3**：角色卡 JSON 导出（`character/index.html`，由补丁注入）改为 `RPHubIO.jsonTextChunks` 流式序列化，不再先构造完整字符串；新增字节级等价的 JSON 流写入组件。
 
-角色 JSON/PNG 等格式的逐项迁移仍列为后续子任务。
+角色 PNG、app.js 内上游角色 JSON 导出、跨页面导入等格式的逐项迁移仍列为后续子任务。
 
 ## 1. 本轮范围与实际文件
 
@@ -44,7 +45,8 @@
 | 聊天分支 JSONL 导出（app.js） | 逐分支、逐消息生成器 → `saveGeneratedFile` | — | 是（原生/FSA） | 是（单条消息粒度）；每条消息有一次 `cloneForStorage` 瞬时副本 | [已证实] 生产流形状；行为见 merge-regressions |
 | 聊天分支 JSONL 导入（chat-import-streaming.js） | — | 共享行读取，逐分支写库 | 是 | 是（逐分支写；不堆积整文件） | [已证实] test-chat-import-streaming（逐字节喂入） |
 | 聊天 legacy JSONL 导入（chat-import-streaming.js） | — | 共享行读取，整段消息数组一次写库 | 是（读取/解析逐行） | 读取阶段逐行；**写入需要完整消息数组驻留（存储契约要求单条记录）** | [已证实] test-chat-import-streaming，且已去掉全量 clone |
-| 角色卡 JSON / PNG 导出（app.js） | `JSON.stringify` / PNG 字节 → `saveGeneratedFile` | — | 否（聚合） | 否（既有行为） | [未迁移] 阶段 3+ 评估 |
+| 角色卡 JSON 导出（character 页，补丁注入） | `RPHubIO.jsonTextChunks(data,{space:2})` → `saveGeneratedFile` | — | 是（原生分块 / FSA） | 是（不再先建整串） | [已证实] test-rphub-io（字节等价）+ test-save-generated-file（路径契约） |
+| 角色卡 JSON / PNG 导出（app.js 上游函数） | `JSON.stringify` / PNG 字节 → `saveGeneratedFile` | — | 否（PNG 字节固有；JSON 先建整串） | 否（既有行为） | [未迁移] app.js 上游函数，阶段 3+ 评估 |
 | 角色/小说/工坊/论坛导入 | 见各自页面 | 既有实现 | 视入口而定 | 视入口而定 | [未迁移] 阶段 2 后续子任务 |
 
 ## 4. 导出一致性与导入失败处理
@@ -59,6 +61,8 @@
 
 **已消除**：聊天 legacy 导入的 `cloneForStorage(legacyMessages)` 全量深拷贝。解析结果是全新普通 JSON 对象（无响应式代理、无函数/循环引用），`prepareLoadedChatHistoryForDisplay` 就地补齐字段后直接写入同一数组引用（IndexedDB 写入时自行结构化克隆）。测试断言 `cloneForStorage` 调用次数为 0，证明不再有一整份聊天副本同时驻留。
 
+**已消除**：角色页整卡 JSON 导出的完整序列化字符串。改为 `RPHubIO.jsonTextChunks(data,{space:2})` 分块生成；标量编码仍委托原生 `JSON.stringify`，仅结构/缩进/`toJSON`/`undefined` 规则由流写入器复现，并有跨 fixture 的**逐字节等价**测试。原生 `appendTextStream` 与 FSA 直接消费该流。
+
 **仍存在、且属 schema 固有（不移除）**：
 - 备份/聊天的「数组记录」在 IndexedDB 中是单个 value，读取与写入时整体物化；要消除必须改变存储 schema 或数据库布局，超出阶段 2 范围（方案 §6 停止/回退明确要求移出本阶段）。
 - 聊天分支导出的 `JSON.stringify(cloneForStorage(messages[messageIndex]))` 为单条消息粒度瞬时副本（非全量驻留）。
@@ -72,6 +76,7 @@
 | legacy 导入额外全量副本 | **已消除（结构证明）** | test-chat-import-streaming 断言 `cloneForStorage` 0 次 |
 | 损坏/截断/取消不静默丢数据 | **已测（Node，负向）** | 聊天损坏截断回滚、备份坏文件/截断/记录数不符拒绝、恢复写入中断反馈、取消不返回成功 |
 | 备份大样本往返确定性 | **已测（Node）** | `backup-large-file.mjs`：552 条记录 / 5.08 MiB（含 30000 条消息的数组记录）导出→导入→再导出字节一致；导出生成器首个 yield 前 `indexedDB.open` 次数为 0（惰性，不整体物化） |
+| 角色卡 JSON 流式序列化字节等价 | **已测（Node）** | `test-rphub-io.mjs`：simple/nested/unicode/numbers/undefined 省略/数组空位/toJSON/转义键/大样本 等 fixture 与 `JSON.stringify(value,null,space)` 逐字节相等（space=2/0/4/tab），大样本分多块且每块≈32 KiB；`character/index.html` 实际接入断言 |
 | 峰值进程内存（含原生桥） | **待测** | 需参考设备 + 大样本，按方案 §7.3；本阶段不做设备测量，不以单测绿代替（Node 堆含 mock IDB，不代表 WebView） |
 | 总耗时 / 吞吐 / 最大在途块数 | **待测** | 同上 |
 | 聊天导入进度回调 | **未实现** | 现有导出有 `onProgress`，聊天导入无；如需 UI 进度另开子任务 |
@@ -88,7 +93,7 @@
 ## 8. 未完成项与下一阶段入口
 
 未完成验收（不标「阶段 2 已完成」的原因）：
-- 已迁移/加固聊天 JSONL 与备份 V5 两个格式；角色 JSON/PNG、跨页面导入等仍按既有实现（未迁移）。
+- 已迁移/加固聊天 JSONL、备份 V5、角色页 JSON 三个格式；角色 PNG、app.js 内上游角色 JSON 导出、跨页面导入等仍按既有实现（未迁移）。
 - 设备端峰值内存/耗时未测。
 - 聊天导入进度回调未实现。
 - 备份镜像恢复仍是分批写入（非单事务）：写入中断已诚实反馈并指向恢复备份，但未做到事务级自动回滚（需 staged/事务存储改造，按方案 §6 属移出本阶段的部分）。

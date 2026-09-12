@@ -151,29 +151,65 @@ export function patchAndroidCharacter(source) {
       'character selective export save hook'
     ]
   ];
-  const states = replacements.map(([before, after, label]) => ({
+  // 阶段 2:整卡 JSON 导出从「先 JSON.stringify 出完整字符串」升级为
+  // RPHubIO.jsonTextChunks 流式写入(原生分块 / FSA / 聚合回退通用)。把升级
+  // 视作同一接入器的第二种已应用状态,保证 reapply 幂等且能识别旧状态升级。
+  const streamifySave = (text) => text
+    .replace(
+      `await downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');`,
+      `await downloadFile(window.RPHubIO.jsonTextChunks(data, { space: 2 }), filename, 'application/json');`
+    )
+    .replace(
+      `const result = await downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');`,
+      `const result = await downloadFile(window.RPHubIO.jsonTextChunks(data, { space: 2 }), filename, 'application/json');`
+    );
+  const streamedLabels = new Set(['character public save hook', 'character selective export save hook']);
+  const states = replacements.map(([before, afterOld, label]) => ({
     before,
-    after,
-    label,
-    beforeCount: countOccurrences(source, before),
-    afterCount: countOccurrences(source, after)
+    afterOld,
+    afterNew: streamedLabels.has(label) ? streamifySave(afterOld) : afterOld,
+    label
   }));
-  const pristine = states.every(({ beforeCount, afterCount }) => beforeCount === 1 && afterCount === 0);
-  const patched = states.every(({ beforeCount, afterCount }) => beforeCount === 0 && afterCount === 1);
-  if (!pristine && !patched) {
-    const detail = states.map(({ label, beforeCount, afterCount }) => `${label}:old=${beforeCount},new=${afterCount}`).join('; ');
+  const describe = (entry) => {
+    const beforeCount = countOccurrences(source, entry.before);
+    const oldCount = countOccurrences(source, entry.afterOld);
+    const newCount = countOccurrences(source, entry.afterNew);
+    const changed = entry.afterOld !== entry.afterNew;
+    const oldSatisfied = changed
+      ? beforeCount === 0 && oldCount === 1 && newCount === 0
+      : beforeCount === 0 && oldCount === 1;
+    const newSatisfied = changed
+      ? beforeCount === 0 && oldCount === 0 && newCount === 1
+      : beforeCount === 0 && oldCount === 1;
+    return { ...entry, beforeCount, oldCount, newCount, oldSatisfied, newSatisfied };
+  };
+  const states2 = states.map(describe);
+  const pristine = states2.every(({ beforeCount, oldCount, newCount }) => beforeCount === 1 && oldCount === 0 && newCount === 0);
+  const patchedOld = states2.every(({ oldSatisfied }) => oldSatisfied);
+  const patchedNew = states2.every(({ newSatisfied }) => newSatisfied);
+  if (!pristine && !patchedOld && !patchedNew) {
+    const detail = states2.map(({ label, beforeCount, oldCount, newCount }) => `${label}:before=${beforeCount},old=${oldCount},new=${newCount}`).join('; ');
     throw new Error(`Partial Android character export hook state: ${detail}`);
   }
   if (pristine) {
-    for (const { before, after } of states) source = source.replace(before, after);
-  }
-  for (const { before, after, label } of states) {
-    const beforeCount = countOccurrences(source, before);
-    const afterCount = countOccurrences(source, after);
-    if (beforeCount !== 0 || afterCount !== 1) {
-      throw new Error(`Android character hook validation failed for ${label}: old=${beforeCount}, new=${afterCount}`);
+    for (const { before, afterNew } of states2) source = source.replace(before, afterNew);
+  } else if (patchedOld) {
+    for (const { afterOld, afterNew } of states2) {
+      if (afterOld !== afterNew) source = source.replace(afterOld, afterNew);
     }
   }
+  for (const { before, afterNew, label } of states2) {
+    if (countOccurrences(source, before) !== 0 || countOccurrences(source, afterNew) !== 1) {
+      throw new Error(`Android character hook validation failed for ${label}`);
+    }
+  }
+  // Load the shared IO module beside the other character-page scripts.
+  source = ensureAfter(
+    source,
+    '<script src="../assets/js/core-utils.js"></script>',
+    '\n    <script src="../assets/js/rphub-io.js"></script>',
+    'character rphub-io script'
+  );
   return source;
 }
 

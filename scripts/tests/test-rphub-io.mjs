@@ -111,4 +111,60 @@ function streamFile(chunks) {
   assert.doesNotMatch(chatSource, /chunkText\.indexOf\('\\n'/, 'chat importer must not keep a private chunk splitter');
 }
 
-console.log('rphub-io shared streaming line reader: UTF-8 boundaries, CRLF, empty-line policy, FileReader fallback, single implementation: PASS');
+// 7) Streaming JSON writer is byte-identical to JSON.stringify(value, null, 2).
+{
+  const io = loadIO();
+  const collect = async (source) => {
+    let text = '';
+    for await (const chunk of source) text += chunk;
+    return text;
+  };
+  const symbolValue = Symbol('s');
+  const fixtures = {
+    simple: { a: 1, b: 'x', c: true, d: null },
+    nested: { a: { b: [1, 2, { c: 'd' }], e: {} }, f: [] },
+    mixedKeys: { 2: 'a', 10: 'b', 1: 'c', x: 'd' },
+    unicode: { 'ключ': 'значение', emoji: '😀🌍', quote: '"\\\n\t', control: '\u0001\u001f' },
+    numbers: { a: 0, b: -0, c: 1.5, d: 1e21, e: 1e-7, f: Number.MAX_SAFE_INTEGER, g: NaN, h: Infinity, i: -Infinity },
+    omitted: { a: undefined, b: () => {}, c: symbolValue, d: 1, e: null },
+    arrayHoles: [1, undefined, 3, () => {}, symbolValue, null, { x: 1 }, []],
+    toJSON: { when: new Date('2020-01-02T03:04:05.000Z'), custom: { toJSON() { return { z: 1 }; } } },
+    empty: { o: {}, a: [] },
+    escapingKeys: { 'a"b': 'v', '\\': 'w', '\n': 'x' },
+    deep: [[[[1, { k: 'v' }]]]],
+    rphubCard: {
+      data: {
+        name: '甲', description: 'line1\nline2', personality: '😺', first_mes: 'hi',
+        extensions: { rp_hub_watermark: 'rp-hub', regex_scripts: [{ name: 'r', find: 'a', replace: 'b' }] },
+        character_book: { entries: [{ keys: ['k1', 'k2'], content: 'entry 一', enabled: true }] }
+      }
+    }
+  };
+  for (const [name, fixture] of Object.entries(fixtures)) {
+    for (const space of [2, 0, 4, '\t']) {
+      const actual = await collect(io.jsonTextChunks(fixture, { space }));
+      assert.equal(actual, JSON.stringify(fixture, null, space), `jsonTextChunks must match native for ${name} (space=${JSON.stringify(space)})`);
+    }
+  }
+  // Streaming: a large payload is emitted in multiple bounded chunks, not one string.
+  const large = { items: Array.from({ length: 4000 }, (_, i) => ({ i, text: `条目 ${i} 😀`, nested: { a: [i, i + 1] } })) };
+  const chunks = [];
+  for await (const chunk of io.jsonTextChunks(large, { space: 2 })) chunks.push(chunk);
+  assert.ok(chunks.length > 1, 'large JSON must be streamed in several chunks');
+  assert.equal(chunks.join(''), JSON.stringify(large, null, 2), 'streamed large JSON must still be byte-identical');
+  assert.ok(chunks.slice(0, -1).every(chunk => chunk.length <= 32 * 1024 + 4096), 'chunks must stay near the 32 KiB target');
+  // Native-matching failures.
+  await assert.rejects(async () => { for await (const _ of io.jsonTextChunks(1n)) { /* drain */ } }, /BigInt/);
+  const circular = {}; circular.self = circular;
+  await assert.rejects(async () => { for await (const _ of io.jsonTextChunks(circular)) { /* drain */ } }, /circular/);
+}
+
+// 8) The character page export actually uses the streaming writer (app call path).
+{
+  const characterSource = await readFile(new URL('../../character/index.html', import.meta.url), 'utf8');
+  assert.match(characterSource, /rphub-io\.js/, 'character page must load the shared IO module');
+  assert.match(characterSource, /RPHubIO\.jsonTextChunks\(data, \{ space: 2 \}\)/, 'character JSON export must stream the card data');
+  assert.doesNotMatch(characterSource, /downloadFile\(JSON\.stringify\(data, null, 2\)/, 'character page must not stringify the whole card before saving');
+}
+
+console.log('rphub-io: streaming line reader + byte-exact streaming JSON writer: PASS');
