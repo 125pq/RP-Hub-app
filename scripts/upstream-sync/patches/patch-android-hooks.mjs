@@ -1,3 +1,4 @@
+import { patchAppNavigation } from './patch-app-navigation.mjs';
 import { countOccurrences, editText, ensureAfter, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
 import { patchCoreUtilsOverlay } from './patch-core-utils.mjs';
 import { patchIndexScriptOverlay } from './index-script-overlay.mjs';
@@ -68,7 +69,7 @@ export function patchAndroidApp(source) {
   }
   source = ensureAfter(
     source,
-    '            scheduleMobileVisualViewportSync({ force: true });',
+    "            window.addEventListener('resize', handleMobileViewportResize, { passive: true });\n            scheduleMobileVisualViewportSync({ force: true });",
     '\n            await initializePlatformAdapters();',
     'app lifecycle initialization'
   );
@@ -79,10 +80,14 @@ export function patchAndroidApp(source) {
   } else {
     source = ensureAfter(
       source,
-      '            clearTimeout(mobileKeyboardBlurTimer);',
+      '            if (mobileViewportRaf) cancelAnimationFrame(mobileViewportRaf);\n            clearTimeout(mobileKeyboardBlurTimer);',
       backCleanup,
       'app lifecycle cleanup'
     );
+  }
+  source = patchAppNavigation(source);
+  if (!source.includes(backDeclaration)) {
+    source = ensureBefore(source, '        const handlePlatformBackButton =', backDeclaration + '\n\n', 'back listener declaration');
   }
   requireExactlyOnce(backDeclaration, 'app back-listener cleanup declaration');
   requireExactlyOnce(backInitializer, 'app back-listener initialization');

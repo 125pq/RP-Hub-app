@@ -374,11 +374,12 @@ assert.equal(patchSidebarComponentTemplate(patched), patched, 'patch must be ide
 assert.throws(() => patchSidebarComponentTemplate(upstreamSnippet.replace('md:w-72 bg-white', 'md:w-72 CHANGED')), /app-sidebar width classes/, 'patch must fail on drifted upstream snippet');
 
 const androidAppFixture = `        let removePlatformBackListener = () => {};
-        const closeBooleanPanel = (panel) => panel;
         const confirmCharacterExport = (type) => {
             return type;
         };
+            window.addEventListener('resize', handleMobileViewportResize, { passive: true });
             scheduleMobileVisualViewportSync({ force: true });
+            if (mobileViewportRaf) cancelAnimationFrame(mobileViewportRaf);
             clearTimeout(mobileKeyboardBlurTimer);`;
 const androidAppPatched = patchAndroidApp(androidAppFixture);
 assert.match(androidAppPatched, /adapter\.onBackButton\(handlePlatformBackButton\)/, 'Android app patch must retain the native back listener');
@@ -391,7 +392,7 @@ assert.throws(
   'Android app patch must reject a duplicate current back-listener declaration'
 );
 const initializerStart = androidAppPatched.indexOf('        const initializePlatformAdapters = async () => {');
-const initializerEnd = androidAppPatched.indexOf('        const confirmCharacterExport = (type) => {', initializerStart);
+const initializerEnd = androidAppPatched.indexOf('        };\n\n', initializerStart) + '        };\n\n'.length;
 assert.ok(initializerStart >= 0 && initializerEnd > initializerStart, 'Android app fixture must contain the complete current initializer');
 const currentInitializer = androidAppPatched.slice(initializerStart, initializerEnd);
 assert.throws(

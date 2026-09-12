@@ -74,6 +74,7 @@ function assertScriptOrder(lines) {
     'rphub-io.js',
     'chat-import-streaming.js',
     'rphub-backup.js',
+    'app-back-navigation.js',
     'app.js'
   ];
   const indexes = assets.map(asset => {
@@ -124,6 +125,7 @@ export function patchIndexScriptOverlay(source) {
   // assets) would place it after chat/backup because those already existed.
   lines = ensureBefore(lines, scriptLine('chat-import-streaming.js'), scriptLine('rphub-io.js'), 'rphub-io.js entry');
   lines = ensureBefore(lines, app, scriptLine('rphub-backup.js'), 'rphub-backup.js entry');
+  lines = ensureBefore(lines, app, scriptLine('app-back-navigation.js'), 'app navigation entry');
   assertScriptOrder(lines);
 
   const replacement = `    <script>\n${lines.join('\n')}\n    </script>`;
