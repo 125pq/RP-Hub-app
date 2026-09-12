@@ -1,3 +1,4 @@
+import { patchAppFileExport } from './patch-app-file-export.mjs';
 import { patchAppNavigation } from './patch-app-navigation.mjs';
 import { countOccurrences, editText, ensureAfter, ensureBefore, replaceOnce, requireContains } from '../lib.mjs';
 import { patchCoreUtilsOverlay } from './patch-core-utils.mjs';
@@ -240,7 +241,7 @@ export async function applyAndroidHooks() {
 
   changes.push(await editText('index.html', category, patchIndexScriptOverlay));
 
-  changes.push(await editText('assets/js/app.js', category, patchAndroidApp));
+  changes.push(await editText('assets/js/app.js', category, source => patchAppFileExport(patchAndroidApp(source))));
 
   changes.push(await editText('assets/js/core-utils.js', category, patchCoreUtilsOverlay));
 
