@@ -1,4 +1,9 @@
+param([string]$CandidateRun)
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('CandidateRun')) {
+    if ([string]::IsNullOrWhiteSpace($CandidateRun)) { throw 'CandidateRun must not be empty.' }
+    $CandidateRun = (Resolve-Path -LiteralPath $CandidateRun).Path
+}
 
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $androidRoot = Join-Path $projectRoot 'android'
@@ -74,7 +79,11 @@ Write-Output "ANDROID_HOME=$androidSdk"
 
 Push-Location $projectRoot
 try {
-    & npm.cmd run android:sync
+    if ($CandidateRun) {
+        & node (Join-Path $projectRoot 'scripts/compose/sync-candidate-android.mjs') --run-dir $CandidateRun
+    } else {
+        & npm.cmd run android:sync
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Capacitor Android sync failed.' }
 
     & (Join-Path $androidRoot 'gradlew.bat') --project-dir $androidRoot clean assembleDebug
@@ -84,9 +93,14 @@ try {
     if (-not (Test-Path -LiteralPath $sourceApk)) { throw "Debug APK was not created: $sourceApk" }
 
     $outputDirectory = Join-Path $projectRoot 'debug_apk'
+    if ($CandidateRun) { $outputDirectory = Join-Path $CandidateRun 'android-debug' }
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     $outputApk = Join-Path $outputDirectory "RP-Hub-$versionName-debug.apk"
     Copy-Item -LiteralPath $sourceApk -Destination $outputApk -Force
+
+    if ($CandidateRun) {
+        & (Join-Path $PSScriptRoot 'verify-candidate-apk.ps1') -CandidateRun $CandidateRun -Apk $outputApk
+    }
 
     $apk = Get-Item -LiteralPath $outputApk
     $hash = Get-RPHubSha256Hex $outputApk

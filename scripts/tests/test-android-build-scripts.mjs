@@ -92,6 +92,10 @@ try {
 }
 
 console.log('Android debug APK version selection and naming contract: PASS');
+const candidateApk = spawnSync(powershellCommand, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+  path.resolve('scripts/tests/test-candidate-apk.ps1')], { encoding: 'utf8' });
+assert.equal(candidateApk.status, 0, candidateApk.stdout + candidateApk.stderr);
+console.log(candidateApk.stdout.trim());
 await import('./test-native-theme.mjs');
 
 await import('./test-build-install-output.mjs');
