@@ -7,11 +7,14 @@ import {
   classifyUpstream, assertLegacy, compareBytes, readLocal,
 } from './compose-lib.mjs';
 
-if (process.argv.length > 2) throw new Error('build-candidate takes no arguments; edit the reviewed lock/recipe to change inputs');
+const args = process.argv.slice(2);
+const independent = args.length === 1 && args[0] === '--independent';
+if (args.length && !independent) throw new Error('Only --independent is supported; edit the reviewed lock/recipe to change inputs');
 const lockBytes = await readFile(path.join(repositoryRoot, 'upstream.lock.json'));
 const recipeBytes = await readFile(path.join(repositoryRoot, 'scripts/compose/recipe.json'));
 const lock = JSON.parse(lockBytes);
 const recipe = JSON.parse(recipeBytes);
+if (independent && recipe.legacyOverrides.length) throw new Error('Independent builds cannot use full-file legacy overrides');
 if (JSON.stringify(recipe.publishRoots) !== JSON.stringify(publishRoots)) {
   throw new Error('Recipe publish roots must match the shared web build policy');
 }
@@ -36,7 +39,8 @@ const pristine = path.join(run, 'upstream');
 const source = path.join(run, 'source');
 const output = path.join(run, 'dist');
 const report = {
-  status: 'building', upstream: lock, recipeSha256: hash(recipeBytes), lockSha256: hash(lockBytes),
+  status: 'building', buildMode: independent ? 'independent' : 'checkout-comparison',
+  upstream: lock, recipeSha256: hash(recipeBytes), lockSha256: hash(lockBytes),
   extensionCommit: git(repositoryRoot, ['rev-parse', 'HEAD']).toString().trim(),
   workingTreeStatus: git(repositoryRoot, ['status', '--porcelain']).toString(),
   dependencyLockSha256: hash(await readFile(path.join(repositoryRoot, 'package-lock.json'))),
@@ -95,8 +99,8 @@ try {
       if (!transform(file, result).equals(result)) throw new Error(`Non-idempotent transform: ${file}`);
     }
     // Full comparison catches local changes absent from the composition recipe.
-    const baseline = await readLocal(repositoryRoot, file);
-    const comparison = compareBytes(file, result, baseline, recipe.allowedBaselineEolDifferences);
+    const comparison = independent ? 'not-compared' : compareBytes(file, result,
+      await readLocal(repositoryRoot, file), recipe.allowedBaselineEolDifferences);
     await write(source, file, result);
     report.files.push({ file, kind, upstreamSha256: hash(bytes), sourceSha256: hash(result), comparison });
   }
@@ -108,7 +112,7 @@ try {
     report.files.push({ file, kind: 'local-extension', sourceSha256: hash(bytes) });
   }
   // No unregistered local asset additions, even if the existing dist is stale.
-  for (const root of recipe.publishRoots) {
+  for (const root of independent ? [] : recipe.publishRoots) {
     const info = await lstat(path.join(repositoryRoot, root));
     if (info.isSymbolicLink()) throw new Error(`Publish root must not be a symlink: ${root}`);
     const actual = info.isDirectory() ? (await filesIn(path.join(repositoryRoot, root))).map(file => `${root}/${file}`) : [root];
@@ -136,15 +140,15 @@ try {
 
   const baseline = path.join(repositoryRoot, 'dist');
   const candidateFiles = await filesIn(output);
-  const baselineFiles = await filesIn(baseline);
-  if (JSON.stringify(candidateFiles) !== JSON.stringify(baselineFiles)) {
+  const baselineFiles = independent ? null : await filesIn(baseline);
+  if (!independent && JSON.stringify(candidateFiles) !== JSON.stringify(baselineFiles)) {
     throw new Error('Candidate and baseline file lists differ; rebuild the baseline with npm run build:web and review new resources');
   }
   for (const file of candidateFiles) {
     const bytes = await readFile(path.join(output, file));
-    const reference = await readFile(path.join(baseline, file));
-    const comparison = compareBytes(file, bytes, reference, recipe.allowedBaselineEolDifferences);
-    report.comparison.push({ file, result: comparison, sha256: hash(bytes), baselineSha256: hash(reference) });
+    const reference = independent ? null : await readFile(path.join(baseline, file));
+    const comparison = independent ? 'not-compared' : compareBytes(file, bytes, reference, recipe.allowedBaselineEolDifferences);
+    report.comparison.push({ file, result: comparison, sha256: hash(bytes), baselineSha256: reference === null ? null : hash(reference) });
   }
   for (const [file, bytes] of upstream) {
     if (!(await readFile(path.join(pristine, file))).equals(bytes)) throw new Error(`Pristine input modified: ${file}`);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFile, readdir, cp, mkdtemp, appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, cp, mkdtemp, appendFile, mkdir, writeFile, symlink, unlink, access } from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import { patchAndroidUpdateCheck } from '../upstream-sync/patches/patch-android-hooks.mjs';
@@ -123,6 +123,45 @@ for (const entry of first.report.comparison) {
     || (entry.result === 'eol-only' && recipe.allowedBaselineEolDifferences.includes(entry.file)));
 }
 assert.equal(first.report.files.filter(entry => entry.kind === 'legacy-override').length, recipe.legacyOverrides.length);
+
+// Independent composition must work after the old upstream-facing checkout and
+// baseline dist are absent. Use a disposable clone, never the user's checkout.
+const isolated = path.join(await mkdtemp(path.join(work, 'independent-test-')), 'repo');
+git(repositoryRoot, ['clone', '--shared', '--quiet', repositoryRoot, isolated]);
+await cp(path.join(repositoryRoot, 'scripts/compose/build-candidate.mjs'), path.join(isolated, 'scripts/compose/build-candidate.mjs'));
+// Git checkout may convert CRLF; preserve the exact registered extension inputs.
+for (const file of recipe.localFiles) await cp(path.join(repositoryRoot, file), path.join(isolated, file));
+await symlink(path.join(repositoryRoot, 'node_modules'), path.join(isolated, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+const tracked = git(isolated, ['ls-files', '-z']).toString().split('\0').filter(Boolean);
+for (const file of tracked) {
+  if (!recipe.publishRoots.includes(file.split('/')[0]) || recipe.localFiles.includes(file)) continue;
+  safeRelative(file);
+  await unlink(path.join(isolated, file));
+}
+await assert.rejects(access(path.join(isolated, 'index.html')));
+await assert.rejects(access(path.join(isolated, 'assets/js/app.js')));
+await assert.rejects(access(path.join(isolated, 'dist')));
+const independentBuild = spawnSync(process.execPath, ['scripts/compose/build-candidate.mjs', '--independent'], {
+  cwd: isolated, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+});
+assert.equal(independentBuild.status, 0, independentBuild.stdout + independentBuild.stderr);
+const isolatedWork = path.join(isolated, '.work/compose');
+const independentRun = path.join(isolatedWork, (await readdir(isolatedWork))[0]);
+const independentReport = JSON.parse(await readFile(path.join(independentRun, 'report.json')));
+assert.equal(independentReport.status, 'verified-candidate');
+assert.equal(independentReport.buildMode, 'independent');
+assert.equal(independentReport.outputSha256, first.report.outputSha256);
+assert.ok(independentReport.comparison.every(entry => entry.result === 'not-compared' && entry.baselineSha256 === null));
+const independentBehavior = spawnSync(process.execPath, ['scripts/compose/check-candidate.mjs', '--run-dir', independentRun], {
+  cwd: isolated, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+});
+assert.equal(independentBehavior.status, 0, independentBehavior.stdout + independentBehavior.stderr);
+const comparisonWithoutCheckout = spawnSync(process.execPath, ['scripts/compose/build-candidate.mjs'], {
+  cwd: isolated, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+});
+assert.notEqual(comparisonWithoutCheckout.status, 0);
+assert.match(comparisonWithoutCheckout.stderr, /ENOENT/);
+console.log('Independent composition: PASS (old web sources and dist absent; identical artifact; candidate behavior passed)');
 
 cli('scripts/compose/check-candidate.mjs', ['--run-dir', first.run]);
 const behavior = JSON.parse(await readFile(path.join(first.run, 'behavior-report.json')));

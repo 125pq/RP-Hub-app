@@ -7,6 +7,7 @@
     "build:css": "node scripts/web/build-css.mjs",
     "build:web": "npm run prepare:vendor && npm run build:css && node scripts/web/build-web.mjs",
     "build:candidate": "node scripts/compose/build-candidate.mjs",
+    "build:candidate:independent": "node scripts/compose/build-candidate.mjs --independent",
     "verify:candidate": "node scripts/compose/check-candidate.mjs",
     "verify:candidate:browser": "node scripts/compose/check-browser.mjs",
     "test:compose": "node scripts/tests/test-compose.mjs",
