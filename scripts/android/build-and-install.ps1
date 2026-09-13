@@ -115,19 +115,112 @@ function Invoke-Adb([string[]]$arguments, [switch]$AllowFail) {
     return @{ Output = ($out -join "`n"); ExitCode = $code }
 }
 
-function Invoke-Native([scriptblock]$Script, [switch]$StreamOutput) {
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [switch]$StreamOutput
+    )
+    # 不能用 `& $Script 2>&1 | ForEach-Object`：首次构建时 Gradle 会派生长驻的
+    # daemon 进程，它继承 stdout 管道句柄且不退出，管道永远读不到 EOF，包装脚本
+    # 就会在构建结束后卡死。这里用 .NET Process 异步按行读取输出，以「进程退出」
+    # 而非「管道关闭」作为结束条件。也不调用 $process.WaitForExit()，因为它会
+    # 连带等待被孙进程占用的输出管道。
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $FilePath
+        $psi.Arguments = (@($ArgumentList | ForEach-Object {
+            $arg = [string]$_
+            if ($arg.Length -gt 0 -and $arg -notmatch '[\s"]') {
+                $arg
+            } else {
+                # Win32 CommandLineToArgvW 转义：引号前的反斜杠翻倍，结尾反斜杠翻倍。
+                $escaped = [regex]::Replace($arg, '(\\*)"', '$1$1\"')
+                $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+                '"' + $escaped + '"'
+            }
+        }) -join ' ')
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $psi
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadLineAsync()
+        $stderrTask = $process.StandardError.ReadLineAsync()
         $lines = New-Object 'System.Collections.Generic.List[string]'
-        & $Script 2>&1 | ForEach-Object {
-            $line = if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                $_.Exception.Message
-            } else { $_.ToString() }
-            $lines.Add($line)
-            if ($StreamOutput) { Write-Host $line }
+
+        while (-not $process.HasExited) {
+            if ($stdoutTask.IsCompleted) {
+                if (-not $stdoutTask.IsFaulted) {
+                    $line = $stdoutTask.Result
+                    if ($null -ne $line) {
+                        $lines.Add($line)
+                        if ($StreamOutput) { Write-Host $line }
+                    }
+                }
+                $stdoutTask = $process.StandardOutput.ReadLineAsync()
+            }
+            if ($stderrTask.IsCompleted) {
+                if (-not $stderrTask.IsFaulted) {
+                    $line = $stderrTask.Result
+                    if ($null -ne $line) {
+                        $lines.Add($line)
+                        if ($StreamOutput) { Write-Host $line }
+                    }
+                }
+                $stderrTask = $process.StandardError.ReadLineAsync()
+            }
+            Start-Sleep -Milliseconds 100
         }
-        return @{ Output = ($lines -join "`n"); ExitCode = $LASTEXITCODE }
+
+        # 进程已退出：最多用 1 秒窗口把缓冲里的尾部输出排空。若管道被孙进程占用
+        # 而读不到 EOF，超时后放弃，保证不会挂起。
+        $stdoutDone = $false
+        $stderrDone = $false
+        $drainDeadline = [DateTime]::UtcNow.AddSeconds(1)
+        while ([DateTime]::UtcNow -lt $drainDeadline -and (-not $stdoutDone -or -not $stderrDone)) {
+            $waiting = $false
+            if (-not $stdoutDone -and $stdoutTask.IsCompleted) {
+                if ($stdoutTask.IsFaulted) {
+                    $stdoutDone = $true
+                } else {
+                    $line = $stdoutTask.Result
+                    if ($null -eq $line) {
+                        $stdoutDone = $true
+                    } else {
+                        $lines.Add($line)
+                        if ($StreamOutput) { Write-Host $line }
+                        $stdoutTask = $process.StandardOutput.ReadLineAsync()
+                    }
+                }
+            }
+            if (-not $stderrDone -and $stderrTask.IsCompleted) {
+                if ($stderrTask.IsFaulted) {
+                    $stderrDone = $true
+                } else {
+                    $line = $stderrTask.Result
+                    if ($null -eq $line) {
+                        $stderrDone = $true
+                    } else {
+                        $lines.Add($line)
+                        if ($StreamOutput) { Write-Host $line }
+                        $stderrTask = $process.StandardError.ReadLineAsync()
+                    }
+                }
+            }
+            if ((-not $stdoutDone -and -not $stdoutTask.IsCompleted) -or
+                (-not $stderrDone -and -not $stderrTask.IsCompleted)) {
+                $waiting = $true
+            }
+            if ($waiting) { Start-Sleep -Milliseconds 25 }
+        }
+
+        return @{ Output = ($lines -join "`n"); ExitCode = $process.ExitCode }
     } finally {
         $ErrorActionPreference = $prevEap
     }
@@ -162,7 +255,8 @@ if (-not $SkipBuild) {
         Write-Host "  构建中 (attempt $($attempt+1)/$($BuildRetries+1)) ..."
         $buildOutput = $null
         try {
-            $build = Invoke-Native -StreamOutput { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript }
+            $build = Invoke-Native -FilePath 'powershell.exe' `
+                -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $buildScript) -StreamOutput
             $code = $build.ExitCode
             $buildOutput = $build.Output
             $apkLine = ($buildOutput -split "`n" | Where-Object { $_ -match '^APK=' }) | Select-Object -Last 1
@@ -207,7 +301,7 @@ if (-not $SkipBuild) {
 # [3/5] 启动 adb 服务
 # ---------------------------------------------------------------------------
 Write-Step '3/5 启动 adb 服务'
-$srv = Invoke-Native { & $adb start-server }
+$srv = Invoke-Native -FilePath $adb -ArgumentList @('start-server')
 if ($srv.ExitCode -ne 0) { Write-Result 'adb start-server 失败' -IsError; exit 3 }
 Write-Result 'adb 服务已启动'
 
@@ -260,7 +354,7 @@ for ($attempt = 0; $attempt -le $installRetries; $attempt++) {
         Start-Sleep -Seconds 3
     }
     Write-Host "  安装中 (attempt $($attempt+1)/$($installRetries+1)) ..."
-    $ins = Invoke-Native { & $adb -s $device install -r -t $targetApk }
+    $ins = Invoke-Native -FilePath $adb -ArgumentList @('-s', $device, 'install', '-r', '-t', $targetApk)
     $installCode = $ins.ExitCode
     $installOut = $ins.Output
     if ($installCode -eq 0 -and $installOut -match 'Success') {
