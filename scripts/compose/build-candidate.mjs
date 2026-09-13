@@ -20,7 +20,7 @@ if (JSON.stringify(recipe.publishRoots) !== JSON.stringify(publishRoots)) {
 }
 if (lock.schemaVersion !== 1 || recipe.schemaVersion !== 1
   || lock.repository !== 'https://github.com/STA1N156/RP-Hub.git'
-  || !/^[0-9a-f]{40}$/.test(lock.commit) || !/^\d+\.\d+\.\d+$/.test(lock.tag)) {
+  || !/^[0-9a-f]{40}$/.test(lock.commit) || !/^v?\d+\.\d+\.\d+$/.test(lock.tag)) {
   throw new Error('Unsupported upstream lock or composition recipe');
 }
 const resolved = git(repositoryRoot, ['rev-parse', `${lock.tag}^{commit}`]).toString().trim();

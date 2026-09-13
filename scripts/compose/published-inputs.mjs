@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { hash, readLocal } from './compose-lib.mjs';
 import { repositoryRoot } from '../web/paths.mjs';
+import { assertVersionMatchesLock } from './pin-upstream.mjs';
 
 export async function assertCurrentInputs(receipt) {
+  const pkg = JSON.parse(await readLocal(repositoryRoot, 'package.json'));
+  assertVersionMatchesLock(pkg.version, receipt.upstream);
   assert.deepEqual(receipt.upstream, JSON.parse(await readLocal(repositoryRoot, 'upstream.lock.json')), 'Upstream lock changed; rebuild composed dist');
   assert.equal(receipt.recipeSha256, hash(await readLocal(repositoryRoot, 'scripts/compose/recipe.json')), 'Recipe changed; rebuild composed dist');
   assert.equal(receipt.dependencyLockSha256, hash(await readLocal(repositoryRoot, 'package-lock.json')), 'Dependencies changed; rebuild composed dist');

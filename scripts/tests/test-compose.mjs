@@ -4,6 +4,7 @@ import { readFile, readdir, cp, mkdtemp, appendFile, mkdir, writeFile, symlink, 
 import path from 'node:path';
 import vm from 'node:vm';
 import { patchAndroidUpdateCheck } from '../upstream-sync/patches/patch-android-hooks.mjs';
+import { pinUpstream, assertVersionMatchesLock } from '../compose/pin-upstream.mjs';
 import { repositoryRoot } from '../web/paths.mjs';
 import { hash, git, filesIn, transform, classifyUpstream, assertLegacy, compareBytes, safeRelative } from '../compose/compose-lib.mjs';
 
@@ -132,6 +133,23 @@ await cp(path.join(repositoryRoot, 'scripts'), path.join(isolated, 'scripts'), {
 // Git checkout may convert CRLF; preserve the exact registered extension inputs.
 for (const file of recipe.localFiles) await cp(path.join(repositoryRoot, file), path.join(isolated, file));
 await symlink(path.join(repositoryRoot, 'node_modules'), path.join(isolated, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+const isolatedLockPath = path.join(isolated, 'upstream.lock.json');
+const originalLock = await readFile(isolatedLockPath);
+const earlierCommit = git(isolated, ['rev-parse', 'refs/tags/1.9.2^{commit}']).toString().trim();
+const earlierLock = pinUpstream(isolated, '1.9.2', earlierCommit);
+assert.equal(JSON.parse(await readFile(isolatedLockPath)).commit, earlierCommit);
+const pinnedBytes = await readFile(isolatedLockPath);
+assert.throws(() => pinUpstream(isolated, '1.9.3', earlierCommit), /differs from the selected release/);
+assert.ok((await readFile(isolatedLockPath)).equals(pinnedBytes), 'mismatched tag must not rewrite lock');
+pinUpstream(isolated, lock.tag, lock.commit, { dryRun: true });
+assert.ok((await readFile(isolatedLockPath)).equals(pinnedBytes), 'dry run must not rewrite lock');
+assertVersionMatchesLock('1.9.2', earlierLock);
+assertVersionMatchesLock('1.9.2.99', earlierLock);
+assertVersionMatchesLock('1.9.2.1', { ...earlierLock, tag: 'v1.9.2' });
+for (const version of ['1.9.3', '1.9.2.100', '1.9.2.0', '1.9.2-invalid']) {
+  assert.throws(() => assertVersionMatchesLock(version, earlierLock), /does not match/);
+}
+await writeFile(isolatedLockPath, originalLock);
 const tracked = git(isolated, ['ls-files', '-z']).toString().split('\0').filter(Boolean);
 for (const file of tracked) {
   if (!recipe.publishRoots.includes(file.split('/')[0]) || recipe.localFiles.includes(file)) continue;

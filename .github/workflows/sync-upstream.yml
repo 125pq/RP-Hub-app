@@ -99,7 +99,10 @@ jobs:
       - name: Prepare Android release metadata
         id: android_release
         if: steps.upstream_sync.outputs.has_updates == 'true'
-        run: node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ steps.upstream_sync.outputs.revision }}"
+        run: |
+          git fetch upstream "refs/tags/${{ steps.upstream_sync.outputs.release_tag }}:refs/tags/${{ steps.upstream_sync.outputs.release_tag }}"
+          node scripts/compose/pin-upstream.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ steps.upstream_sync.outputs.upstream_sha }}"
+          node scripts/upstream-sync/prepare-android-release.mjs "${{ steps.upstream_sync.outputs.release_tag }}" "${{ steps.upstream_sync.outputs.revision }}"
 
       - name: Verify adapter and upstream hooks
         if: steps.upstream_sync.outputs.has_updates == 'true'

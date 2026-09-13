@@ -27,6 +27,10 @@ assert.match(workflow, /actions\/setup-java@v4[\s\S]*if: steps\.upstream_sync\.o
 assert.match(workflow, /Install dependencies[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
 assert.match(workflow, /Sync Capacitor and build Android release[\s\S]*if: steps\.upstream_sync\.outputs\.has_updates == 'true'/);
 assert.match(workflow, /prepare-android-release\.mjs .*steps\.upstream_sync\.outputs\.release_tag.*steps\.upstream_sync\.outputs\.revision/);
+const pinIndex = workflow.indexOf('node scripts/compose/pin-upstream.mjs');
+assert.ok(pinIndex > workflow.indexOf('git fetch upstream "refs/tags/'));
+assert.ok(pinIndex < workflow.indexOf('node scripts/upstream-sync/prepare-android-release.mjs'));
+assert.match(workflow.slice(pinIndex, workflow.indexOf('\n', pinIndex)), /steps\.upstream_sync\.outputs\.upstream_sha/);
 const verifyApkIndex = workflow.indexOf('name: Verify and package signed APK');
 const finalizeMetadataIndex = workflow.indexOf('name: Finalize Android release metadata');
 const finalDiffIndex = workflow.indexOf('name: Check final diff');
