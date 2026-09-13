@@ -1,3 +1,4 @@
+import { recoveryFixture } from '../../tests/recovery-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -195,8 +196,9 @@ function makeSeed() {
 const ioSource = await readFile(new URL('../../../assets/js/rphub-io.js', import.meta.url), 'utf8');
 const backupSource = await readFile(new URL('../../../assets/js/rphub-backup.js', import.meta.url), 'utf8');
 
-function loadBackup({ indexedDB, localStorage, saveGeneratedFile }) {
+function loadBackup({ indexedDB, localStorage, saveGeneratedFile, saveRecovery }) {
   const win = {};
+  win.RPHubRecoveryStore = recoveryFixture(saveRecovery);
   win.window = win;
   win.RPHubCardUtils = {
     saveGeneratedFile: saveGeneratedFile || (async (stream) => {
@@ -326,7 +328,7 @@ let exportedLines;
   const backup = loadBackup({
     indexedDB: freshIdb,
     localStorage,
-    saveGeneratedFile: async (stream, filename) => {
+    saveRecovery: async (stream, filename) => {
       const parts = [];
       for await (const part of stream) parts.push(String(part));
       savedParts = parts;

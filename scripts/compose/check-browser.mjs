@@ -120,6 +120,64 @@ try {
     page.screenshot = entry.replaceAll('/', '-') + '.png';
     await writeFile(path.join(browserRun, page.screenshot), Buffer.from(screenshot.data, 'base64'));
     console.log(`Browser startup PASS: ${entry}`);
+    if (entry === 'index.html') {
+      // Real IndexedDB transactions, cross-chunk UTF-8 and crash/failure retention.
+      // This browser has a fresh disposable profile, never the user's app data.
+      const check = await send('Runtime.evaluate', { awaitPromise: true, returnByValue: true,
+        expression: `(${async function () {
+          const store = window.RPHubRecoveryStore;
+          const ensure = (condition, message) => { if (!condition) throw new Error(message); };
+          const stream = text => (async function* () { yield text; })();
+          const content = '🙂中文'.repeat(100000);
+          await store.save(stream(content), 'first.jsonl');
+          await store.withLatest(async (meta, chunks) => {
+            const decoder = new TextDecoder();
+            let text = '', count = 0;
+            for await (const chunk of chunks) {
+              ensure(chunk.length <= 256 * 1024, 'unbounded chunk');
+              text += decoder.decode(chunk, { stream: true }); count++;
+            }
+            text += decoder.decode();
+            ensure(text === content && count > 1, 'UTF-8 roundtrip mismatch');
+          });
+          await store.save(stream('latest'), 'second.jsonl');
+          try {
+            await store.save((async function* () { yield 'x'.repeat(300000); throw new Error('injected failure'); })(), 'broken.jsonl');
+            throw new Error('failed stream was accepted');
+          } catch (error) { ensure(error.message === 'injected failure', error.message); }
+          const originalDelete = IDBObjectStore.prototype.delete;
+          IDBObjectStore.prototype.delete = function (key) {
+            if (this.name === 'chunks' && key instanceof IDBKeyRange) {
+              IDBObjectStore.prototype.delete = originalDelete;
+              throw new Error('injected promotion abort');
+            }
+            return originalDelete.call(this, key);
+          };
+          try {
+            await store.save(stream('uncommitted'), 'aborted.jsonl');
+            throw new Error('aborted promotion was accepted');
+          } catch (error) { ensure(error.message === 'injected promotion abort', error.message); }
+          finally { IDBObjectStore.prototype.delete = originalDelete; }
+          await store.withLatest(async (meta, chunks) => {
+            ensure(meta.filename === 'second.jsonl', 'previous recovery was lost');
+            let text = '';
+            for await (const chunk of chunks) text += new TextDecoder().decode(chunk);
+            ensure(text === 'latest', 'previous recovery changed');
+          });
+          const open = indexedDB.open('RPHubImportRecovery');
+          const db = await new Promise((resolve, reject) => { open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
+          try {
+            const request = db.transaction('chunks').objectStore('chunks').count();
+            const count = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+            ensure(count === 1, 'old or failed snapshots accumulated');
+          } finally { db.close(); }
+          await store.clear();
+          return 'PASS: UTF-8, bounded chunks, last-only retention, failed-save preservation, atomic promotion abort';
+        }.toString()})()` });
+      assert.ok(!check.exceptionDetails, JSON.stringify(check.exceptionDetails));
+      report.recoveryStore = check.result.value;
+      console.log(report.recoveryStore);
+    }
   }
   const actual = [];
   for (const file of await filesIn(dist)) actual.push({ file, sha256: hash(await readFile(path.join(dist, file))) });

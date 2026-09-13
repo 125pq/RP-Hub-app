@@ -724,9 +724,8 @@
     }
 
     // --- Top-level operations -------------------------------------------------
-    // Single save boundary shared by the manual export and the pre-import recovery
-    // export: build the streaming snapshot and hand it to saveGeneratedFile, which
-    // owns chunking / backpressure / cancel for the format (阶段 2).
+    // Manual export uses the platform save boundary. Automatic import recovery
+    // uses the separate local chunk store and never opens a save picker.
     async function saveSnapshotStream(filename, { onStatus, label = '正在导出' } = {}) {
         await RPHubBackupBridge.flush();
         const stats = { recordCount: 0, totalBytes: 0 };
@@ -753,28 +752,31 @@
 
     async function createRecoveryBackup({ onStatus } = {}) {
         try {
-            const { result, stats, filename } = await saveSnapshotStream(
-                `rp-hub-recovery-${timestampToken()}.jsonl`,
-                { onStatus, label: '正在导出恢复备份' }
-            );
-            if (result?.supported === false) return null;
-            if (result?.cancelled) return null; // 用户取消保存恢复备份 → importBackup 视作失败,中断恢复不覆盖现有数据
-            return { filename, recordCount: stats.recordCount };
+            await RPHubBackupBridge.flush();
+            if (!window.RPHubRecoveryStore) throw new Error('本地恢复备份模块未加载。');
+            onStatus?.('正在自动保存导入前备份（仅保留最近一份）...');
+            const stats = { recordCount: 0, totalBytes: 0 };
+            const result = await window.RPHubRecoveryStore.save(buildExportStream(stats), `rp-hub-recovery-${timestampToken()}.jsonl`);
+            return { ...result, recordCount: stats.recordCount };
         } catch (error) {
-            return null;
+            throw new Error(`无法保存本地恢复备份，已中止导入。请检查剩余存储空间。${error?.message || error}`);
         }
     }
 
-    async function importBackup(file, { onStatus, onProgress } = {}) {
-        // 1. Auto-export a recovery backup of the current data. If it fails, cancel
-        //    the restore (per requirement: 保存失败则默认取消恢复).
-        onStatus?.('正在导出当前数据的恢复备份...');
-        const recovery = await createRecoveryBackup({ onStatus });
-        if (!recovery) throw new Error('恢复备份导出失败，已取消导入恢复。');
+    async function exportRecoveryBackup() {
+        if (!window.RPHubRecoveryStore) throw new Error('本地恢复备份模块未加载。');
+        return window.RPHubRecoveryStore.withLatest(async (metadata, stream) => {
+            const result = await window.RPHubCardUtils.saveGeneratedFile(stream, metadata.filename, { mimeType: 'application/jsonl' });
+            if (result?.supported === false) throw new Error('当前平台不支持文件保存。');
+            return result?.cancelled ? { cancelled: true } : metadata;
+        });
+    }
 
-        // 2. Full validate-only pass.
+    async function importBackup(file, { onStatus, onProgress } = {}) {
+        // Invalid input must not replace the previous local recovery snapshot.
         onStatus?.('正在校验备份文件...');
         const { recordCount } = await restoreSnapshotFile(file, { validateOnly: true });
+        const recovery = await createRecoveryBackup({ onStatus });
 
         // 3. Real mirror restore. Batched writes are not one transaction, so a
         //    runtime failure after the write pass starts can leave some stores
@@ -791,7 +793,7 @@
             if (!writeStarted) throw error; // 校验阶段失败:未写入,保持原始错误
             const reason = error?.message || String(error);
             const failure = new Error(
-                `数据恢复中断，部分本地数据可能已被覆盖。请导入恢复备份 ${recovery.filename} 以回到导入前状态。原始错误：${reason}`
+                `数据恢复中断，部分本地数据可能已被覆盖。请在本地控制中心“导出恢复备份”，再导入 ${recovery.filename} 以回到导入前状态。原始错误：${reason}`
             );
             failure.partialWrite = true;
             failure.recovery = recovery;
@@ -983,8 +985,9 @@
                 <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">跟随系统</span><span class="rphub-control-row__hint" data-role="theme-value"></span></div><button type="button" class="rphub-control-switch" data-action="toggle-system-theme" role="switch" aria-checked="true" aria-label="切换跟随系统"></button></div></section>
                 <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">万相广场镜像</span><span class="rphub-control-row__hint" data-role="mirror-value"></span></div><button type="button" class="rphub-control-switch" data-action="toggle-mirror" role="switch" aria-checked="true" aria-label="切换万相广场镜像"></button></div></section>
                 <section class="rphub-control-section"><div class="rphub-control-row"><div class="rphub-control-row__body"><span class="rphub-control-row__title">检查更新</span><span class="rphub-control-row__hint" data-role="update-value">手动检查软件更新</span></div><button type="button" class="rphub-backup-panel__btn" data-action="check-update">检查更新</button></div></section>
-                <section class="rphub-control-section"><h3 class="rphub-control-section__title">整体备份</h3><p class="rphub-control-section__hint">导入前会先导出当前数据的恢复备份。</p><div class="rphub-backup-panel__actions">
+                <section class="rphub-control-section"><h3 class="rphub-control-section__title">整体备份</h3><p class="rphub-control-section__hint">导入前自动在应用内保存备份，仅保留最近一份。清除应用数据或卸载会一并删除。</p><div class="rphub-backup-panel__actions">
                     <button type="button" class="rphub-backup-panel__btn rphub-backup-panel__btn--primary" data-action="export">导出整体备份</button><button type="button" class="rphub-backup-panel__btn" data-action="import">导入整体备份</button>
+                    <button type="button" class="rphub-backup-panel__btn" data-action="export-recovery">导出恢复备份</button>
                 </div>
                 <p class="rphub-backup-status"></p></section>
             </div>
@@ -1048,6 +1051,15 @@
                 busy = false;
             }
         });
+        anchorEl.querySelector('[data-action="export-recovery"]').addEventListener('click', async () => {
+            if (busy) return;
+            busy = true;
+            try {
+                const result = await exportRecoveryBackup();
+                setStatus(result.cancelled ? '已取消导出。' : `已导出 ${result.filename}。`);
+            } catch (error) { setStatus(error?.message || '导出失败。', true); }
+            finally { busy = false; }
+        });
         anchorEl.querySelector('[data-action="import"]').addEventListener('click', () => {
             if (busy) return;
             fileInput.value = '';
@@ -1059,7 +1071,7 @@
             if (busy) return;
             busy = true;
             const confirmed = window.confirm(
-                '导入将按备份覆盖当前全部本地数据（角色、聊天、记忆、设置、小说、角色生成器）。\n\n恢复前会自动导出一份当前数据的恢复备份。\n\n确定继续吗？'
+                '导入将按备份覆盖当前全部本地数据（角色、聊天、记忆、设置、小说、角色生成器）。\n\n导入前会自动在应用内保留最近一份备份，无需另选保存位置。\n\n确定继续吗？'
             );
             if (!confirmed) {
                 busy = false;
@@ -1113,6 +1125,7 @@
         SNAPSHOT_SCHEMA_VERSION,
         buildExportStream,
         createRecoveryBackup,
+        exportRecoveryBackup,
         exportBackup,
         importBackup,
         iterateSnapshotLines,

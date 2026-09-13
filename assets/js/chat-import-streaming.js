@@ -161,7 +161,7 @@
             if (!backup?.createRecoveryBackup) throw new Error('恢复备份接口不可用，已中止导入。');
             const recovery = await backup.createRecoveryBackup();
             if (!recovery) {
-                showToast('未保存恢复备份，已取消聊天导入。', 'info');
+                showToast('未能保存本地恢复备份，已取消聊天导入。', 'info');
                 return;
             }
             if (currentCharacter.value?.uuid !== char.uuid) throw new Error('当前角色已切换，已中止导入。');
@@ -170,7 +170,7 @@
                 try {
                     await write();
                 } catch (error) {
-                    const failure = new Error(`聊天导入中断，部分本地数据可能已被覆盖。请导入恢复备份 ${recovery.filename} 以恢复导入前的数据。原始错误：${error?.message || String(error)}`);
+                    const failure = new Error(`聊天导入中断，部分本地数据可能已被覆盖。请在本地控制中心“导出恢复备份”，再导入 ${recovery.filename} 以恢复导入前的数据。原始错误：${error?.message || String(error)}`);
                     failure.partialWrite = true;
                     failure.recovery = recovery;
                     throw failure;

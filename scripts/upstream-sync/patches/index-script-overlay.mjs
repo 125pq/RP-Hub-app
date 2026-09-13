@@ -73,6 +73,7 @@ function assertScriptOrder(lines) {
     'safe-area.js',
     'rphub-io.js',
     'chat-import-streaming.js',
+    'recovery-store.js',
     'rphub-backup.js',
     'app-back-navigation.js',
     'text-metrics.js',
@@ -128,6 +129,7 @@ export function patchIndexScriptOverlay(source) {
   // assets) would place it after chat/backup because those already existed.
   lines = ensureBefore(lines, scriptLine('chat-import-streaming.js'), scriptLine('rphub-io.js'), 'rphub-io.js entry');
   lines = ensureBefore(lines, app, scriptLine('rphub-backup.js'), 'rphub-backup.js entry');
+  lines = ensureBefore(lines, scriptLine('rphub-backup.js'), scriptLine('recovery-store.js'), 'recovery-store.js entry');
   lines = ensureBefore(lines, app, scriptLine('app-back-navigation.js'), 'app navigation entry');
   lines = ensureBefore(lines, app, scriptLine('text-metrics.js'), 'text metrics entry');
   lines = ensureBefore(lines, app, scriptLine('chat-export-streaming.js'), 'chat export entry');

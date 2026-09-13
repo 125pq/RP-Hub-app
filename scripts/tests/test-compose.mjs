@@ -128,7 +128,7 @@ assert.equal(first.report.files.filter(entry => entry.kind === 'legacy-override'
 // baseline dist are absent. Use a disposable clone, never the user's checkout.
 const isolated = path.join(await mkdtemp(path.join(work, 'independent-test-')), 'repo');
 git(repositoryRoot, ['clone', '--shared', '--quiet', repositoryRoot, isolated]);
-await cp(path.join(repositoryRoot, 'scripts/compose/build-candidate.mjs'), path.join(isolated, 'scripts/compose/build-candidate.mjs'));
+await cp(path.join(repositoryRoot, 'scripts'), path.join(isolated, 'scripts'), { recursive: true });
 // Git checkout may convert CRLF; preserve the exact registered extension inputs.
 for (const file of recipe.localFiles) await cp(path.join(repositoryRoot, file), path.join(isolated, file));
 await symlink(path.join(repositoryRoot, 'node_modules'), path.join(isolated, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');

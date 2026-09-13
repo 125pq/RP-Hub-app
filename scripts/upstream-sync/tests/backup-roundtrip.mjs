@@ -1,4 +1,5 @@
 import { webFixturePath } from '../../tests/web-fixture.mjs';
+import { recoveryFixture } from '../../tests/recovery-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -325,6 +326,7 @@ function loadBackupModule(env) {
 function makeWindowOverEnv(env) {
   // window === the global scope that rphub-backup writes to
   const win = {};
+  win.RPHubRecoveryStore = recoveryFixture();
   win.window = win;
   win.document = env.document;
   win.indexedDB = env.indexedDB;
@@ -632,15 +634,14 @@ function traceImport(env, fileLines) {
   console.log('Validate-only pass: PASS');
 }
 
-// ---- 8. P1 negative: 取消保存恢复备份 → importBackup 拒绝且不覆盖现有数据 ----
-// 修复前 createRecoveryBackup 对 result.cancelled 不误判时仍返回成功对象,导入会继续覆盖。
+// ---- 8. Local recovery failure must stop before any overwrite ----
 {
   const env = await setupSeed();
   const { lines } = await runExport(env);
   // 种一个「即将被导入的数据」标记,并记录恢复备份应被取消时的现状
   env.localStorage.setItem('rp_hub_p1_guard', 'original-value');
-  // 让保存恢复备份被取消
-  env.window.RPHubCardUtils.saveGeneratedFile = async () => ({ supported: true, cancelled: true });
+  // Simulate unavailable local storage; no manual file picker is involved.
+  env.window.RPHubRecoveryStore.save = async () => { throw new Error('Quota exceeded'); };
   const { RPHubBackup } = await loadBackupModule(env);
   const file = {
     stream() {
@@ -656,10 +657,10 @@ function traceImport(env, fileLines) {
   await assert.rejects(
     () => RPHubBackup.importBackup(file, {}),
     /恢复备份/,
-    'cancelled recovery backup must abort the import',
+    'failed local recovery must abort the import',
   );
   assert.equal(env.localStorage.getItem('rp_hub_p1_guard'), 'original-value', 'existing data must not be overwritten when recovery save is cancelled');
-  console.log('Import aborts on cancelled recovery backup: PASS');
+  console.log('Import aborts on failed local recovery backup: PASS');
 }
 
 // ---- 9. P1 negative: 取消普通备份导出 → exportBackup 返回 cancelled,不返回成功对象 ----
@@ -686,7 +687,7 @@ function traceImport(env, fileLines) {
   const { RPHubBackup } = await loadBackupModule(env);
   const source = await readFile(webFixturePath('assets/js/rphub-backup.js'), 'utf8');
   const startMarker = "anchorEl.querySelector('[data-action=\"export\"]').addEventListener";
-  const endMarker = "anchorEl.querySelector('[data-action=\"import\"]').addEventListener";
+    const endMarker = "anchorEl.querySelector('[data-action=\"export-recovery\"]').addEventListener";
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start);
   assert.ok(start >= 0 && end > start, 'extract the production export click binding');
@@ -738,4 +739,27 @@ function traceImport(env, fileLines) {
   console.log('Backup export UI cancellation/success/error: PASS');
 }
 
+{
+  const env = await setupSeed();
+  const { lines } = await runExport(env);
+  let saves = 0;
+  env.window.RPHubRecoveryStore = recoveryFixture(() => { saves++; });
+  env.window.RPHubCardUtils.saveGeneratedFile = async () => { throw new Error('Import must not open a save picker'); };
+  await runImport(env, lines);
+  assert.equal(saves, 1);
+  await assert.rejects(runImport(env, ['broken json\n']));
+  assert.equal(saves, 1, 'invalid input must not replace recovery');
+  const { RPHubBackup } = await loadBackupModule(env);
+  let exported = '';
+  env.window.RPHubCardUtils.saveGeneratedFile = async stream => {
+    for await (const part of stream) exported += part;
+    return { supported: true };
+  };
+  const recovered = await RPHubBackup.exportRecoveryBackup();
+  assert.ok(recovered.local);
+  assert.match(exported, /snapshotEnd/);
+  env.window.RPHubCardUtils.saveGeneratedFile = async () => ({ cancelled: true });
+  assert.equal((await RPHubBackup.exportRecoveryBackup()).cancelled, true);
+  console.log('Import: no save picker; invalid input keeps recovery; optional recovery export and cancellation PASS');
+}
 console.log('\nAll backup roundtrip tests: PASS');

@@ -42,6 +42,7 @@ try {
   assert.deepEqual(await snapshot(), expected, 'Candidate artifact differs from build report');
   result.outputSha256 = build.outputSha256;
   result.fixtureSha256 = hash(await readFile(path.join(repositoryRoot, 'scripts/tests/web-fixture.mjs')));
+  result.recoveryFixtureSha256 = hash(await readFile(path.join(repositoryRoot, 'scripts/tests/recovery-fixture.mjs')));
   result.runnerSha256 = hash(await readFile(new URL(import.meta.url)));
   for (const file of tests) {
     const test = { file, sha256: hash(await readFile(path.join(repositoryRoot, file))) };
