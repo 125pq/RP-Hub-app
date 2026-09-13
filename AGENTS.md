@@ -12,14 +12,17 @@
 ## 2. 常用命令
 
 ```bash
-npm run build:web          # 构建 dist/
-npm run verify:dist        # 校验构建产物
+npm run build:web          # 由锁定上游组合并提升 dist/（默认入口，需本地 .git）
+npm run verify:dist        # 按来源凭据校验 dist/
 npm run test:syntax        # node --check 语法检查
 npm run test:platform      # 平台适配层测试
 npm run test:upstream-sync # 补丁与上游同步全套测试（最重要）
 npm run test:performance   # 性能相关测试
 npm run test:backup        # 备份导入导出往返测试
+npm run test:compose       # 组合构建、来源报告与候选行为检查
 ```
+
+`build:web:legacy` / `verify:dist:legacy` 保留旧的根目录复制构建，仅用于排查，不是发布路径。
 
 改了补丁或上游文件，**必须**跑 `npm run test:upstream-sync`。
 

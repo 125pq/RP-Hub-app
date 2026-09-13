@@ -25,15 +25,31 @@ async function digest(directory) {
   return hash(JSON.stringify(entries));
 }
 async function candidate() {
-  const before = new Set(await readdir(work));
-  cli('scripts/compose/build-candidate.mjs');
-  const added = (await readdir(work)).filter(name => !before.has(name));
-  assert.equal(added.length, 1);
-  const run = path.join(work, added[0]);
+  const run = await mkdtemp(path.join(work, 'run-test-'));
+  cli('scripts/compose/build-candidate.mjs', ['--run-dir', run]);
   return { run, report: JSON.parse(await readFile(path.join(run, 'report.json'))) };
 }
 
+// The default local build entry must compose dist from the locked input and
+// promote it through the publication receipt, not copy the legacy checkout.
+const rootPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
+assert.equal(rootPackage.scripts['build:web'], 'node scripts/compose/build-dist.mjs');
+assert.equal(rootPackage.scripts['verify:dist'], 'node scripts/compose/verify-published.mjs');
+assert.equal(rootPackage.scripts['build:web:legacy'], 'npm run prepare:vendor && npm run build:css && node scripts/web/build-web.mjs');
+assert.equal(rootPackage.scripts['verify:dist:legacy'], 'node scripts/web/verify-dist.mjs');
+const buildDistSource = await readFile(path.join(repositoryRoot, 'scripts/compose/build-dist.mjs'), 'utf8');
+assert.match(buildDistSource, /ensure-lock-tag\.mjs/);
+assert.match(buildDistSource, /build-candidate\.mjs', \['--official', '--run-dir'/);
+assert.match(buildDistSource, /publish-candidate\.mjs/);
+assert.match(buildDistSource, /verify-published\.mjs/);
+const syncSourceForEntry = await readFile(path.join(repositoryRoot, 'scripts/upstream-sync/sync-upstream.mjs'), 'utf8');
+assert.match(syncSourceForEntry, /pinUpstream\(projectRoot, release\.tagName, release\.commitSha\)/);
+assert.match(syncSourceForEntry, /await validateReleaseInputs\(release, revision, \{ restoreOnSuccess: dryRun \}\)/);
+
 assert.deepEqual(recipe.legacyOverrides, [], 'No full-file app override may return');
+const candidateSource = await readFile(path.join(repositoryRoot, 'scripts/compose/build-candidate.mjs'), 'utf8');
+assert.match(candidateSource, /if \(recipe\.legacyOverrides\.length\) \{\s*throw new Error\('Full-file legacy overrides are retired/);
+assert.doesNotMatch(candidateSource, /!exclusive && recipe\.legacyOverrides/);
 const appOriginal = git(repositoryRoot, ['show', `${lock.commit}:assets/js/app.js`]);
 const appRebuilt = transform('assets/js/app.js', appOriginal);
 assert.equal(compareBytes('assets/js/app.js', appRebuilt, await readFile(path.join(repositoryRoot, 'assets/js/app.js')), recipe.allowedBaselineEolDifferences), 'eol-only');
@@ -129,6 +145,10 @@ assert.equal(first.report.files.filter(entry => entry.kind === 'legacy-override'
 // baseline dist are absent. Use a disposable clone, never the user's checkout.
 const isolated = path.join(await mkdtemp(path.join(work, 'independent-test-')), 'repo');
 git(repositoryRoot, ['clone', '--shared', '--quiet', repositoryRoot, isolated]);
+// A clean CI checkout may only carry the *-android release tags; fetch the real
+// upstream stable tags this suite pins against so the isolated clone is complete.
+git(isolated, ['remote', 'add', 'upstream', 'https://github.com/STA1N156/RP-Hub.git']);
+git(isolated, ['fetch', '--quiet', 'upstream', 'refs/tags/1.9.2:refs/tags/1.9.2', 'refs/tags/1.9.3:refs/tags/1.9.3']);
 await cp(path.join(repositoryRoot, 'scripts'), path.join(isolated, 'scripts'), { recursive: true });
 // Git checkout may convert CRLF; preserve the exact registered extension inputs.
 for (const file of recipe.localFiles) await cp(path.join(repositoryRoot, file), path.join(isolated, file));
@@ -150,6 +170,20 @@ for (const version of ['1.9.3', '1.9.2.100', '1.9.2.0', '1.9.2-invalid']) {
   assert.throws(() => assertVersionMatchesLock(version, earlierLock), /does not match/);
 }
 await writeFile(isolatedLockPath, originalLock);
+
+// A present tag that disagrees with the lock must fail loudly without moving
+// the tag; only a missing tag may be fetched.
+const lockMismatch = { ...JSON.parse(originalLock.toString()), tag: '1.9.2', commit: git(isolated, ['rev-parse', `refs/tags/${lock.tag}^{commit}`]).toString().trim() };
+await writeFile(isolatedLockPath, JSON.stringify(lockMismatch, null, 2) + '\n');
+const tagBefore = git(isolated, ['rev-parse', 'refs/tags/1.9.2^{commit}']).toString().trim();
+const mismatchResult = spawnSync(process.execPath, ['scripts/compose/ensure-lock-tag.mjs'], {
+  cwd: isolated, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+});
+assert.notEqual(mismatchResult.status, 0, 'mismatched local tag must fail');
+assert.match(mismatchResult.stderr, /refusing to overwrite/);
+assert.equal(git(isolated, ['rev-parse', 'refs/tags/1.9.2^{commit}']).toString().trim(), tagBefore, 'mismatched tag must not be moved');
+await writeFile(isolatedLockPath, originalLock);
+
 const tracked = git(isolated, ['ls-files', '-z']).toString().split('\0').filter(Boolean);
 for (const file of tracked) {
   if (!recipe.publishRoots.includes(file.split('/')[0]) || recipe.localFiles.includes(file)) continue;
@@ -188,6 +222,14 @@ function isolatedCli(script, args = [], success = true) {
   assert.equal(result.status === 0, success, result.stdout + result.stderr);
   return result;
 }
+// Windows publish renames retry only transient sharing violations.
+const publishSource = await readFile(path.join(repositoryRoot, 'scripts/compose/publish-candidate.mjs'), 'utf8');
+assert.match(publishSource, /TRANSIENT_RENAME_CODES = new Set\(\['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'\]\)/);
+assert.doesNotMatch(publishSource, /catch \(error\) \{ if \(error\.code[^}]*continue; \}/);
+for (const call of ['renameWithRetry(output, previous)', 'renameWithRetry(incoming, output)', 'renameWithRetry(previous, output)']) {
+  assert.ok(publishSource.includes(call), `publish must use the retrying rename: ${call}`);
+}
+
 const isolatedDist = path.join(isolated, 'dist');
 await mkdir(isolatedDist);
 await writeFile(path.join(isolatedDist, 'previous.txt'), 'previous usable output');
@@ -207,6 +249,19 @@ assert.equal(await digest(isolatedDist), publishedDigest);
 await rmdir(receipt);
 await rename(savedReceipt, receipt);
 isolatedCli('scripts/compose/verify-published.mjs');
+
+// The default build:web entry must compose and promote dist without any legacy
+// checkout web sources, so it is exercised in the same isolated clone.
+const officialBuild = spawnSync(process.execPath, ['scripts/compose/build-dist.mjs'], {
+  cwd: isolated, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 600000,
+});
+assert.equal(officialBuild.status, 0, officialBuild.stdout + officialBuild.stderr);
+isolatedCli('scripts/compose/verify-published.mjs');
+assert.equal(await digest(isolatedDist), publishedDigest, 'Official build must reproduce the same verified artifact');
+const officialReceipt = JSON.parse(await readFile(path.join(isolatedWork, 'published.json')));
+assert.equal(officialReceipt.outputSha256, first.report.outputSha256);
+assert.equal(officialReceipt.behaviorReport.status, 'passed');
+console.log('Official build:web entry: PASS (composed, promoted and verified without legacy sources)');
 
 // A later local change cannot silently publish an older candidate or validate it.
 await appendFile(path.join(isolated, 'assets/js/text-filter-cache.js'), '\n// newer local input\n');
@@ -255,7 +310,12 @@ await cp(path.join(second.run, 'source'), cssSource, { recursive: true });
 await appendFile(path.join(cssSource, 'index.html'), '\n<div class="z-[12345]"></div>\n');
 cli('scripts/web/build-css.mjs', ['--source-root', cssSource]);
 assert.match(await readFile(path.join(cssSource, 'assets/generated/main.css'), 'utf8'), /z-index:12345/);
-assert.doesNotMatch(await readFile(path.join(repositoryRoot, 'assets/generated/main.css'), 'utf8'), /z-index:12345/);
+try {
+  await access(path.join(repositoryRoot, 'assets/generated/main.css'));
+  assert.doesNotMatch(await readFile(path.join(repositoryRoot, 'assets/generated/main.css'), 'utf8'), /z-index:12345/);
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error; // generated CSS is gitignored; absent on a clean checkout
+}
 
 // A broken candidate/source comparison fails without changing the official output.
 await appendFile(path.join(cssSource, 'assets/js/api-utils.js'), '\n// injected mismatch\n');

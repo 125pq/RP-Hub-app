@@ -58,6 +58,8 @@ npm run build:web
 
 不建议直接用 `file://` 打开源码入口；本地静态服务器可以避免浏览器的跨域和文件读取限制。
 
+> `build:web` 由组合构建生成 `dist/`：它从本地 Git 仓库中锁定版本的上游提交取源码，需在完整 Git 检出（含 `upstream` 远端与锁定 tag）中运行；`ensure-lock-tag.mjs` 会在 tag 缺失时从锁定仓库抓取。无 Git 的 ZIP 解压目录不适用；Web 产物仅供开发测试，正式交付为 Android APK。
+
 #### 2. 初始化设置
 1. 打开应用后，点击侧边栏（或顶部菜单）的**设置 (Settings)** 选项。
 2. 选择自定义配置，填入您自己的或第三方提供的 API 节点 (`API URL`)。
@@ -117,7 +119,7 @@ RP-Hub-app/
 - 修改默认预设、各模式提示词、生图画师串或工具说明时，统一编辑 `built-in-content.js`。
 - 更新公告固定放在 `built-in-content.js` 最底部，方便查找和替换。
 - 可复用界面统一放在 `ui-components.js`，业务数据处理放在 `data-services.js`。
-- 修改后至少运行 `npm run test:performance`、`npm run test:platform`、`npm run build:web` 和 `npm run verify:dist`。
+- 修改后至少运行 `npm run test:performance`、`npm run test:platform`、`npm run build:web` 和 `npm run verify:dist`；改动组合构建或上游接入时另跑 `npm run test:compose`。
 - Android debug 构建使用 `npm run android:debug`；配置本地永久签名信息后，正式 APK 使用 `npm run android:release` 构建。
 
 ### 常用验证命令

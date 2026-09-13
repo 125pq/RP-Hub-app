@@ -189,7 +189,7 @@ try {
   if (!outputStat.isDirectory()) throw new Error('dist exists but is not a directory');
 } catch (error) {
   if (error?.code === 'ENOENT') {
-    throw new Error('dist/ does not exist. Run npm run build:web first.');
+    throw new Error('dist/ does not exist. Run npm run build:web:legacy first.');
   }
   throw error;
 }

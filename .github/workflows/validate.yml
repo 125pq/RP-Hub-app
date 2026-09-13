@@ -33,6 +33,9 @@ jobs:
           git remote get-url upstream || git remote add upstream https://github.com/STA1N156/RP-Hub.git
           git fetch upstream --force refs/heads/main:refs/remotes/upstream/main
 
+      - name: Fetch locked upstream tag
+        run: node scripts/compose/ensure-lock-tag.mjs
+
       - name: Syntax checks
         run: npm run test:syntax
 
@@ -51,3 +54,6 @@ jobs:
 
       - name: Verify dist
         run: npm run verify:dist
+
+      - name: Composition tests
+        run: npm run test:compose

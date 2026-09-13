@@ -2,7 +2,7 @@
 
 日期：2026-09-12。起点：`codex/long-term-android-plan`，`29f0b30e59445b92e72a7cba2d9a1bcbf1aa6757`。
 
-状态：原版输入已可重建完整 app，候选构建已无整文件覆盖；阶段三进入验收收口。正式构建、自动同步、APK 发布入口尚未切换。用户明确要求本轮不使用子代理，真机验收由用户负责。
+状态：原版输入已可重建完整 app，候选构建已无整文件覆盖；阶段三已接通默认本地构建入口与本地同步命令；正式自动同步与 APK 发布入口仍未切换。用户明确要求本轮不使用子代理，真机验收由用户负责。
 
 ## 首个切片背景（后续进度见文末）
 
@@ -200,4 +200,35 @@ test:compose 在没有旧网页源码的隔离副本中完成提升与校验，�
 
 组合产物提升/校验同时检查 package.json 的上游基础版本与锁一致，允许 1–99 的 Android 修订号，避免把旧候选提升为不同基础版本的 dist。构建锁支持上游带 v 前缀的稳定标签。隔离测试使用真实 1.9.2/1.9.3 标签验证更新、错误提交拒绝、dry-run 无写入和版本匹配；工作流检查验证执行顺序。
 
-当前锁没有改变，仍为 1.9.3。本轮只修改本地工作流代码，没有触发远端同步/发布；默认 build:web 和独立运行的旧 sync-upstream CLI 仍需在下一步一起衔接组合入口。主线程复核通过，无子代理。
+当前锁没有改变，仍为 1.9.3。本轮只修改本地工作流代码，没有触发远端同步/发布。默认 build:web 和独立运行的旧 sync-upstream CLI 仍需在下一步一起衔接组合入口。主线程复核通过，无子代理。
+
+## 默认构建与本地同步接通（2026-09-13）
+
+`npm run build:web` 改为 `scripts/compose/build-dist.mjs`：先物化锁定上游 tag，再以 `--official` 模式在 `.work/compose/run-*` 组合候选，跑十组候选行为检查，原子提升为 `dist` 并写入来源凭据；任一步失败都不改动旧 `dist`。`npm run verify:dist` 改为按凭据核对 `dist` 的 `verify-published.mjs`。旧脚本保留为 `build:web:legacy` 与 `verify:dist:legacy`，仍可单独运行，不构成第二套发布路径。
+
+注意影响范围：发布工作流 `sync-upstream.yml` 已经调用 `npm run build:web`，因此默认命令切换同样改变了发布构建的产物来源（发布 APK 现在也来自组合产物）。本轮**只切换了构建来源**；Git 合并式同步机制（`sync-upstream` 的 merge/auto-resolver/reapply、`sync-upstream.yml` 的合并步骤）尚未切换，自动同步入口与 Android release 打包入口仍未改。准确表述应是“构建来源已切换，Git 合并同步机制仍未切换”。
+
+新增 `scripts/compose/ensure-lock-tag.mjs`：检查锁定 tag 是否已指向锁定提交，缺失时只从锁定仓库抓取该 tag 并校验提交，绝不查询 latest、不回写锁。`validate.yml` 在“Fetch upstream refs”之后、各测试之前增加一个专用步骤执行该脚本（组合构建需要本地 Git 对象）；`build:web` 内部也会再执行一次，CI 端的重复调用为幂等冗余。独立 `sync-upstream` CLI 在完整运行（包括 dry-run，不包括 `--prepare-only`）时，先抓取本次 release tag、`pinUpstream` 绑定锁、再应用 Android 版本元数据，随后才运行 `build:web`；“默认版本号配旧锁定网页”的约束因此成立。工作流的 pin/version 步骤保持不变，`--prepare-only` 路径不触发新逻辑。
+
+验证：`test:compose` 新增默认入口断言，并在无旧网页源码的隔离副本中实跑 `build-dist.mjs`，产物哈希与既有一致；同步全套、平台测试、`build:web`、`verify:dist` 通过；正式 `dist` 由组合流程生成并有来源凭据。默认构建现依赖 `.git` 与本地锁定 tag，因此不再支持无 Git 的 ZIP 直接构建 Web 版（Web 产物仅供开发测试，正式交付为 APK）。Git 合并式同步仍保留，真实新版本迁移回放留待阶段四/六。主线程复核通过，无子代理。
+
+## GLM-5.3 复审收口（2026-09-13）
+
+独立只读复审（GLM-5.3）给出 PASS，并指出四项应修问题；本轮逐条处理：
+
+1. **整文件覆盖禁令写反**：`build-candidate.mjs` 原仅禁止非 exclusive 模式使用 `legacyOverrides`，正式构建反而允许。改为**任何模式**发现 `recipe.legacyOverrides` 非空即拒绝（“Full-file legacy overrides are retired”），杜绝静默退回整文件补丁。当前列表为空，产物不变。
+2. **dry-run 验证的是旧版本**：原实现 dry-run 跳过绑锁，却仍运行组合构建，验证的其实是旧锁定版本，且正常同步失败时新锁/版本元数据无回滚。新增 `scripts/upstream-sync/release-inputs.mjs`（`snapshotReleaseInputs`/`restoreReleaseInputs`，覆盖 `upstream.lock.json`、`package.json`、`package-lock.json`、`README.md`、`android/app/build.gradle`、`scripts/android/build-android-release.ps1`）；`sync-upstream` 统一走 `validateReleaseInputs`：先绑锁并应用版本再验证，**dry-run 成功即恢复**（真正只读且真正预览新版本），**任何失败也恢复**，正常成功则保留供提交。新增 `tests/release-inputs.mjs` 覆盖快照/恢复、缺失文件移除与接线断言。
+3. **标签获取不应强制覆盖**：`ensure-lock-tag.mjs` 原对已有不符标签执行强制 fetch，会在校验前移动标签。改为：已有标签指向锁定提交则 no-op；**已存在但不符直接报错并拒绝覆盖**；仅标签缺失时才抓取并校验提交。
+4. **文档低估切换范围**：补注——`sync-upstream.yml` 已调用 `npm run build:web`，默认命令切换同样改变了发布 APK 的产物来源；准确表述为“构建来源已切换，Git 合并同步机制仍未切换”。同时把 `docs/ANDROID-UPDATE-FLOW.md` 标为历史快照，指明行号/流程可能已变化。
+
+CI 与健壮性：`validate.yml` 在构建之后新增 `npm run test:compose`（先修正该测试对未入库的根 `assets/generated/main.css` 的依赖，并在隔离克隆内自取 `1.9.2`/`1.9.3` 上游 tag，保证干净检出可跑）；`publish-candidate.mjs` 对提升用的 rename 增加仅针对瞬时占用错误（`EPERM`/`EACCES`/`EBUSY`/`ENOTEMPTY`）的有限退避重试，保留失败回滚、不吞异常、不重跑构建。
+
+验证：`test:compose`（含标签不符拒绝、rename 重试接线、隔离克隆取 tag）与同步全套（含新 `release-inputs`）通过；`test:platform`、`test:performance`、`test:syntax`、`build:web`、`verify:dist` 全通过；`git diff --check` 干净。该记录为复审时状态；发布构建来源已切换，真实新版本迁移回放留待阶段四/六。
+
+## 阶段三验收收口（2026-09-13）
+
+阶段三的锁定原版输入、登记变换、自有模块复制、独立构建与同版本等价验证已完成；默认 build:web 同时完成了阶段六的一部分入口切换。移除标签获取残留的 --force，使用完整 refs/tags 引用；组合测试显式预留运行目录，避免并行测试新增目录导致误报。
+
+本轮运行 build:web、verify:dist、test:compose、test:upstream-sync、test:platform；主线程审查，无子代理。网页产物仍为 51 文件，SHA-256 为 8c5291e14a9053fc819fe5b4b12cb83fd7c10dcf0ddbc2a5b0c7557c46f76e12，与之前自动恢复备份候选一致，无新增真机测试要求。
+
+阶段四/六仍需真实相邻稳定版本迁移验收，以及从 Git 合并网页源码切换同步机制。当前 release-inputs 测试证明元数据快照恢复及调用接线，并不等同于完整 sync dry-run 的端到端验收；本轮未触发远端发布。

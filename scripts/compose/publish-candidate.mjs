@@ -6,6 +6,22 @@ import { repositoryRoot } from '../web/paths.mjs';
 import { filesIn, hash } from './compose-lib.mjs';
 import { assertCurrentInputs } from './published-inputs.mjs';
 
+// Windows can briefly deny a directory rename while an indexer, antivirus or
+// Explorer holds a handle. Retry only those transient sharing violations with
+// a short backoff; every other error (and exhaustion) propagates so the
+// existing rollback still restores the previous dist.
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY']);
+async function renameWithRetry(source, destination, attempts = 5) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await rename(source, destination);
+    } catch (error) {
+      if (attempt >= attempts || !TRANSIENT_RENAME_CODES.has(error.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 50 * attempt));
+    }
+  }
+}
+
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== '--run-dir') throw new Error('Expected --run-dir <verified candidate>');
 const run = path.resolve(args[1]);
@@ -48,13 +64,13 @@ try {
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
 let movedPrevious = false, movedIncoming = false;
 try {
-  if (hadPrevious) { await rename(output, previous); movedPrevious = true; }
-  await rename(incoming, output);
+  if (hadPrevious) { await renameWithRetry(output, previous); movedPrevious = true; }
+  await renameWithRetry(incoming, output);
   movedIncoming = true;
-  await rename(receiptSource, path.join(repositoryRoot, '.work/compose/published.json'));
+  await renameWithRetry(receiptSource, path.join(repositoryRoot, '.work/compose/published.json'));
 } catch (error) {
-  if (movedIncoming) await rename(output, incoming);
-  if (movedPrevious) await rename(previous, output);
+  if (movedIncoming) await renameWithRetry(output, incoming);
+  if (movedPrevious) await renameWithRetry(previous, output);
   throw error;
 }
 // Keep the previous output in this disposable run for diagnosis/rollback.

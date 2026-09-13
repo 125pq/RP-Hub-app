@@ -7,6 +7,8 @@ import { reapplyHooks } from './reapply-hooks.mjs';
 import { resolveLatestStableRelease } from './release-source.mjs';
 import { mergeWithAutoResolver } from './sync-orchestration.mjs';
 import { androidReleaseMetadata, deriveRevision, selectRevision } from './prepare-android-release.mjs';
+import { pinUpstream } from '../compose/pin-upstream.mjs';
+import { snapshotReleaseInputs, restoreReleaseInputs } from './release-inputs.mjs';
 import { assertReleaseTargetAncestry, determineSyncMode } from './sync-decision.mjs';
 
 const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
@@ -182,6 +184,33 @@ function resolveAndroidEnvironment() {
   return env;
 }
 
+// Local full runs must compose the *new* upstream, so materialize the release
+// tag locally, bind the composition lock to it and apply the Android release
+// metadata before the default build:web (which now composes dist). The workflow
+// does the equivalent in its own pin/version steps, so --prepare-only skips this.
+async function pinAndApplyRelease(release, revision) {
+  await git(['fetch', 'upstream', `refs/tags/${release.tagName}:refs/tags/${release.tagName}`]);
+  pinUpstream(projectRoot, release.tagName, release.commitSha);
+  await run(process.execPath, ['scripts/upstream-sync/prepare-android-release.mjs', release.tagName, String(revision)]);
+}
+
+// Bind the lock and version metadata, then validate against the *new* upstream.
+// The default build:web now composes dist from the lock, so validation must run
+// after binding; a dry run restores the prior inputs after previewing, and any
+// failure restores them too, so a new lock is never left paired with
+// uncommitted metadata. A successful real sync keeps the inputs for the commit.
+async function validateReleaseInputs(release, revision, { restoreOnSuccess = false } = {}) {
+  const before = snapshotReleaseInputs(projectRoot);
+  try {
+    await pinAndApplyRelease(release, revision);
+    await runValidation();
+  } catch (error) {
+    restoreReleaseInputs(projectRoot, before);
+    throw error;
+  }
+  if (restoreOnSuccess) restoreReleaseInputs(projectRoot, before);
+}
+
 async function runValidation() {
   const npm = commandName('npm');
   await run(process.execPath, ['scripts/upstream-sync/verify.mjs']);
@@ -243,7 +272,13 @@ try {
       git,
       reapply: async () => reapplyHooks()
     });
-    if (!prepareOnly) await runValidation();
+    if (!prepareOnly) {
+      // A dry run binds the new release, previews it, then restores the prior
+      // lock and version metadata so the preview is read-only and validation
+      // really exercises the new upstream. A real run keeps the inputs to
+      // commit; any failure restores them.
+      await validateReleaseInputs(release, revision, { restoreOnSuccess: dryRun });
+    }
 
     if (dryRun) {
       if (await mergeInProgress()) await git(['merge', '--abort']);
