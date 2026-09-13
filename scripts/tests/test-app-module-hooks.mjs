@@ -1,3 +1,4 @@
+import { webFixturePath } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -5,7 +6,7 @@ import vm from 'node:vm';
 import { patchAppChatImport } from '../upstream-sync/patches/patch-app-chat-import.mjs';
 import { patchBackupApp } from '../upstream-sync/patches/patch-backup.mjs';
 import { patchAppOffscreen } from '../upstream-sync/patches/patch-app-offscreen.mjs';
-const current = readFileSync('assets/js/app.js', 'utf8').replace(/\r\n/g, '\n');
+const current = readFileSync(webFixturePath('assets/js/app.js'), 'utf8').replace(/\r\n/g, '\n');
 const upstream = execFileSync('git', ['show', '4aef0bb:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
 for (const transform of [patchAppChatImport, patchBackupApp, patchAppOffscreen]) {
   assert.equal(transform(current), current);

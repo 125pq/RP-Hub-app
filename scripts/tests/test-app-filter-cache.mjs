@@ -1,10 +1,11 @@
+import { webFixturePath } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
 import { composeApp } from '../compose/app-transform.mjs';
 import { patchAppFilterCache } from '../upstream-sync/patches/patch-app-filter-cache.mjs';
-const current = readFileSync('assets/js/app.js','utf8').replace(/\r\n/g,'\n');
+const current = readFileSync(webFixturePath('assets/js/app.js'),'utf8').replace(/\r\n/g,'\n');
 const upstream = execFileSync('git',['show','4aef0bb:assets/js/app.js'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 const legacy = execFileSync('git',['show','4afa9a5:assets/js/app.js'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 assert.equal(composeApp(upstream), current);
@@ -23,7 +24,7 @@ function load(body) {
     findUiTemplateUpdateBlock: text => { const index=text.indexOf('[UI]'); return index<0 ? null : {index}; },
     cardUtils: { transformUnprotectedText:(text,fn)=>{transforms++;return fn(text);} }
   });
-  vm.runInContext(readFileSync('assets/js/text-filter-cache.js','utf8'),context);
+  vm.runInContext(readFileSync(webFixturePath('assets/js/text-filter-cache.js'),'utf8'),context);
   const run=vm.runInContext(definitions+body+'\nfilterBlockedStyleText;',context);
   return {run,logs,settings,get transforms(){return transforms;}};
 }

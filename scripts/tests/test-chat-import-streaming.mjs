@@ -1,3 +1,4 @@
+import { webFixturePath } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -7,8 +8,8 @@ import vm from 'node:vm';
 // 覆盖:legacy / 分支导入成功、损坏与截断回滚、取消(abort)、以及去掉全量 clone 后
 // 的存储契约(存储引用与展示准备一致)。
 
-const ioSource = await readFile(new URL('../../assets/js/rphub-io.js', import.meta.url), 'utf8');
-const chatSource = await readFile(new URL('../../assets/js/chat-import-streaming.js', import.meta.url), 'utf8');
+const ioSource = await readFile(webFixturePath('assets/js/rphub-io.js'), 'utf8');
+const chatSource = await readFile(webFixturePath('assets/js/chat-import-streaming.js'), 'utf8');
 
 const STORY_BRANCH_CHAT_EXPORT_TYPE = 'rp-hub-story-branch-chat';
 const STORY_BRANCH_CHAT_EXPORT_VERSION = 1;

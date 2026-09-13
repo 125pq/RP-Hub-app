@@ -1,3 +1,4 @@
+import { webFixturePath } from '../../tests/web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -286,8 +287,8 @@ function makeIndexedDBV2(seed) {
 }
 
 function loadBackupModule(env) {
-  const ioPromise = readFile(new URL('../../../assets/js/rphub-io.js', import.meta.url), 'utf8');
-  const sourcePromise = readFile(new URL('../../../assets/js/rphub-backup.js', import.meta.url), 'utf8');
+  const ioPromise = readFile(webFixturePath('assets/js/rphub-io.js'), 'utf8');
+  const sourcePromise = readFile(webFixturePath('assets/js/rphub-backup.js'), 'utf8');
   return Promise.all([ioPromise, sourcePromise]).then(([ioSource, source]) => {
     const sandbox = {
       window: env.window,
@@ -683,7 +684,7 @@ function traceImport(env, fileLines) {
 {
   const env = await setupSeed();
   const { RPHubBackup } = await loadBackupModule(env);
-  const source = await readFile(new URL('../../../assets/js/rphub-backup.js', import.meta.url), 'utf8');
+  const source = await readFile(webFixturePath('assets/js/rphub-backup.js'), 'utf8');
   const startMarker = "anchorEl.querySelector('[data-action=\"export\"]').addEventListener";
   const endMarker = "anchorEl.querySelector('[data-action=\"import\"]').addEventListener";
   const start = source.indexOf(startMarker);

@@ -1,3 +1,4 @@
+import { webFixturePath } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -7,7 +8,7 @@ import vm from 'node:vm';
 //  2) 非原生 + File System Access API 可用 → 真流式写出,不聚合 Blob
 //  3) FSA 取消 → cancelled:true(不显示成功);FSA 不可用 → 聚合 fallback;FSA 写失败 → 抛错不静默回退
 
-const coreUtilsSource = await readFile(new URL('../../assets/js/core-utils.js', import.meta.url), 'utf8');
+const coreUtilsSource = await readFile(webFixturePath('assets/js/core-utils.js'), 'utf8');
 
 function makeWindow(overrides = {}) {
   const listeners = {};

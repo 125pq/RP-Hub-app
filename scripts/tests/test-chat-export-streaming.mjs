@@ -1,9 +1,10 @@
+import { webFixturePath } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
 import { patchChatExport } from '../upstream-sync/patches/patch-chat-export.mjs';
-const read = file => readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+const read = file => readFileSync(webFixturePath(file), 'utf8').replace(/\r\n/g, '\n');
 const current = read('assets/js/app.js');
 const old = execFileSync('git', ['show', '2780a81:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
 const upstream = execFileSync('git', ['show', '4aef0bb:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');

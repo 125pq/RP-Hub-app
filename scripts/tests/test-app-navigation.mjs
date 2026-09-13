@@ -1,3 +1,4 @@
+import { webFixturePath } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -6,7 +7,7 @@ import { patchAndroidApp } from '../upstream-sync/patches/patch-android-hooks.mj
 const previous = execFileSync('git', ['show', '6d66da9:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
 // Ignore the retired panel in the legacy oracle; it no longer exists in upstream setup.
 const legacy = previous.slice(previous.indexOf('        const closeBooleanPanel ='), previous.indexOf('        const initializePlatformAdapters =')).replace('                showInstructionPanel,\n', '');
-const current = readFileSync('assets/js/app.js', 'utf8').replace(/\r\n/g, '\n');
+const current = readFileSync(webFixturePath('assets/js/app.js'), 'utf8').replace(/\r\n/g, '\n');
 const bindingStart = current.indexOf('        const handlePlatformBackButton =');
 const binding = current.slice(bindingStart, current.indexOf('        const initializePlatformAdapters =', bindingStart));
 // Verify bindings against declarations, before constructing any fake state.
@@ -21,7 +22,7 @@ const assertDeclared = names => {
 assertDeclared(boundNames);
 assert.throws(() => assertDeclared([...boundNames, 'showInstructionPanel']), /undeclared app state/);
 assert.ok(!binding.includes('showInstructionPanel'));
-const moduleSource = readFileSync('assets/js/app-back-navigation.js', 'utf8');
+const moduleSource = readFileSync(webFixturePath('assets/js/app-back-navigation.js'), 'utf8');
 const names = [...new Set(legacy.match(/\b(?:show\w+|globalConfirmModal|settingsHelpTopic)\b/g))];
 const upstream = execFileSync('git', ['show', '4aef0bb:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
 for (const source of [previous, upstream]) {

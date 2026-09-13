@@ -7,6 +7,7 @@
     "build:css": "node scripts/web/build-css.mjs",
     "build:web": "npm run prepare:vendor && npm run build:css && node scripts/web/build-web.mjs",
     "build:candidate": "node scripts/compose/build-candidate.mjs",
+    "verify:candidate": "node scripts/compose/check-candidate.mjs",
     "test:compose": "node scripts/tests/test-compose.mjs",
     "verify:dist": "node scripts/web/verify-dist.mjs",
     "test:syntax": "node --check assets/js/text-metrics.js && node --check assets/js/app-back-navigation.js && node --check assets/js/platform-services.js && node --check assets/js/rphub-android-adapter.js && node --check assets/js/rphub-backup.js && node --check assets/js/core-utils.js && node --check assets/js/app.js",

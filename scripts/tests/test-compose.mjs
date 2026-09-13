@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFile, readdir, cp, mkdtemp, appendFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, cp, mkdtemp, appendFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import { patchAndroidUpdateCheck } from '../upstream-sync/patches/patch-android-hooks.mjs';
@@ -123,6 +123,39 @@ for (const entry of first.report.comparison) {
     || (entry.result === 'eol-only' && recipe.allowedBaselineEolDifferences.includes(entry.file)));
 }
 assert.equal(first.report.files.filter(entry => entry.kind === 'legacy-override').length, recipe.legacyOverrides.length);
+
+cli('scripts/compose/check-candidate.mjs', ['--run-dir', first.run]);
+const behavior = JSON.parse(await readFile(path.join(first.run, 'behavior-report.json')));
+assert.equal(behavior.status, 'passed');
+assert.equal(behavior.outputSha256, first.report.outputSha256);
+assert.equal(behavior.tests.length, 10);
+assert.ok(behavior.tests.every(test => test.status === 'passed'));
+
+// Prove the selected artifact is used, with no checkout fallback on missing or
+// broken modules. Only disposable copies are changed.
+const negative = await mkdtemp(path.join(work, 'behavior-negative-'));
+await cp(path.join(first.run, 'dist'), path.join(negative, 'dist'), { recursive: true });
+await cp(path.join(first.run, 'report.json'), path.join(negative, 'report.json'));
+const cacheFile = path.join(negative, 'dist/assets/js/text-filter-cache.js');
+const cache = await readFile(cacheFile, 'utf8');
+assert.ok(cache.includes('return cache.get(source)'));
+await writeFile(cacheFile, cache.replace('return cache.get(source)', "return 'BROKEN_CANDIDATE'"));
+const brokenBehavior = spawnSync(process.execPath, ['scripts/tests/test-app-filter-cache.mjs'], {
+  cwd: repositoryRoot, encoding: 'utf8',
+  env: { ...process.env, RPHUB_TEST_WEB_ROOT: path.join(negative, 'dist') },
+});
+assert.notEqual(brokenBehavior.status, 0);
+assert.match(brokenBehavior.stderr, /BROKEN_CANDIDATE/);
+assert.match(cli('scripts/compose/check-candidate.mjs', ['--run-dir', negative], false).stderr, /artifact differs/);
+const rejected = JSON.parse(await readFile(path.join(negative, 'behavior-report.json')));
+assert.equal(rejected.status, 'failed');
+assert.equal(rejected.tests.length, 0);
+const missingBehavior = spawnSync(process.execPath, ['scripts/tests/test-app-filter-cache.mjs'], {
+  cwd: repositoryRoot, encoding: 'utf8',
+  env: { ...process.env, RPHUB_TEST_WEB_ROOT: path.join(negative, 'missing') },
+});
+assert.notEqual(missingBehavior.status, 0);
+assert.match(missingBehavior.stderr, /ENOENT/);
 
 // A candidate-only class must be scanned; scanning the root checkout would miss it.
 const cssTest = await mkdtemp(path.join(work, 'css-test-'));

@@ -1,3 +1,4 @@
+import { webFixturePath } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -6,9 +7,9 @@ import vm from 'node:vm';
 // 覆盖:跨 chunk 的 UTF-8/emoji 边界、CRLF、无尾换行、空行策略、
 // FileReader 回退,以及 backup / chat 两个消费者确实共用同一实现(无私有副本)。
 
-const ioSource = await readFile(new URL('../../assets/js/rphub-io.js', import.meta.url), 'utf8');
-const backupSource = await readFile(new URL('../../assets/js/rphub-backup.js', import.meta.url), 'utf8');
-const chatSource = await readFile(new URL('../../assets/js/chat-import-streaming.js', import.meta.url), 'utf8');
+const ioSource = await readFile(webFixturePath('assets/js/rphub-io.js'), 'utf8');
+const backupSource = await readFile(webFixturePath('assets/js/rphub-backup.js'), 'utf8');
+const chatSource = await readFile(webFixturePath('assets/js/chat-import-streaming.js'), 'utf8');
 
 class StubFileReader {
   readAsText(file) {
@@ -161,7 +162,7 @@ function streamFile(chunks) {
 
 // 8) The character page export actually uses the streaming writer (app call path).
 {
-  const characterSource = await readFile(new URL('../../character/index.html', import.meta.url), 'utf8');
+  const characterSource = await readFile(webFixturePath('character/index.html'), 'utf8');
   assert.match(characterSource, /rphub-io\.js/, 'character page must load the shared IO module');
   assert.match(characterSource, /RPHubIO\.jsonTextChunks\(data, \{ space: 2 \}\)/, 'character JSON export must stream the card data');
   assert.doesNotMatch(characterSource, /downloadFile\(JSON\.stringify\(data, null, 2\)/, 'character page must not stringify the whole card before saving');
