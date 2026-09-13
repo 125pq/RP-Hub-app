@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { readFile, lstat } from 'node:fs/promises';
+import path from 'node:path';
+import { repositoryRoot } from '../web/paths.mjs';
+import { filesIn, hash } from './compose-lib.mjs';
+import { assertCurrentInputs } from './published-inputs.mjs';
+
+if (process.argv.length !== 2) throw new Error('verify-published takes no arguments');
+const receipt = JSON.parse(await readFile(path.join(repositoryRoot, '.work/compose/published.json')));
+assert.equal(receipt.schema, 1);
+assert.equal(hash(JSON.stringify(receipt.files)), receipt.outputSha256, 'Invalid publication receipt');
+assert.equal(receipt.behaviorReport.status, 'passed');
+assert.equal(receipt.behaviorReport.outputSha256, receipt.outputSha256);
+const output = path.join(repositoryRoot, 'dist');
+const info = await lstat(output);
+assert.ok(info.isDirectory() && !info.isSymbolicLink(), 'dist must be an ordinary directory');
+const actual = [];
+for (const file of await filesIn(output)) actual.push({ file, sha256: hash(await readFile(path.join(output, file))) });
+assert.deepEqual(actual, receipt.files, 'dist differs from the verified composition');
+await assertCurrentInputs(receipt);
+console.log(`Published composition verified: ${actual.length} files, ${receipt.outputSha256}`);

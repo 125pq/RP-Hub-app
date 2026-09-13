@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFile, readdir, cp, mkdtemp, appendFile, mkdir, writeFile, symlink, unlink, access } from 'node:fs/promises';
+import { readFile, readdir, cp, mkdtemp, appendFile, mkdir, writeFile, symlink, unlink, access, rename, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import { patchAndroidUpdateCheck } from '../upstream-sync/patches/patch-android-hooks.mjs';
@@ -162,6 +162,40 @@ const comparisonWithoutCheckout = spawnSync(process.execPath, ['scripts/compose/
 assert.notEqual(comparisonWithoutCheckout.status, 0);
 assert.match(comparisonWithoutCheckout.stderr, /ENOENT/);
 console.log('Independent composition: PASS (old web sources and dist absent; identical artifact; candidate behavior passed)');
+
+function isolatedCli(script, args = [], success = true) {
+  const result = spawnSync(process.execPath, [script, ...args], {
+    cwd: isolated, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+  });
+  assert.equal(result.status === 0, success, result.stdout + result.stderr);
+  return result;
+}
+const isolatedDist = path.join(isolated, 'dist');
+await mkdir(isolatedDist);
+await writeFile(path.join(isolatedDist, 'previous.txt'), 'previous usable output');
+isolatedCli('scripts/compose/publish-candidate.mjs', ['--run-dir', independentRun]);
+isolatedCli('scripts/compose/verify-published.mjs');
+const publishedDigest = await digest(isolatedDist);
+const promoted = (await readdir(independentRun)).find(name => name.startsWith('publish-'));
+assert.equal(await readFile(path.join(independentRun, promoted, 'previous-dist/previous.txt'), 'utf8'), 'previous usable output');
+
+// A late receipt failure must restore the previous dist, not leave half a build.
+const receipt = path.join(isolatedWork, 'published.json');
+const savedReceipt = path.join(isolatedWork, 'saved-receipt.json');
+await rename(receipt, savedReceipt);
+await mkdir(receipt);
+isolatedCli('scripts/compose/publish-candidate.mjs', ['--run-dir', independentRun], false);
+assert.equal(await digest(isolatedDist), publishedDigest);
+await rmdir(receipt);
+await rename(savedReceipt, receipt);
+isolatedCli('scripts/compose/verify-published.mjs');
+
+// A later local change cannot silently publish an older candidate or validate it.
+await appendFile(path.join(isolated, 'assets/js/text-filter-cache.js'), '\n// newer local input\n');
+assert.match(isolatedCli('scripts/compose/publish-candidate.mjs', ['--run-dir', independentRun], false).stderr, /Composition input changed/);
+assert.match(isolatedCli('scripts/compose/verify-published.mjs', [], false).stderr, /Composition input changed/);
+assert.equal(await digest(isolatedDist), publishedDigest);
+console.log('Publication: PASS (verified copy, stale input rejection, late failure rollback; main dist unchanged)');
 
 cli('scripts/compose/check-candidate.mjs', ['--run-dir', first.run]);
 const behavior = JSON.parse(await readFile(path.join(first.run, 'behavior-report.json')));
