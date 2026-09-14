@@ -1,11 +1,10 @@
-import { webFixturePath } from './web-fixture.mjs';
+import { webFixturePath, readUpstreamSource } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
 import { patchAppFileExport } from '../upstream-sync/patches/patch-app-file-export.mjs';
 const current = readFileSync(webFixturePath('assets/js/app.js'), 'utf8').replace(/\r\n/g, '\n');
-const upstream = execFileSync('git', ['show', '4aef0bb:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
+const upstream = readUpstreamSource('assets/js/app.js');
 const scopes = [
   ['        const downloadJsonFile =', '        const readJsonFileInput ='],
   ['        const exportCharacterJson =', '        const exportCharacterChat ='],

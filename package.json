@@ -11,6 +11,8 @@
     "build:candidate:independent": "node scripts/compose/build-candidate.mjs --independent",
     "verify:candidate": "node scripts/compose/check-candidate.mjs",
     "verify:candidate:browser": "node scripts/compose/check-browser.mjs",
+    "verify:adjacent": "node scripts/compose/verify-adjacent.mjs",
+    "test:compat": "node scripts/compose/tests/adjacent-replay.mjs",
     "test:compose": "node scripts/tests/test-compose.mjs",
     "verify:dist": "node scripts/compose/verify-published.mjs",
     "verify:dist:legacy": "node scripts/web/verify-dist.mjs",

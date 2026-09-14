@@ -1,4 +1,4 @@
-import { webFixturePath } from './web-fixture.mjs';
+import { webFixturePath, readUpstreamSource } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -7,7 +7,7 @@ import { patchChatExport } from '../upstream-sync/patches/patch-chat-export.mjs'
 const read = file => readFileSync(webFixturePath(file), 'utf8').replace(/\r\n/g, '\n');
 const current = read('assets/js/app.js');
 const old = execFileSync('git', ['show', '2780a81:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
-const upstream = execFileSync('git', ['show', '4aef0bb:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
+const upstream = readUpstreamSource('assets/js/app.js');
 function extract(source) {
   return source.slice(source.indexOf('        const exportCharacterChat = async'), source.indexOf('        const exportCharacterPng = async'));
 }

@@ -290,6 +290,8 @@ docs/architecture/               # 拟新增：接口、决策与阶段报告
 
 **停止/回退：** 仅源码子串检查通过或测试执行的不是候选产物，不能进入阶段 6。先补测试接线，不降低门禁。
 
+**阶段 4 进度（2026-09-14）：** 新增隔离回放入口 `npm run verify:adjacent -- --tag <稳定版本>`：在 `.work/compose/adjacent/` 的一次性 clone 内把锁重定向到相邻稳定上游并运行组合构建，**不改动主仓锁、`dist/`、tag**（报告含 `sourceLockUnchanged`/`sourceDistUnchanged` 断言）。行为门禁的上游对照从硬编码 `4aef0bb` 改为绑定候选自身上游提交（`RPHUB_TEST_UPSTREAM_SHA`，缺省回退仓库锁），使门禁可验证任意版本；1.9.3 行为逐字节不变，历史 legacy oracle 仍钉死。可选档位 `--browser`（整页离线启动）与 `--android-apk`（候选 APK 打包并比对包内网页资产）按需开启；报告 `capabilities` 区分必需（`composition`/`behavior`）与可选（`browser`/`android-apk`），`stage` 定位失败阶段。新增 `npm run test:compat`：用锁定的树合成缺失锚点/重复锚点/语义漂移/未登记新路径的不兼容上游，断言均在 `composition` 阶段 fail-closed，另用被投毒的自有模块断言 `behavior` 阶段隔离，全部验证源仓未被改写；已接入 `validate.yml`。相邻 1.9.4（`d312bd4`）在本机通过四档全门禁（组合+行为+浏览器+APK，候选 SHA `bc8bb7ec…`，APK SHA `43e86d7f…`）。**尚未移动锁或发布**；1.9.4 仅为隔离回放证据，真机验收由用户负责。经 GPT 独立复审修正三项：`commit-tree` 改注入测试专用 Git 身份（CI 不再依赖全局配置）；`test:compat` 合成/行为源覆盖复制当前未提交 `scripts/`（“改完即测”）；把只测空格变化的伪“语义漂移”换成真正的行为漂移（60 ms 刷新契约、count-only 契约）。另修复 `hash-object` 未收到 stdin 导致合成文件为空的缺陷（此前负例为空文件通过）。`test:compat` 用例 6→7。
+
 ### 阶段 5：独立推进长聊天和复杂 UI 性能优化
 
 **入口：** 相关行为有基线，具备性能测量方法；可在阶段 3/4 后按瓶颈逐项执行。

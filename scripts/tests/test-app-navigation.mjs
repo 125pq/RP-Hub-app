@@ -1,4 +1,4 @@
-import { webFixturePath } from './web-fixture.mjs';
+import { webFixturePath, readUpstreamSource } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -24,7 +24,7 @@ assert.throws(() => assertDeclared([...boundNames, 'showInstructionPanel']), /un
 assert.ok(!binding.includes('showInstructionPanel'));
 const moduleSource = readFileSync(webFixturePath('assets/js/app-back-navigation.js'), 'utf8');
 const names = [...new Set(legacy.match(/\b(?:show\w+|globalConfirmModal|settingsHelpTopic)\b/g))];
-const upstream = execFileSync('git', ['show', '4aef0bb:assets/js/app.js'], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
+const upstream = readUpstreamSource('assets/js/app.js');
 for (const source of [previous, upstream]) {
   const changed = patchAndroidApp(source);
   assert.equal(patchAndroidApp(changed), changed);

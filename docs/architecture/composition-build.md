@@ -232,3 +232,40 @@ CI 与健壮性：`validate.yml` 在构建之后新增 `npm run test:compose`（
 本轮运行 build:web、verify:dist、test:compose、test:upstream-sync、test:platform；主线程审查，无子代理。网页产物仍为 51 文件，SHA-256 为 8c5291e14a9053fc819fe5b4b12cb83fd7c10dcf0ddbc2a5b0c7557c46f76e12，与之前自动恢复备份候选一致，无新增真机测试要求。
 
 阶段四/六仍需真实相邻稳定版本迁移验收，以及从 Git 合并网页源码切换同步机制。当前 release-inputs 测试证明元数据快照恢复及调用接线，并不等同于完整 sync dry-run 的端到端验收；本轮未触发远端发布。
+
+## 阶段四：隔离回放与发布级兼容门禁（2026-09-14）
+
+**问题：** 行为门禁的五个套件此前把上游对照硬编码为 1.9.3 提交 `4aef0bb`（`git show 4aef0bb:assets/js/app.js`）。这让门禁结构上只能接受一个版本：回放相邻 1.9.4 时，即便组合完全正确（`composeApp(1.9.4 上游) === 1.9.4 候选`、幂等）也会因对照陈旧而失败。先修门禁，才能做真实相邻版本验收。
+
+**隔离回放（`npm run verify:adjacent -- --tag <稳定版本>`）：** 在 `.work/compose/adjacent/<tag>-*/repo` 建一次性 clone，只在该 clone 内把 `upstream.lock.json` 重定向到目标稳定 tag（缺失时按需 fetch），复制 `scripts/` 与登记自有文件、链接 `node_modules`，依次运行 `build-candidate --independent` 与候选行为门禁。全程不动主仓锁、`dist/`、tag；`finally` 中重新核对主仓锁字节与 `dist` 摘要，一旦被改写即强制失败。报告写入 `.work/compose/adjacent-report.json`，含 `stage`（prepare/composition/behavior/browser/android-apk/verified）、`capabilities`、逐套件结果与 `sourceLockUnchanged`/`sourceDistUnchanged`。
+
+**版本自适应对照：** `scripts/tests/web-fixture.mjs` 新增 `readUpstreamSource`，以 `RPHUB_TEST_UPSTREAM_SHA`（完整 40 位十六进制，非法即 fail-closed）为对照提交，缺省回退仓库锁；`check-candidate.mjs` 将候选自身上游提交（来自已验证的构建报告）注入每个行为套件，故对照始终等于候选来源。五个套件改用它，历史 legacy oracle（`4afa9a5`/`6d66da9`/`2780a81`）保持钉死。无 env 覆盖时对 1.9.3 逐字节等价。
+
+**可选档位：** `--browser <路径>` 复用 `check-browser.mjs`，对候选跑三个整页离线启动（Vue 挂载、开屏退出、无启动异常/资源错误）并做恢复快照真实 IndexedDB 检查；`--android-apk` 经 `sync-candidate-android.mjs` 同步候选到 Android，再以 `build-android-debug.ps1 -CandidateRun` 打包并用 `verify-candidate-apk.ps1` 逐文件核对包内 `assets/public/*` 的 SHA、拒绝缺失/多余/重复项。必需档位为 `composition`+`behavior`；`browser`/`android-apk` 通过后才记入 `capabilities`，因此不会出现“未跑却报通过”。
+
+**Windows 管道挂起修复：** Gradle 守护进程会继承构建子进程的 stdout 句柄，用管道捕获其输出永远等不到 EOF（表现为构建已完成却挂起）。Android 档改用 `runStreamedToFile`：输出重定向到日志文件，按**直接子进程**的 `exit` 事件收尾，与 `build-and-install.ps1` 的 `Invoke-Native` 同一契约；超时先置标志再 kill，避免误判成功。
+
+**兼容失败门禁（`npm run test:compat`，已接入 `validate.yml`）：** 用 git plumbing（`read-tree`/`write-tree`/`commit-tree`/`hash-object` + `GIT_INDEX_FILE`，不改工作树）从锁定树合成不兼容上游，覆盖：缺失锚点、重复锚点、语义漂移、未登记的新上游路径——断言均在 `composition` 阶段 fail-closed 且诊断可读；另将被投毒的自有模块（`text-filter-cache.js`）断言 `behavior` 阶段隔离。每个用例都验证源仓锁与 `dist` 未被改写。
+
+**证据：** 相邻 1.9.4（`d312bd4b2798dad3f30307afdbd704aac1f80f1a`）本机通过四档全门禁——组合、10/10 行为、整页浏览器（三入口）、候选 APK（包内 51 文件一致，APK SHA `43e86d7f…`）；候选产物 SHA `bc8bb7ec…`，dist 内嵌公告为 `RP-Hub 1.9.4`，确认来自新上游。`test:compat` 6 个 fail-closed 用例通过；`test:compose`、`test:platform`、`test:upstream-sync`、`test:performance` 全通过。**主仓锁仍为 1.9.3、tag 未动、`dist` 未变。** 两步分别经独立只读复审（GLM-5.3）PASS，可选加固已回。
+
+**边界：** 隔离回放只证明该版本可组合且过门禁，不等于已切换锁、发布或完成真机验收；1.9.4 的锁升级、发布与真机验收均未执行，留待阶段六。
+
+### GPT 复审修正（2026-09-14）
+
+独立复审（GPT）在阶段四上给出三项必修，全部实证成立并已修：
+
+1. **CI 缺 Git 身份会失败（P1）：** `test:compat` 的 `commit-tree` 依赖开发机全局 `user.name/email`，禁用全局配置后复现 `Author identity unknown`，干净 CI 必挂。改为在 `commit-tree` 的命令环境注入测试专用 `GIT_AUTHOR_*`/`GIT_COMMITTER_*`，不读全局配置；以 `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` 指向真空配置复跑通过。
+2. **负例可能验证旧代码（P2）：** `test:compat` 只 clone 已提交 HEAD，未带入本批未提交的 `scripts/` 与登记自有文件，因此部分负例实际用的是上一提交的构建/行为脚本。改为在合成源与行为源 clone 后覆盖复制当前 `scripts/` 与 `recipe.localFiles`，与 `runAdjacentReplay` 的复制保持一致，“改完即测”确实测本次代码。
+3. **“语义漂移”其实只测了空格（P3）：** 原用例在 `=` 后加空格，只是让锚点找不到，并非“锚点不变、语义变化”。换成两个真正的语义漂移：`api-utils.js` 的 `setInterval(flush, 60)→100`（函数声明锚点不变、60 ms 固定刷新契约改变）与 `app.js` 的 count-only 调用 `includeSystem: false→true`（调用点文本锚点不变、契约改变），断言命中各自的行为校验失败信息。
+
+**另发现并修复（比 P3 更严重）：** 测试的 `git()` 辅助固定 `stdio[0]='ignore'`，导致 `hash-object --stdin` 从未收到合成内容，**每个合成文件都是空 blob**——此前 6 个负例其实是以空文件通过，属于“为错误的原因通过”。改为按需为 `hash-object` 打开 stdin 管道，并在写入后断言 blob 与预期内容 round-trip 一致，杜绝再次退化为空文件。修正后各负例诊断具体化（如 `Expected 1 stable 1.9.3 retry wrapper, found 0`），用例数 6→7。
+
+**复验：** `test:compat` 7 用例通过（含全局 Git 配置被隔离、`GIT_CONFIG_GLOBAL` 指向真空文件两种环境）；`test:compose`、`test:platform`、`test:upstream-sync`、`test:performance` 全通过；1.9.4 隔离回放仍 PASS；主仓锁仍 1.9.3、tag 与 `dist` 未动。
+
+二次独立复审（GLM-5.3）指出两处仍可能“空洞通过”，已修：
+
+- **行为阶段用例可能为基础设施崩溃放行：** 原断言只看 `stage==='behavior'` 与 `behaviorStatus==='failed'`；若 `check-candidate` 在跑测试前崩溃，也会写出 `status:'failed'`、`tests:[]` 的报告。改为额外要求错误匹配 `/Adjacent behavior gate failed: /` 且存在被判失败的套件。实测：人为在测试循环前注入崩溃 → 断言拒绝（`tests:0`）；真实行为失败 → 通过。
+- **源仓 `dist` 保留检查为空比较：** `dist/` 被 git 忽略，全新 clone 没有它，`digest` 两边都是 `null`。改为在每个源 clone 预置 `dist/index.html` 哨兵，使“回放不得改写源仓 dist”真正生效。另把 `scripts/` 覆盖复制改为先删后拷（避免工作树删除的文件残留在合成仓），并为合成源补 `node_modules` 链接。
+
+**待提交提示：** `scripts/compose/adjacent-replay.mjs`、`verify-adjacent.mjs`、`scripts/compose/tests/` 仍为未跟踪；`validate.yml` 已引用 `test:compat`，故这批文件必须随本次提交一并纳入，否则 CI 会因脚本缺失而失败（fail-closed，但会阻塞）。

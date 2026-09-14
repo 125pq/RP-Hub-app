@@ -1,4 +1,4 @@
-import { webFixturePath } from './web-fixture.mjs';
+import { webFixturePath, readUpstreamSource } from './web-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import { composeApp } from '../compose/app-transform.mjs';
 import { patchAppFilterCache } from '../upstream-sync/patches/patch-app-filter-cache.mjs';
 const current = readFileSync(webFixturePath('assets/js/app.js'),'utf8').replace(/\r\n/g,'\n');
-const upstream = execFileSync('git',['show','4aef0bb:assets/js/app.js'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
+const upstream = readUpstreamSource('assets/js/app.js');
 const legacy = execFileSync('git',['show','4afa9a5:assets/js/app.js'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 assert.equal(composeApp(upstream), current);
 assert.equal(composeApp(current), current);

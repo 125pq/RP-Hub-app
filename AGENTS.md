@@ -20,6 +20,8 @@ npm run test:upstream-sync # 补丁与上游同步全套测试（最重要）
 npm run test:performance   # 性能相关测试
 npm run test:backup        # 备份导入导出往返测试
 npm run test:compose       # 组合构建、来源报告与候选行为检查
+npm run test:compat        # 相邻版本隔离回放的兼容失败负例门禁
+npm run verify:adjacent    # 隔离回放相邻稳定上游版本（--tag，可选 --browser/--android-apk）
 ```
 
 `build:web:legacy` / `verify:dist:legacy` 保留旧的根目录复制构建，仅用于排查，不是发布路径。

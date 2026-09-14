@@ -119,8 +119,20 @@ RP-Hub-app/
 - 修改默认预设、各模式提示词、生图画师串或工具说明时，统一编辑 `built-in-content.js`。
 - 更新公告固定放在 `built-in-content.js` 最底部，方便查找和替换。
 - 可复用界面统一放在 `ui-components.js`，业务数据处理放在 `data-services.js`。
-- 修改后至少运行 `npm run test:performance`、`npm run test:platform`、`npm run build:web` 和 `npm run verify:dist`；改动组合构建或上游接入时另跑 `npm run test:compose`。
+- 修改后至少运行 `npm run test:performance`、`npm run test:platform`、`npm run build:web` 和 `npm run verify:dist`；改动组合构建或上游接入时另跑 `npm run test:compose` 和 `npm run test:compat`。
 - Android debug 构建使用 `npm run android:debug`；配置本地永久签名信息后，正式 APK 使用 `npm run android:release` 构建。
+
+### 相邻上游版本验收
+
+在**不移动当前锁、不改动 `dist/`** 的前提下，可用隔离回放验证一个新的稳定上游版本：
+
+```bash
+npm run verify:adjacent -- --tag 1.9.4
+# 可选：整页浏览器入口检查 / 候选 APK 打包比对
+npm run verify:adjacent -- --tag 1.9.4 --browser "C:\Program Files\Google\Chrome\Application\chrome.exe" --android-apk
+```
+
+它在 `.work/compose/adjacent/` 下建立一次性 clone，只在该 clone 内重定向锁，运行组合与十组行为门禁；`--browser` 追加整页离线启动检查，`--android-apk` 追加候选 APK 打包与包内网页资产比对。报告写入 `.work/compose/adjacent-report.json`，其中 `capabilities` 列出本次实际通过的档位（`composition`、`behavior` 必需，`browser`、`android-apk` 可选）。通过回放**只证明该版本可组合且通过门禁，不代表已切换锁、发布或完成真机验收**。
 
 ### 常用验证命令
 
@@ -130,6 +142,7 @@ npm run test:performance
 npm run test:platform
 npm run build:web
 npm run verify:dist
+npm run test:compat
 npm audit --omit=dev
 ```
 

@@ -5,6 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { patchAndroidUpdateCheck } from '../upstream-sync/patches/patch-android-hooks.mjs';
 import { pinUpstream, assertVersionMatchesLock } from '../compose/pin-upstream.mjs';
+import { runAdjacentReplay, REQUIRED_CAPABILITIES, OPTIONAL_CAPABILITIES } from '../compose/adjacent-replay.mjs';
 import { repositoryRoot } from '../web/paths.mjs';
 import { hash, git, filesIn, transform, classifyUpstream, assertLegacy, compareBytes, safeRelative } from '../compose/compose-lib.mjs';
 
@@ -37,6 +38,10 @@ assert.equal(rootPackage.scripts['build:web'], 'node scripts/compose/build-dist.
 assert.equal(rootPackage.scripts['verify:dist'], 'node scripts/compose/verify-published.mjs');
 assert.equal(rootPackage.scripts['build:web:legacy'], 'npm run prepare:vendor && npm run build:css && node scripts/web/build-web.mjs');
 assert.equal(rootPackage.scripts['verify:dist:legacy'], 'node scripts/web/verify-dist.mjs');
+assert.equal(rootPackage.scripts['verify:adjacent'], 'node scripts/compose/verify-adjacent.mjs');
+assert.equal(rootPackage.scripts['test:compat'], 'node scripts/compose/tests/adjacent-replay.mjs');
+const validateWorkflow = await readFile(path.join(repositoryRoot, '.github/workflows/validate.yml'), 'utf8');
+assert.match(validateWorkflow, /npm run test:compat/, 'CI must run the adjacent-version compatibility gate');
 const buildDistSource = await readFile(path.join(repositoryRoot, 'scripts/compose/build-dist.mjs'), 'utf8');
 assert.match(buildDistSource, /ensure-lock-tag\.mjs/);
 assert.match(buildDistSource, /build-candidate\.mjs', \['--official', '--run-dir'/);
@@ -276,6 +281,28 @@ assert.equal(behavior.status, 'passed');
 assert.equal(behavior.outputSha256, first.report.outputSha256);
 assert.equal(behavior.tests.length, 10);
 assert.ok(behavior.tests.every(test => test.status === 'passed'));
+assert.equal(behavior.upstreamCommit, lock.commit, 'Behavior report must record the candidate upstream commit');
+
+// The behavior gate must replay a candidate against its *own* upstream. A
+// hardcoded release oracle would make the gate structurally single-version, so
+// assert the candidate binds the oracle commit through the test environment.
+const checkSource = await readFile(path.join(repositoryRoot, 'scripts/compose/check-candidate.mjs'), 'utf8');
+assert.match(checkSource, /RPHUB_TEST_UPSTREAM_SHA: build\.upstream\.commit/);
+const fixtureSource = await readFile(path.join(repositoryRoot, 'scripts/tests/web-fixture.mjs'), 'utf8');
+assert.match(fixtureSource, /RPHUB_TEST_UPSTREAM_SHA/);
+for (const file of ['test-app-filter-cache.mjs', 'test-app-module-hooks.mjs', 'test-app-file-export.mjs',
+  'test-chat-export-streaming.mjs', 'test-app-navigation.mjs']) {
+  const testSource = await readFile(path.join(repositoryRoot, 'scripts/tests', file), 'utf8');
+  assert.doesNotMatch(testSource, /git['"],\s*\[['"]show['"],\s*['"]4aef0bb/, `${file} must not hardcode the 1.9.3 upstream oracle`);
+  assert.match(testSource, /readUpstreamSource/, `${file} must use the lock-bound upstream oracle`);
+}
+// A malformed oracle override must fail closed rather than silently fall back.
+const badOracle = spawnSync(process.execPath, ['scripts/tests/test-app-filter-cache.mjs'], {
+  cwd: repositoryRoot, encoding: 'utf8',
+  env: { ...process.env, RPHUB_TEST_WEB_ROOT: first.run + '/dist', RPHUB_TEST_UPSTREAM_SHA: '4aef0bb' },
+});
+assert.notEqual(badOracle.status, 0, 'Short oracle commit must be rejected');
+assert.match(badOracle.stderr, /full 40-hex commit id/);
 
 // Prove the selected artifact is used, with no checkout fallback on missing or
 // broken modules. Only disposable copies are changed.
@@ -302,6 +329,22 @@ const missingBehavior = spawnSync(process.execPath, ['scripts/tests/test-app-fil
 });
 assert.notEqual(missingBehavior.status, 0);
 assert.match(missingBehavior.stderr, /ENOENT/);
+
+// The isolated adjacent replay must reject non-release tags and any workspace
+// outside the repository before it clones or builds.
+await assert.rejects(runAdjacentReplay({ tag: 'latest' }), /stable release tag/);
+await assert.rejects(runAdjacentReplay({ tag: 'main' }), /stable release tag/);
+await assert.rejects(runAdjacentReplay({ tag: '1.9.4', workParent: path.dirname(repositoryRoot) }), /stay inside the source repository/);
+
+// Adjacent replay capability contract: composition + behavior are always
+// required; browser and android-apk are opt-in and must be rejected when their
+// preconditions are missing, without running the build.
+assert.deepEqual(REQUIRED_CAPABILITIES, ['composition', 'behavior']);
+assert.deepEqual(OPTIONAL_CAPABILITIES, ['browser', 'android-apk']);
+await assert.rejects(runAdjacentReplay({ tag: '1.9.4', browser: '   ' }), /non-empty string/);
+if (process.platform !== 'win32') {
+  await assert.rejects(runAdjacentReplay({ tag: '1.9.4', androidApk: true }), /requires Windows/);
+}
 
 // A candidate-only class must be scanned; scanning the root checkout would miss it.
 const cssTest = await mkdtemp(path.join(work, 'css-test-'));

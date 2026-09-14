@@ -26,7 +26,7 @@ const tests = [
   'scripts/upstream-sync/tests/backup-roundtrip.mjs',
 ];
 const result = {
-  schema: 1, status: 'failed', outputSha256: null, tests: [],
+  schema: 1, status: 'failed', outputSha256: null, upstreamCommit: null, tests: [],
   limitations: 'Node/VM behavior checks with simulated platform services; not browser mount or Android device acceptance.',
 };
 async function snapshot() {
@@ -41,6 +41,10 @@ try {
   assert.equal(hash(JSON.stringify(expected)), build.outputSha256, 'Invalid build output hash');
   assert.deepEqual(await snapshot(), expected, 'Candidate artifact differs from build report');
   result.outputSha256 = build.outputSha256;
+  // The behavior suites replay the candidate against its *own* upstream, so the
+  // oracle must track the committed lock, not a hardcoded release.
+  assert.match(build.upstream?.commit || '', /^[0-9a-f]{40}$/, 'Build must record its upstream commit');
+  result.upstreamCommit = build.upstream.commit;
   result.fixtureSha256 = hash(await readFile(path.join(repositoryRoot, 'scripts/tests/web-fixture.mjs')));
   result.recoveryFixtureSha256 = hash(await readFile(path.join(repositoryRoot, 'scripts/tests/recovery-fixture.mjs')));
   result.runnerSha256 = hash(await readFile(new URL(import.meta.url)));
@@ -48,7 +52,7 @@ try {
     const test = { file, sha256: hash(await readFile(path.join(repositoryRoot, file))) };
     const child = spawnSync(process.execPath, [path.join(repositoryRoot, file)], {
       cwd: repositoryRoot, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
-      env: { ...process.env, RPHUB_TEST_WEB_ROOT: dist },
+      env: { ...process.env, RPHUB_TEST_WEB_ROOT: dist, RPHUB_TEST_UPSTREAM_SHA: build.upstream.commit },
     });
     test.status = child.status === 0 && !child.error ? 'passed' : 'failed';
     result.tests.push(test);

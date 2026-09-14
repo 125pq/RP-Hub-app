@@ -57,3 +57,6 @@ jobs:
 
       - name: Composition tests
         run: npm run test:compose
+
+      - name: Adjacent-version compatibility gate
+        run: npm run test:compat
