@@ -3,13 +3,14 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
 import { patchTextMetrics } from '../upstream-sync/patches/patch-text-metrics.mjs';
+import { webFixturePath } from './web-fixture.mjs';
 const maps = [];
 class ObservedMap extends Map {
   constructor() { super(); maps.push(this); }
 }
 const context = vm.createContext({ window: {}, Map: ObservedMap });
-vm.runInContext(readFileSync('assets/js/text-metrics.js', 'utf8'), context);
-const app = readFileSync('assets/js/app.js', 'utf8').replace(/\r\n/g, '\n');
+vm.runInContext(readFileSync(webFixturePath('assets/js/text-metrics.js'), 'utf8'), context);
+const app = readFileSync(webFixturePath('assets/js/app.js'), 'utf8').replace(/\r\n/g, '\n');
 const binding = app.match(/^        const getTimelineCharCount = .*;$/m)?.[0];
 assert.ok(binding);
 const count = vm.runInContext(binding + '\ngetTimelineCharCount;', context);

@@ -5,10 +5,11 @@ import {
   patchWorkshopInputPanelSafeArea
 } from '../upstream-sync/patches/patch-safe-area.mjs';
 import { dominantEol, rebuildWithOriginalEol } from '../upstream-sync/lib.mjs';
+import { webFixturePath } from './web-fixture.mjs';
 
 const css = await readFile(new URL('../../assets/css/safe-area.css', import.meta.url), 'utf8');
-const index = await readFile(new URL('../../index.html', import.meta.url), 'utf8');
-const character = await readFile(new URL('../../character/index.html', import.meta.url), 'utf8');
+const index = await readFile(webFixturePath('index.html'), 'utf8');
+const character = await readFile(webFixturePath('character/index.html'), 'utf8');
 const gradle = await readFile(new URL('../../android/app/build.gradle', import.meta.url), 'utf8');
 
 const wideLayout = css.match(/@media \(min-width: 769px\) \{([\s\S]*?)\n\}/)?.[1] || '';

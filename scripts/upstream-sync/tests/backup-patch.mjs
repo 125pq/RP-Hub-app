@@ -3,9 +3,11 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { countOccurrences } from '../lib.mjs';
+import { composedSourceRoot } from '../../compose/materialize-source.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
+const upstreamRoot = composedSourceRoot({ root: projectRoot });
+const read = relativePath => readFile(path.join(upstreamRoot, relativePath), 'utf8');
 
 const [index, app, character, novel] = await Promise.all([
   read('index.html'),

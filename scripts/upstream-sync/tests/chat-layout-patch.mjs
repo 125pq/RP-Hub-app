@@ -3,9 +3,11 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchChatLayoutCss } from '../patches/patch-chat-layout.mjs';
+import { composedSourceRoot } from '../../compose/materialize-source.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
+const upstreamRoot = composedSourceRoot({ root: projectRoot });
+const read = relativePath => readFile(path.join(upstreamRoot, relativePath), 'utf8');
 
 // --- patch unit checks ------------------------------------------------------
 const upstreamSnippet = `            .centered-message-shell {
