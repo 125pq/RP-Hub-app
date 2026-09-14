@@ -178,11 +178,11 @@ function Invoke-Native {
             Start-Sleep -Milliseconds 100
         }
 
-        # 进程已退出：最多用 1 秒窗口把缓冲里的尾部输出排空。若管道被孙进程占用
-        # 而读不到 EOF，超时后放弃，保证不会挂起。
+        # 进程已退出：给异步读取一个短暂窗口把缓冲里的尾部输出排空。若管道被孙
+        # 进程占用而读不到 EOF，窗口结束后放弃，保证构建包装器不会再次等待长驻进程。
         $stdoutDone = $false
         $stderrDone = $false
-        $drainDeadline = [DateTime]::UtcNow.AddSeconds(1)
+        $drainDeadline = [DateTime]::UtcNow.AddMilliseconds(250)
         while ([DateTime]::UtcNow -lt $drainDeadline -and (-not $stdoutDone -or -not $stderrDone)) {
             $waiting = $false
             if (-not $stdoutDone -and $stdoutTask.IsCompleted) {
