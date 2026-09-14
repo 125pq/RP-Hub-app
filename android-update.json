@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.9.4",
+  "versionCode": 1090400,
+  "tag": "v1.9.4-android",
+  "notes": "## 上游 RP-Hub 1.9.4 更新说明\n\n- 解决了Gemini模型部分提示词被标记的情况\r\n- 适配了Gemini模型新缓存机制\n\n## APK 校验\n\nAPK SHA-256：`121498c41bb985749788614d253e4171b4897e76a958aa41e49d15024092b71c`\n",
+  "apk": {
+    "name": "RP-Hub-1.9.4-release.apk",
+    "sources": [
+      [
+        "https://github.com/125pq/RP-Hub-app/releases/download/v1.9.4-android/RP-Hub-1.9.4-release.apk"
+      ],
+      [
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.4-release.apk.part-000",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.4-release.apk.part-001",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.4-release.apk.part-002",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.4-release.apk.part-003",
+        "https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/RP-Hub-1.9.4-release.apk.part-004"
+      ]
+    ],
+    "size": 17643031,
+    "sha256": "121498c41bb985749788614d253e4171b4897e76a958aa41e49d15024092b71c"
+  }
+}
