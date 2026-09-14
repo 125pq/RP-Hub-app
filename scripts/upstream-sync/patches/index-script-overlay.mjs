@@ -67,6 +67,7 @@ function assertScriptOrder(lines) {
     'data-services.js',
     'offscreen-iframe-lifecycle.js',
     'runtime-services.js',
+    'card-frame-renderer.js',
     'ui-components.js',
     'platform-services.js',
     'rphub-android-adapter.js',
@@ -113,6 +114,7 @@ export function patchIndexScriptOverlay(source) {
   const core = scriptLine('core-utils.js', '');
   const data = scriptLine('data-services.js');
   const app = scriptLine('app.js');
+  lines = ensureAfter(lines, scriptLine('runtime-services.js'), scriptLine('card-frame-renderer.js'), 'card frame renderer entry');
   lines = removeOptionalLine(lines, scriptLine('performance-benchmark.js', ''), 'performance benchmark entry');
   lines = removeOptionalLine(lines, scriptLine('scroll-performance-diagnosis.js', ''), 'scroll diagnosis entry');
   lines = ensureAfter(lines, data, scriptLine('offscreen-iframe-lifecycle.js'), 'offscreen iframe entry');

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { testCardFrameRenderer } from '../tests/card-frame-renderer.browser.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -121,6 +122,11 @@ try {
     await writeFile(path.join(browserRun, page.screenshot), Buffer.from(screenshot.data, 'base64'));
     console.log(`Browser startup PASS: ${entry}`);
     if (entry === 'index.html') {
+      const frameCheck = await send('Runtime.evaluate', { awaitPromise: true, returnByValue: true,
+        expression: `(${testCardFrameRenderer.toString()})()` });
+      assert.ok(!frameCheck.exceptionDetails, JSON.stringify(frameCheck.exceptionDetails));
+      report.cardFrame = frameCheck.result.value;
+      console.log(report.cardFrame);
       // Real IndexedDB transactions, cross-chunk UTF-8 and crash/failure retention.
       // This browser has a fresh disposable profile, never the user's app data.
       const check = await send('Runtime.evaluate', { awaitPromise: true, returnByValue: true,

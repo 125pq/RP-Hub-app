@@ -15,6 +15,7 @@
     "assets/css/safe-area.css",
     "assets/css/tailwind.input.css",
     "assets/js/chat-import-streaming.js",
+    "assets/js/card-frame-renderer.js",
     "assets/js/offscreen-iframe-lifecycle.js",
     "assets/js/platform-services.js",
     "assets/js/rphub-android-adapter.js",
