@@ -60,3 +60,6 @@ jobs:
 
       - name: Adjacent-version compatibility gate
         run: npm run test:compat
+
+      - name: Full-sync replay guard
+        run: npm run test:full-sync-core

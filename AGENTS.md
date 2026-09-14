@@ -22,7 +22,10 @@ npm run test:backup        # 备份导入导出往返测试
 npm run test:compose       # 组合构建、来源报告与候选行为检查
 npm run test:compat        # 相邻版本隔离回放的兼容失败负例门禁
 npm run verify:adjacent    # 隔离回放相邻稳定上游版本（--tag，可选 --browser/--android-apk）
+npm run verify:full-sync   # 隔离回放完整 compose 同步（--tag，含 dry-run 与失败恢复）
 ```
+
+同步机制（阶段六起）：`sync:upstream` 默认“获取稳定上游 → 更新锁定输入 → 组合并校验”，不再把上游网页源码合并进根目录；旧合并路径仅在显式 `--legacy-merge` 时使用，**无自动回退**。上游锁 `upstream.lock.json` 是权威输入。
 
 `build:web:legacy` / `verify:dist:legacy` 保留旧的根目录复制构建，仅用于排查，不是发布路径。
 

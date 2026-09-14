@@ -56,8 +56,12 @@ function validateRevision(revision) {
   return numericRevision;
 }
 
-export function selectRevision({ upstreamTag, currentVersion, mode = 'merge', explicitRevision = null }) {
-  if (!['merge', 'recover', 'noop'].includes(mode)) {
+// Advancing modes bind a *new* upstream base (or re-release the same one) and
+// therefore increment the revision; non-advancing modes keep the current one.
+const ADVANCING_MODES = new Set(['merge', 'compose']);
+
+export function selectRevision({ upstreamTag, currentVersion, mode = 'compose', explicitRevision = null }) {
+  if (!['merge', 'compose', 'recover', 'noop'].includes(mode)) {
     throw new Error(`Unsupported sync mode for revision selection: ${mode}`);
   }
   const upstream = normalizeBaseVersion(upstreamTag);
@@ -70,7 +74,7 @@ export function selectRevision({ upstreamTag, currentVersion, mode = 'merge', ex
     && String(explicitRevision).trim() !== '';
   if (hasExplicitRevision) return validateRevision(explicitRevision);
 
-  if (mode !== 'merge') {
+  if (!ADVANCING_MODES.has(mode)) {
     const revision = upstream && current && upstream.base === current.base
       ? current.revision
       : deriveRevision(upstreamTag, currentVersion);

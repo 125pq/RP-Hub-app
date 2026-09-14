@@ -134,6 +134,18 @@ npm run verify:adjacent -- --tag 1.9.4 --browser "C:\Program Files\Google\Chrome
 
 它在 `.work/compose/adjacent/` 下建立一次性 clone，只在该 clone 内重定向锁，运行组合与十组行为门禁；`--browser` 追加整页离线启动检查，`--android-apk` 追加候选 APK 打包与包内网页资产比对。报告写入 `.work/compose/adjacent-report.json`，其中 `capabilities` 列出本次实际通过的档位（`composition`、`behavior` 必需，`browser`、`android-apk` 可选）。通过回放**只证明该版本可组合且通过门禁，不代表已切换锁、发布或完成真机验收**。
 
+### 上游同步流程（阶段六起）
+
+`npm run sync:upstream` 默认采用**组合式同步**：获取稳定上游 → 更新锁定输入（`upstream.lock.json` 与版本元数据）→ 组合并校验 `dist`；它**不再**把上游网页源码合并进根目录。旧的“合并 + 重放补丁”路径仅在显式 `--legacy-merge` 时使用，且**没有自动回退**。上游锁是权威输入，根目录上游文件将在阶段七退役。
+
+隔离验证完整流程（不移动主仓锁、不改 `dist`）：
+
+```bash
+npm run verify:full-sync -- --tag 1.9.4
+```
+
+它在一次性 clone 内执行真实的 pin + 版本准备 + 组合 + 校验，并验证 dry-run 与失败注入都会恢复发布输入。
+
 ### 常用验证命令
 
 ```bash
@@ -143,6 +155,7 @@ npm run test:platform
 npm run build:web
 npm run verify:dist
 npm run test:compat
+npm run test:full-sync-core
 npm audit --omit=dev
 ```
 

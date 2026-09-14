@@ -46,7 +46,7 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Fetch, merge, and reapply categorized hooks
+      - name: Resolve stable upstream release and sync mode
         id: upstream_sync
         env:
           GH_TOKEN: ${{ github.token }}
@@ -152,12 +152,16 @@ jobs:
               echo "Android Release $ANDROID_TAG has invalid target $release_target; refusing recovery" >&2
               exit 1
             fi
-            if ! git merge-base --is-ancestor "$UPSTREAM_SHA" "$release_target"; then
-              echo "Upstream release $UPSTREAM_SHA is not an ancestor of Android Release $ANDROID_TAG target $release_target; refusing recovery" >&2
-              exit 1
-            fi
+            # Compose model: the target must be in our history and its lock must
+            # pin exactly this upstream release. There is no upstream-ancestor
+            # requirement because upstream is composed, not merged.
             if ! git merge-base --is-ancestor "$release_target" "$current_head"; then
               echo "Android Release $ANDROID_TAG targets $release_target, which is not an ancestor of current HEAD $current_head; refusing recovery" >&2
+              exit 1
+            fi
+            target_lock="$(git show "$release_target:upstream.lock.json" 2>/dev/null | jq -r '.commit // ""')"
+            if [ "$target_lock" != "$UPSTREAM_SHA" ]; then
+              echo "Android Release $ANDROID_TAG target $release_target pinned upstream $target_lock, not the selected release $UPSTREAM_SHA; refusing recovery" >&2
               exit 1
             fi
             gh release download "$ANDROID_TAG" \
@@ -251,7 +255,7 @@ jobs:
             exit 0
           fi
           git add -A
-          git commit -m "chore(sync): merge upstream RP-Hub release ${UPSTREAM_RELEASE_TAG} (${UPSTREAM_SHA:0:7}) and reapply local patches"
+          git commit -m "chore(sync): compose upstream RP-Hub release ${UPSTREAM_RELEASE_TAG} (${UPSTREAM_SHA:0:7})"
           git push origin HEAD:main
 
       - name: Publish Android GitHub Release
@@ -277,12 +281,13 @@ jobs:
                 echo "Android Release $ANDROID_TAG has invalid target $release_target; refusing recovery" >&2
                 exit 1
               fi
-              if ! git merge-base --is-ancestor "$UPSTREAM_SHA" "$release_target"; then
-                echo "Upstream release $UPSTREAM_SHA is not an ancestor of Android Release $ANDROID_TAG target $release_target; refusing recovery" >&2
-                exit 1
-              fi
               if ! git merge-base --is-ancestor "$release_target" "$current_head"; then
                 echo "Android Release $ANDROID_TAG targets $release_target, which is not an ancestor of current HEAD $current_head; refusing recovery" >&2
+                exit 1
+              fi
+              target_lock="$(git show "$release_target:upstream.lock.json" 2>/dev/null | jq -r '.commit // ""')"
+              if [ "$target_lock" != "$UPSTREAM_SHA" ]; then
+                echo "Android Release $ANDROID_TAG target $release_target pinned upstream $target_lock, not the selected release $UPSTREAM_SHA; refusing recovery" >&2
                 exit 1
               fi
               echo "Android Release $ANDROID_TAG already exists; skipping duplicate recovery publication"

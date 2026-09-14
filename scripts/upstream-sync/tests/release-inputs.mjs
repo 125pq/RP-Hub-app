@@ -41,13 +41,19 @@ try {
     await rm(missingRoot, { recursive: true, force: true });
   }
 
-  // The production sync must validate against the new upstream and restore on
-  // dry run / failure rather than leaving a new lock with uncommitted metadata.
+  // The production sync must bind against the new upstream and restore on dry
+  // run / failure rather than leaving a new lock with uncommitted metadata. The
+  // default compose path delegates this to compose-sync; the explicit
+  // legacy-merge path keeps validateReleaseInputs.
   const syncSource = await readFile(path.join(projectRoot, 'scripts/upstream-sync/sync-upstream.mjs'), 'utf8');
+  assert.match(syncSource, /runComposeSync\(\{/);
   assert.match(syncSource, /validateReleaseInputs\(release, revision, \{ restoreOnSuccess: dryRun \}\)/);
   assert.match(syncSource, /snapshotReleaseInputs\(projectRoot\)/);
   assert.match(syncSource, /catch \(error\) \{\s*restoreReleaseInputs\(projectRoot, before\);\s*throw error;/);
   assert.doesNotMatch(syncSource, /if \(!dryRun\) await pinAndApplyRelease/);
+  const composeSyncSource = await readFile(path.join(projectRoot, 'scripts/upstream-sync/compose-sync.mjs'), 'utf8');
+  assert.match(composeSyncSource, /restoreReleaseInputs\(projectRoot, before\)/);
+  assert.match(composeSyncSource, /if \(dryRun\) \{/);
   console.log('Release input binding: snapshot/restore and dry-run validation wiring PASS');
 } finally {
   await rm(root, { recursive: true, force: true });

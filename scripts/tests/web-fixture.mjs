@@ -2,11 +2,19 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { composedSourceRoot } from '../compose/materialize-source.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const override = process.env.RPHUB_TEST_WEB_ROOT;
 if (override !== undefined && !override.trim()) throw new Error('RPHUB_TEST_WEB_ROOT must name an explicit directory');
-export const webFixtureRoot = override === undefined ? repository : path.resolve(override);
+// Phase 6: the lock is the source of truth. Standalone runs read the composed
+// source derived from the locked commit, not the root working-tree upstream
+// files (retired in phase 7). An explicit RPHUB_TEST_WEB_ROOT (a candidate dist)
+// still wins for candidate behavior checks.
+export const webFixtureRoot = override === undefined
+  ? composedSourceRoot({ root: repository })
+  : path.resolve(override);
+export const sourceRepository = repository;
 
 // Behavior tests compare the candidate against a "current upstream" oracle to
 // prove the registered transforms replay the candidate exactly. That oracle must

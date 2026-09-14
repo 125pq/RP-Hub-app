@@ -269,3 +269,46 @@ CI 与健壮性：`validate.yml` 在构建之后新增 `npm run test:compose`（
 - **源仓 `dist` 保留检查为空比较：** `dist/` 被 git 忽略，全新 clone 没有它，`digest` 两边都是 `null`。改为在每个源 clone 预置 `dist/index.html` 哨兵，使“回放不得改写源仓 dist”真正生效。另把 `scripts/` 覆盖复制改为先删后拷（避免工作树删除的文件残留在合成仓），并为合成源补 `node_modules` 链接。
 
 **待提交提示：** `scripts/compose/adjacent-replay.mjs`、`verify-adjacent.mjs`、`scripts/compose/tests/` 仍为未跟踪；`validate.yml` 已引用 `test:compat`，故这批文件必须随本次提交一并纳入，否则 CI 会因脚本缺失而失败（fail-closed，但会阻塞）。
+
+## 阶段六：组合式同步切换（2026-09-14）
+
+自动同步的权威输入由“合并进根目录的上游网页源码”切换为**锁定上游 + 登记变换的组合**。旧根目录上游文件保留到阶段七退役；本次只切换权威输入及其消费者，不改动主仓锁（仍 1.9.3）。
+
+### 新同步核心：`scripts/upstream-sync/compose-sync.mjs`
+
+顺序固定为：物化 release tag → 快照发布输入 → `pinUpstream` 绑锁 → 应用 Android 版本元数据（`prepare-android-release.mjs`）→ `build:web` → `verify:dist`。**dry-run 成功即恢复**，**任何一步失败也恢复**，因此失败绝不会留下“新锁 + 未提交元数据”。`sync-upstream.mjs` 默认走这条路；`--prepare-only` 交由工作流自身的 pin/version 步骤；**显式 `--legacy-merge`** 才回到旧的 merge+reapply，**没有自动回退**，避免用回退掩盖失败。
+
+### 锁模型判定与发布完整性
+
+- 集成判定：`determineComposeMode`——锁已钉住该 release 则 `noop`/`recover`，否则 `compose`；不再用 Git ancestry。
+- 发布完整性：`assertReleaseTargetLock`——release target 必须在当前历史中，且其 `upstream.lock.json` 精确等于所选 release。合并时代“上游是 target 祖先”的证明不再成立，故替换。
+- 旧 `determineSyncMode`/`assertReleaseTargetAncestry` 保留，仅供 `--legacy-merge` 与既有 fixture。
+
+### 消费者重指向：`scripts/compose/materialize-source.mjs`
+
+根目录读取者改读锁定组合源（同步、内容寻址缓存）：`web-fixture.mjs` 的独立运行与 `upstream-sync/verify.mjs`。桥接测试证明组合源与仍存在的根目录文件逐字节一致（27 exact + 2 EOL-only），重指向是行为保持的。
+
+### 隔离全流程验证
+
+`npm run verify:full-sync -- --tag 1.9.4` 在 `.work/compose/full-sync/` 的一次性 clone 内执行真实 pin + 版本 + 组合 + 校验，并断言 dry-run 与失败注入都恢复发布输入、主仓锁/dist 未动。1.9.4 通过：版本推进到 `1.9.4`，`full-compose`/`dry-run-restore`/`failure-restore` 三项全绿。离线 `test:upstream-sync/tests/compose-sync.mjs` 覆盖顺序与回滚；`test:full-sync-core` 覆盖参数与工作区约束。
+
+**边界：** 未升级 `upstream.lock.json`、未发布、未真机验收；根目录上游文件退役与旧 merge 路径清理属阶段七。
+
+### GPT/GLM 复审修正（2026-09-14）
+
+独立复审发现并修复：
+
+1. **默认 compose 路径必崩（P0，GLM 实测复现）：** `sync-upstream.mjs` 的默认分支引用了未定义的 `readLock`（编辑中丢失定义），`sync:upstream` 与 workflow 第一步都会 `ReferenceError`。补上定义并删除同样引用它的死代码 `releaseLocked`。
+2. **CLI 顶层无执行级测试（P0 根因）：** 既有测试只对 `sync-upstream.mjs` 做源文本正则，或直接调 `runComposeSync`，从不执行 CLI 模块体。新增 `tests/sync-upstream-cli.mjs`：在一次性 clone + 本地 bare upstream 上**真实运行 CLI**，断言到达 `COMPOSE_MODE=compose SYNC_MODE=compose`、锁已钉住时判定 `noop/recover`、且无 `ReferenceError`、源仓未动；并抽出可测的 `resolveMode` 覆盖分支矩阵。为支持离线执行新增两个环境接缝（`RPHUB_UPSTREAM_URL`、`RPHUB_SYNC_RELEASE_JSON`），生产不设置。
+3. **组合源缓存未含变换代码（可选）：** 缓存键原仅 lock+recipe，改补丁不改锁时会读到旧变换产物。改为并入 `scripts/compose`、`scripts/upstream-sync/patches`、`overlay-transformers.mjs`、`lib.mjs`、`app-transform.mjs` 的内容指纹。
+4. **全流程回放的源 `dist` 检查空洞（可选）：** `dist` 被 gitignore，可能 `null===null`。改为在缺失时预置哨兵再比较，结束后仅移除自建哨兵。
+
+二次复审（GLM-5.3）确认两处必修已修，但发现一处新的平台回归与两处残留：
+
+5. **默认 compose 在 Windows 上 `spawn npm` ENOENT（必修，回归）：** `compose-sync.mjs` 默认 `applyCompose` 直接 `run('npm', ...)`，而 CLI 的 `run` 只对 `.cmd/.bat` 开 shell，Windows 上 `npm` 是 `.cmd` 垫片，故 `sync:upstream` 的 compose 步骤在 Windows 本地崩溃（Linux/CI 不受影响）。改为经 `commandName` 解析为 `npm.cmd`，并加回归测试断言默认步骤使用平台 npm。以真实 CLI `--dry-run` 在隔离 clone 上端到端复验：`COMPOSE_MODE=compose SYNC_MODE=compose` → 组合校验 → `DRY_RUN_ROLLBACK=PASS`，锁保持 1.9.3。
+6. **组合源缓存未含 `recipe.localFiles`（可选残留）：** 自有扩展文件在物化时逐字节复制，改文件不改锁会读到旧缓存。把各 `localFiles` 的字节并入缓存键。
+7. **CLI 测试的“源未动”断言是恒真式（可选）：** 原先 `HEAD == HEAD` 自比。改为运行前记录 HEAD 再比较。
+
+阶段六复审修正（2026-09-14）：根目录对照仅用于固定的 1.9.3 迁移基线；新锁版本的物化缓存逐文件对照当次新鲜组合源，不要求新上游等于旧根目录。默认 compose 同步在构建前执行 `test:upstream-sync`、`test:platform`、`test:performance`，隔离回放复用同一路径，并复制工作树发布输入及 workflow，避免只测试已提交的旧配置。Git 命令非零退出默认中止，只有显式存在性探测允许失败。这里的全流程指本地 Web 同步门禁，不包含签名 APK 构建、远程发布或真机验收。
+
+本轮复验：真实 1.9.4 回放通过同步、平台、性能、构建及产物校验五项门禁，dry-run 与失败注入恢复通过；主仓 1.9.3 的同步测试、构建与产物校验通过，51 文件产物哈希仍为 `8c5291e14a9053fc819fe5b4b12cb83fd7c10dcf0ddbc2a5b0c7557c46f76e12`。回放报告保存在 `.work/compose/full-sync-report.json`，只证明本地 Web 路径。

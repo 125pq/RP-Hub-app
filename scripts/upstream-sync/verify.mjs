@@ -3,17 +3,24 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { countOccurrences, projectRoot } from './lib.mjs';
+import { composedSourceRoot } from '../compose/materialize-source.mjs';
 
+// Phase 6: the lock is the source of truth. Upstream-facing files (index, web
+// assets, character/novel pages) are read from the composed source derived from
+// the locked commit, not the root working tree (retired in phase 7). Native
+// Android sources and repository-local modules still come from the repo.
+const upstreamRoot = composedSourceRoot({ root: projectRoot });
 const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
+const readUpstream = relativePath => readFile(path.join(upstreamRoot, relativePath), 'utf8');
 const [index, app, core, character, novel, platform, android, updateCheck] = await Promise.all([
-  read('index.html'),
-  read('assets/js/app.js'),
-  read('assets/js/core-utils.js'),
-  read('character/index.html'),
-  read('novel/index.html'),
-  read('assets/js/platform-services.js'),
-  read('assets/js/rphub-android-adapter.js'),
-  read('assets/js/update-check.js')
+  readUpstream('index.html'),
+  readUpstream('assets/js/app.js'),
+  readUpstream('assets/js/core-utils.js'),
+  readUpstream('character/index.html'),
+  readUpstream('novel/index.html'),
+  readUpstream('assets/js/platform-services.js'),
+  readUpstream('assets/js/rphub-android-adapter.js'),
+  readUpstream('assets/js/update-check.js')
 ]);
 
 assert.match(platform, /global\.platformAdapter\s*=\s*platformAdapter/);
@@ -60,7 +67,7 @@ assert.match(await read('assets/js/rphub-backup.js'), /data-action="check-update
 const scanRoots = ['assets/js', 'character', 'novel'];
 const candidates = [];
 async function walk(relativeDirectory) {
-  for (const entry of await readdir(path.join(projectRoot, relativeDirectory), { withFileTypes: true })) {
+  for (const entry of await readdir(path.join(upstreamRoot, relativeDirectory), { withFileTypes: true })) {
     const relativePath = path.join(relativeDirectory, entry.name);
     if (entry.isDirectory()) {
       if (!['vendor', 'generated'].includes(entry.name)) await walk(relativePath);
@@ -81,7 +88,7 @@ const forbiddenPatterns = [
 ];
 for (const relativePath of candidates) {
   if (allowed.has(relativePath.replace(/\\/g, '/'))) continue;
-  const source = await read(relativePath);
+  const source = await readUpstream(relativePath);
   for (const [label, pattern] of forbiddenPatterns) {
     assert.doesNotMatch(source, pattern, `${label} leaked into ${relativePath}`);
   }

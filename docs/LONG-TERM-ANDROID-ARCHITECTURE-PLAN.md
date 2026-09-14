@@ -316,6 +316,14 @@ docs/architecture/               # 拟新增：接口、决策与阶段报告
 
 **停止/回退：** 发布验证或数据连续性失败，保持上一稳定发布。只回滚本次配方/锁文件和构建入口，不修改用户数据库。没有发布授权时交付本地候选与检查结果，不宣称线上完成。
 
+**阶段 6 进度（2026-09-14）：** 自动同步的权威输入已从“合并进根目录的上游网页源码”切换为**锁定上游 + 登记变换的组合**。新增 `scripts/upstream-sync/compose-sync.mjs`：物化 tag → 快照发布输入 → `pinUpstream` 绑锁 → 应用 Android 版本元数据 → `build:web` → `verify:dist`；**dry-run 成功即恢复、任何失败也恢复**，失败绝不留下“新锁配未提交元数据”。`sync-upstream.mjs` 默认走该 compose 路径（`--prepare-only` 交由工作流自身的 pin/version 步骤）；**显式 `--legacy-merge`** 才回到旧的 merge+reapply，**无自动回退**，避免掩盖失败。同步判定改为锁模型：`determineComposeMode`（锁已钉住该 release 则 noop/recover，否则 compose），发布完整性用 `assertReleaseTargetLock`（release target 必须在历史中，且其 `upstream.lock.json` 精确等于所选 release），取代合并时代“上游是 target 祖先”的证明。工作流的恢复校验、步骤名与提交信息同步改写；旧 merge 判定/证明函数保留供 legacy 路径与既有 fixture。
+
+根目录读取的消费者已改为读**锁定组合源**：新增 `scripts/compose/materialize-source.mjs`（同步、内容寻址缓存），`web-fixture.mjs` 的独立运行与 `upstream-sync/verify.mjs` 改用它；桥接测试证明组合源与仍存在的根目录文件逐字节一致（27 exact + 2 EOL-only），因此重指向是行为保持的。旧根目录上游文件留到阶段七退役。
+
+验证：新增离线 `test:upstream-sync/tests/compose-sync.mjs`（顺序、dry-run 恢复、失败回滚）与桥接测试 `compose/tests/materialize-source.mjs`；新增隔离全流程回放 `npm run verify:full-sync -- --tag 1.9.4`，在一次性 clone 内跑真实 pin+版本+组合+校验，并证明 dry-run 与失败注入都恢复输入，**主仓锁仍 1.9.3、dist 未动**。1.9.4 全流程回放通过（版本推进到 1.9.4，三项检查全绿）。`test:upstream-sync`、`test:platform`、`test:performance`、`test:compose`、`test:compat`、`test:full-sync-core` 全通过。**未升级锁、未发布**；真实发布与真机验收仍待授权。
+
+阶段六复审修正（2026-09-14）：根目录对照仅用于固定的 1.9.3 迁移基线；新锁版本的物化缓存逐文件对照当次新鲜组合源，不要求新上游等于旧根目录。默认 compose 同步在构建前执行 `test:upstream-sync`、`test:platform`、`test:performance`，隔离回放复用同一路径，并复制工作树发布输入及 workflow，避免只测试已提交的旧配置。Git 命令非零退出默认中止，只有显式存在性探测允许失败。这里的全流程指本地 Web 同步门禁，不包含签名 APK 构建、远程发布或真机验收。
+
 ### 阶段 7：退役冗余差异和旧同步特例
 
 **入口：** 组合构建已实际使用，至少两次真实上游更新提供稳定证据。该次数是退出旧路径的建议门槛，不是当前已达成事实。

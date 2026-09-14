@@ -9,17 +9,36 @@ import { mergeWithAutoResolver } from './sync-orchestration.mjs';
 import { androidReleaseMetadata, deriveRevision, selectRevision } from './prepare-android-release.mjs';
 import { pinUpstream } from '../compose/pin-upstream.mjs';
 import { snapshotReleaseInputs, restoreReleaseInputs } from './release-inputs.mjs';
-import { assertReleaseTargetAncestry, determineSyncMode } from './sync-decision.mjs';
+import { runComposeSync } from './compose-sync.mjs';
+import {
+  assertReleaseTargetAncestry, assertReleaseTargetLock, resolveMode,
+} from './sync-decision.mjs';
 
-const UPSTREAM_URL = 'https://github.com/STA1N156/RP-Hub.git';
+// Offline tests point this at a local bare repository; production uses the URL.
+const UPSTREAM_URL = process.env.RPHUB_UPSTREAM_URL || 'https://github.com/STA1N156/RP-Hub.git';
 const RELEASE_REF = 'refs/remotes/upstream/releases/latest';
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
 const prepareOnly = args.has('--prepare-only');
+// The default path composes dist from the locked upstream. `--legacy-merge`
+// restores the old "merge upstream web sources + reapply patches" path; it is
+// explicit so a failed compose can never silently fall back to it.
+const legacyMerge = args.has('--legacy-merge');
 const noCommit = args.has('--no-commit') || prepareOnly;
-const known = new Set(['--dry-run', '--prepare-only', '--no-commit']);
+const known = new Set(['--dry-run', '--prepare-only', '--no-commit', '--legacy-merge']);
 for (const arg of args) if (!known.has(arg)) throw new Error(`Unknown option: ${arg}`);
 if (dryRun && prepareOnly) throw new Error('--dry-run and --prepare-only cannot be combined');
+
+const readLock = () => JSON.parse(readFileSync(path.join(projectRoot, 'upstream.lock.json'), 'utf8'));
+
+// Read the upstream.lock.json pinned by an arbitrary commit, for the
+// release-target integrity proof. Returns '' when the file is absent so the
+// caller fails closed.
+const lockAt = async commit => {
+  const result = await git(['show', `${commit}:upstream.lock.json`], { capture: true, allowFailure: true });
+  if (result.code !== 0) return '';
+  try { return JSON.parse(result.stdout).commit || ''; } catch { return ''; }
+};
 
 function commandName(base) {
   return process.platform === 'win32' && ['npm', 'npx'].includes(base) ? `${base}.cmd` : base;
@@ -130,6 +149,46 @@ async function publicationComplete(release) {
   try { return JSON.parse(mirrorCheck.stdout).tag === metadata.androidTag; } catch { return false; }
 }
 
+// Compose-model publication check: the Android release must already exist and
+// its target must pin exactly this upstream release in its lock, and target a
+// commit in our history. There is no upstream-ancestor requirement because the
+// compose path never merges upstream into HEAD.
+async function publicationCompleteCompose(release) {
+  if (process.env.RPHUB_CHECK_PUBLICATION !== 'true') return true;
+  const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+  const rawRevision = String(process.env.RPHUB_ANDROID_REVISION || '').trim();
+  const revision = rawRevision === '' ? deriveRevision(release.tagName, packageJson.version) : Number(rawRevision);
+  const metadata = androidReleaseMetadata(release.tagName, revision);
+  const repository = process.env.GITHUB_REPOSITORY;
+  if (!repository || !process.env.GH_TOKEN) return false;
+  const releaseCheck = await run('gh', [
+    'release', 'view', metadata.androidTag,
+    '--repo', repository,
+    '--json', 'targetCommitish',
+    '--jq', '.targetCommitish'
+  ], { capture: true, allowFailure: true });
+  if (releaseCheck.code !== 0) return false;
+  const currentHead = await gitText(['rev-parse', 'HEAD']);
+  const isAncestor = async (ancestor, descendant) => {
+    const result = await git(['merge-base', '--is-ancestor', ancestor, descendant], { allowFailure: true });
+    if (result.code !== 0 && result.code !== 1) {
+      throw new Error(`Unable to verify release ancestry for ${metadata.androidTag}`);
+    }
+    return result.code === 0;
+  };
+  await assertReleaseTargetLock({
+    androidTag: metadata.androidTag,
+    upstreamSha: release.commitSha,
+    targetCommitish: releaseCheck.stdout,
+    headSha: currentHead,
+    lockAt,
+    isAncestor
+  });
+  const mirrorCheck = await run('curl', ['--silent', '--show-error', '--fail', '--location', '--max-time', '30', 'https://gitee.com/pq125pq/rp-hub-app/raw/android-latest/android-update.json'], { capture: true, allowFailure: true });
+  if (mirrorCheck.code !== 0) return false;
+  try { return JSON.parse(mirrorCheck.stdout).tag === metadata.androidTag; } catch { return false; }
+}
+
 async function mergeInProgress() {
   return (await git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { capture: true, allowFailure: true })).code === 0;
 }
@@ -141,6 +200,8 @@ async function upstreamReleaseAlreadyIntegrated(upstreamHead) {
   }
   return result.code === 0;
 }
+
+
 
 async function ensureCleanStart() {
   const status = await gitText(['status', '--porcelain']);
@@ -194,11 +255,8 @@ async function pinAndApplyRelease(release, revision) {
   await run(process.execPath, ['scripts/upstream-sync/prepare-android-release.mjs', release.tagName, String(revision)]);
 }
 
-// Bind the lock and version metadata, then validate against the *new* upstream.
-// The default build:web now composes dist from the lock, so validation must run
-// after binding; a dry run restores the prior inputs after previewing, and any
-// failure restores them too, so a new lock is never left paired with
-// uncommitted metadata. A successful real sync keeps the inputs for the commit.
+// Legacy-merge validation: after the merge/reapply, bind the lock + version and
+// run the full validation, restoring the inputs on dry run or failure.
 async function validateReleaseInputs(release, revision, { restoreOnSuccess = false } = {}) {
   const before = snapshotReleaseInputs(projectRoot);
   try {
@@ -229,6 +287,30 @@ async function runValidation() {
   await git(['diff', '--cached', '--check']);
 }
 
+// Default compose path: bind the lock + Android version metadata, then compose
+// and verify dist from the locked upstream. --prepare-only leaves binding to the
+// workflow's own pin/version steps; otherwise the inputs are bound here.
+async function runCompose(release, revision) {
+  if (prepareOnly) {
+    console.log('COMPOSE_PREPARE_ONLY=true (binding left to workflow pin/version steps)');
+    return;
+  }
+  await runComposeSync({
+    projectRoot,
+    release,
+    revision,
+    dryRun,
+    git,
+    run,
+  });
+}
+
+function commitMessage(release, upstreamShort, mode) {
+  return mode === 'compose'
+    ? `chore(sync): compose upstream RP-Hub release ${release.tagName} (${upstreamShort})`
+    : `chore(sync): merge upstream RP-Hub release ${release.tagName} (${upstreamShort}) and reapply local patches`;
+}
+
 let completed = false;
 let beforeHead = '';
 try {
@@ -236,19 +318,35 @@ try {
   beforeHead = await gitText(['rev-parse', 'HEAD']);
   console.log(`SYNC_BEFORE_HEAD=${beforeHead}`);
   await ensureUpstreamRemote();
-  const release = await resolveLatestStableRelease();
+  // Offline seam: a fixture can pin the release resolution so the CLI's top
+  // level can be exercised without GitHub. Production leaves this unset.
+  const release = process.env.RPHUB_SYNC_RELEASE_JSON
+    ? JSON.parse(process.env.RPHUB_SYNC_RELEASE_JSON)
+    : await resolveLatestStableRelease();
+  if (!/^v?\d+\.\d+\.\d+$/.test(String(release.tagName || '')) || !/^[0-9a-f]{40}$/.test(String(release.commitSha || ''))) {
+    throw new Error(`Invalid upstream release metadata: ${JSON.stringify(release)}`);
+  }
   console.log(`UPSTREAM_RELEASE=${release.tagName}`);
   console.log(`UPSTREAM_RELEASE_URL=${release.url}`);
   console.log(`UPSTREAM_RELEASE_PUBLISHED_AT=${release.publishedAt}`);
   await fetchUpstreamRelease(release);
   const upstreamHead = await gitText(['rev-parse', `${RELEASE_REF}^{commit}`]);
   const upstreamShort = await gitText(['rev-parse', '--short', `${RELEASE_REF}^{commit}`]);
-  const incoming = await gitText(['log', '--oneline', `HEAD..${upstreamHead}`]);
   console.log(`UPSTREAM_HEAD=${upstreamHead}`);
-  console.log(incoming ? `INCOMING_COMMITS=\n${incoming}` : 'INCOMING_COMMITS=none');
-  const alreadyIntegrated = await upstreamReleaseAlreadyIntegrated(upstreamHead);
-  const complete = alreadyIntegrated ? await publicationComplete(release) : false;
-  const mode = determineSyncMode({ alreadyIntegrated, publicationComplete: complete });
+
+  if (legacyMerge) {
+    const incoming = await gitText(['log', '--oneline', `HEAD..${upstreamHead}`]);
+    console.log(incoming ? `INCOMING_COMMITS=\n${incoming}` : 'INCOMING_COMMITS=none');
+  }
+  const mode = await resolveMode({
+    legacyMerge,
+    release,
+    lock: legacyMerge ? null : readLock(),
+    integrationCheck: () => upstreamReleaseAlreadyIntegrated(upstreamHead),
+    publicationCheck: () => (legacyMerge ? publicationComplete(release) : publicationCompleteCompose(release)),
+  });
+  console.log(`COMPOSE_MODE=${legacyMerge ? 'legacy-merge' : 'compose'} SYNC_MODE=${mode}`);
+
   const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
   const rawRevision = String(process.env.RPHUB_ANDROID_REVISION || '').trim();
   const revision = selectRevision({
@@ -262,10 +360,30 @@ try {
   if (mode === 'noop') {
     console.log(`UPSTREAM_HAS_UPDATES=false (release ${release.tagName} is already integrated)`);
     completed = true;
+  } else if (mode === 'recover') {
+    console.log(`UPSTREAM_HAS_UPDATES=true (release ${release.tagName} is integrated but publication is incomplete)`);
+    completed = true;
+  } else if (mode === 'compose') {
+    await runCompose(release, revision);
+    if (dryRun) {
+      const restored = await gitText(['rev-parse', 'HEAD']);
+      const status = await gitText(['status', '--porcelain']);
+      if (restored !== beforeHead || status) throw new Error('Dry-run rollback did not restore the original clean state');
+      console.log('DRY_RUN_ROLLBACK=PASS');
+    } else if (!noCommit) {
+      const status = await gitText(['status', '--porcelain']);
+      if (!status) {
+        console.log('SYNC_COMMIT=none (no changes)');
+      } else {
+        await stageTrackedChangesPrecisely();
+        await git(['commit', '-m', commitMessage(release, upstreamShort, mode)]);
+        console.log(`SYNC_COMMIT=${await gitText(['rev-parse', 'HEAD'])}`);
+      }
+    }
+    completed = true;
   } else if (mode === 'merge') {
-
-    // Keep merge output/classification and the resolver/reapply/abort path in
-    // one injectable helper so offline fixtures exercise the Action behavior.
+    // Explicit legacy path only; reached via --legacy-merge. Keep merge output,
+    // classification and resolver/reapply in the injectable helper.
     await mergeWithAutoResolver({
       cwd: projectRoot,
       upstreamRef: upstreamHead,
@@ -273,10 +391,6 @@ try {
       reapply: async () => reapplyHooks()
     });
     if (!prepareOnly) {
-      // A dry run binds the new release, previews it, then restores the prior
-      // lock and version metadata so the preview is read-only and validation
-      // really exercises the new upstream. A real run keeps the inputs to
-      // commit; any failure restores them.
       await validateReleaseInputs(release, revision, { restoreOnSuccess: dryRun });
     }
 
@@ -292,14 +406,13 @@ try {
         console.log('SYNC_COMMIT=none (no changes)');
       } else {
         await stageTrackedChangesPrecisely();
-        await git(['commit', '-m', `chore(sync): merge upstream RP-Hub release ${release.tagName} (${upstreamShort}) and reapply local patches`]);
+        await git(['commit', '-m', commitMessage(release, upstreamShort, mode)]);
         console.log(`SYNC_COMMIT=${await gitText(['rev-parse', 'HEAD'])}`);
       }
     }
     completed = true;
   } else {
-    console.log(`UPSTREAM_HAS_UPDATES=true (release ${release.tagName} is integrated but publication is incomplete)`);
-    completed = true;
+    throw new Error(`Unsupported sync mode: ${mode}`);
   }
 } finally {
   if (!completed && await mergeInProgress()) {

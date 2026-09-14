@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from '../lib.mjs';
 import { pollGiteeMirror } from '../poll-gitee-mirror.mjs';
-import { assertReleaseTargetAncestry, determineSyncMode } from '../sync-decision.mjs';
+import { assertReleaseTargetAncestry, assertReleaseTargetLock, determineComposeMode, determineSyncMode, resolveMode } from '../sync-decision.mjs';
 
 const read = relativePath => readFile(path.join(projectRoot, relativePath), 'utf8');
 const [workflow, gradle, updater] = await Promise.all([
@@ -15,8 +15,8 @@ const [workflow, gradle, updater] = await Promise.all([
 assert.match(gradle, /RPHUB_VERSION_NAME/);
 assert.match(gradle, /RPHUB_VERSION_CODE/);
 const configGitIdentityIndex = workflow.indexOf('name: Configure Git identity');
-const fetchMergeIndex = workflow.indexOf('name: Fetch, merge, and reapply categorized hooks');
-assert.ok(configGitIdentityIndex !== -1 && configGitIdentityIndex < fetchMergeIndex);
+const resolveReleaseIndex = workflow.indexOf('name: Resolve stable upstream release and sync mode');
+assert.ok(configGitIdentityIndex !== -1 && resolveReleaseIndex !== -1 && configGitIdentityIndex < resolveReleaseIndex);
 assert.match(workflow, /git config user\.name "github-actions\[bot\]"/);
 assert.match(workflow, /git config user\.email "41898282\+github-actions\[bot\]@users\.noreply\.github\.com"/);
 assert.match(workflow, /repository_dispatch:[\s\S]*types:[\s\S]*- upstream-release/);
@@ -44,27 +44,53 @@ assert.match(workflow, /if \[ "\$SYNC_MODE" != "recover" \][\s\S]*refusing to re
 assert.match(workflow, /if \[ "\$SYNC_MODE" = "recover" \][\s\S]*skipping duplicate recovery publication[\s\S]*exit 0/);
 assert.match(workflow, /appeared during sync mode \$SYNC_MODE[\s\S]*refusing to skip publication[\s\S]*exit 1/);
 assert.ok((workflow.match(/--json targetCommitish --jq '\.targetCommitish'/g) || []).length >= 2);
-assert.ok((workflow.match(/git merge-base --is-ancestor "\$UPSTREAM_SHA" "\$release_target"/g) || []).length >= 2);
+// Compose recovery proof: target-in-history plus a lock match, in both the APK
+// packaging and publication recovery blocks.
 assert.ok((workflow.match(/git merge-base --is-ancestor "\$release_target" "\$current_head"/g) || []).length >= 2);
+assert.ok((workflow.match(/git show "\$release_target:upstream\.lock\.json"/g) || []).length >= 2);
+assert.ok((workflow.match(/target_lock" != "\$UPSTREAM_SHA"/g) || []).length >= 2);
+assert.doesNotMatch(workflow, /git merge-base --is-ancestor "\$UPSTREAM_SHA" "\$release_target"/);
 assert.doesNotMatch(workflow, /if \[ "\$release_target" != "\$current_head" \]/);
 const syncSource = await read('scripts/upstream-sync/sync-upstream.mjs');
 assert.match(syncSource, /merge-base', '--is-ancestor/);
 assert.match(syncSource, /has_updates=\$\{upstreamUpdated\}/);
 assert.match(syncSource, /UPSTREAM_HAS_UPDATES=false \(release/);
-const integrationCheckIndex = syncSource.indexOf('const alreadyIntegrated = await upstreamReleaseAlreadyIntegrated');
+// The default path composes from the lock; the explicit --legacy-merge path
+// keeps the old merge ordering. Both are wired in one CLI.
+assert.match(syncSource, /--legacy-merge/);
+assert.match(syncSource, /runComposeSync\(\{/);
+assert.match(syncSource, /resolveMode\(\{/);
+const composeIndex = syncSource.indexOf('await runCompose(release, revision)');
 const mergeIndex = syncSource.indexOf('await mergeWithAutoResolver');
-assert.ok(integrationCheckIndex !== -1 && integrationCheckIndex < mergeIndex);
-assert.match(syncSource, /if \(mode === 'noop'\) \{[\s\S]*UPSTREAM_HAS_UPDATES=false \(release[\s\S]*\} else if \(mode === 'merge'\)/);
-assert.match(syncSource, /publicationComplete/);
+assert.ok(composeIndex !== -1 && mergeIndex !== -1 && composeIndex < mergeIndex,
+  'compose is the default branch and legacy merge follows it');
+assert.match(syncSource, /if \(mode === 'noop'\) \{[\s\S]*UPSTREAM_HAS_UPDATES=false \(release[\s\S]*mode === 'recover'/);
+assert.match(syncSource, /publicationCompleteCompose/);
 assert.match(syncSource, /sync_mode=\$\{mode\}/);
 assert.match(syncSource, /revision=\$\{revision\}/);
-const publicationCheck = syncSource.slice(syncSource.indexOf('async function publicationComplete'), syncSource.indexOf('async function mergeInProgress'));
+const publicationCheck = syncSource.slice(syncSource.indexOf('async function publicationComplete('), syncSource.indexOf('async function mergeInProgress'));
 assert.match(publicationCheck, /rawRevision === '' \? deriveRevision\(release\.tagName, packageJson\.version\)/);
 assert.doesNotMatch(publicationCheck, /selectRevision/);
+// Compose-model mode decision: locked release -> noop/recover; anything else ->
+// compose. There is no Git-ancestry input.
+assert.equal(determineComposeMode({ lockedTag: '1.9.4', lockedCommit: 'a'.repeat(40), release: { tagName: '1.9.4', commitSha: 'a'.repeat(40) }, publicationComplete: true }), 'noop');
+assert.equal(determineComposeMode({ lockedTag: '1.9.4', lockedCommit: 'a'.repeat(40), release: { tagName: '1.9.4', commitSha: 'a'.repeat(40) }, publicationComplete: false }), 'recover');
+assert.equal(determineComposeMode({ lockedTag: '1.9.3', lockedCommit: 'b'.repeat(40), release: { tagName: '1.9.4', commitSha: 'a'.repeat(40) }, publicationComplete: false }), 'compose');
+// Legacy merge mode decision is retained for the explicit escape hatch.
 assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: false }), 'merge');
 assert.equal(determineSyncMode({ alreadyIntegrated: false, publicationComplete: true }), 'merge');
 assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: true }), 'noop');
 assert.equal(determineSyncMode({ alreadyIntegrated: true, publicationComplete: false }), 'recover');
+
+// resolveMode is the exact branch the CLI runs. Exercise it offline so a
+// ReferenceError or a wrong branch is caught without a network remote.
+const rel = { tagName: '1.9.4', commitSha: 'a'.repeat(40) };
+assert.equal(await resolveMode({ legacyMerge: false, release: rel, lock: { tag: '1.9.3', commit: 'b'.repeat(40) } }), 'compose');
+assert.equal(await resolveMode({ legacyMerge: false, release: rel, lock: { tag: '1.9.4', commit: 'a'.repeat(40) }, publicationCheck: async () => true }), 'noop');
+assert.equal(await resolveMode({ legacyMerge: false, release: rel, lock: { tag: '1.9.4', commit: 'a'.repeat(40) }, publicationCheck: async () => false }), 'recover');
+assert.equal(await resolveMode({ legacyMerge: false, release: rel, lock: null }), 'compose');
+assert.equal(await resolveMode({ legacyMerge: true, release: rel, lock: null, integrationCheck: async () => false }), 'merge');
+assert.equal(await resolveMode({ legacyMerge: true, release: rel, lock: null, integrationCheck: async () => true, publicationCheck: async () => false }), 'recover');
 const upstreamSha = '0562644622384ae645b2be959aeec0968a11d436';
 const intermediateTarget = '93c950a';
 const currentHead = '9482f302217f4dd5d69753741f26f5c9611ce4c7';
@@ -102,6 +128,44 @@ await assert.rejects(
 );
 assert.match(publicationCheck, /assertReleaseTargetAncestry/);
 assert.match(publicationCheck, /merge-base', '--is-ancestor/);
+const composePublicationCheck = syncSource.slice(syncSource.indexOf('async function publicationCompleteCompose'), syncSource.indexOf('async function mergeInProgress'));
+assert.match(composePublicationCheck, /assertReleaseTargetLock/);
+assert.match(composePublicationCheck, /lockAt/);
+// Compose-model release-target proof: target must be in our history and its
+// lock must pin exactly the selected release.
+const lockCommit = 'c'.repeat(40);
+const composedHead = 'd'.repeat(40);
+const lockCalls = [];
+assert.equal(await assertReleaseTargetLock({
+  androidTag: 'v1.9.4-android',
+  upstreamSha: lockCommit,
+  targetCommitish: 'abc1234',
+  headSha: composedHead,
+  lockAt: async target => { lockCalls.push(target); return lockCommit; },
+  isAncestor: async () => true,
+}), true);
+assert.deepEqual(lockCalls, ['abc1234']);
+await assert.rejects(
+  () => assertReleaseTargetLock({
+    androidTag: 'v1.9.4-android', upstreamSha: lockCommit, targetCommitish: 'abc1234', headSha: composedHead,
+    lockAt: async () => 'e'.repeat(40), isAncestor: async () => true,
+  }),
+  /pinned upstream .* not the selected release .*refusing to reuse its APK/s
+);
+await assert.rejects(
+  () => assertReleaseTargetLock({
+    androidTag: 'v1.9.4-android', upstreamSha: lockCommit, targetCommitish: 'abc1234', headSha: composedHead,
+    lockAt: async () => '', isAncestor: async () => true,
+  }),
+  /has no readable upstream lock.*refusing to reuse its APK/
+);
+await assert.rejects(
+  () => assertReleaseTargetLock({
+    androidTag: 'v1.9.4-android', upstreamSha: lockCommit, targetCommitish: 'abc1234', headSha: composedHead,
+    lockAt: async () => lockCommit, isAncestor: async () => false,
+  }),
+  /not an ancestor of current HEAD.*refusing to reuse its APK/
+);
 assert.match(workflow, /npm audit --omit=dev/);
 assert.match(workflow, /apksigner[\s\S]*verify --verbose --print-certs/);
 assert.match(workflow, /manifest application-id[\s\S]*io\.github\.pq125\.rphub/);
