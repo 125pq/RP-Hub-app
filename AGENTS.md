@@ -26,6 +26,8 @@ npm run verify:adjacent    # 隔离回放相邻稳定上游版本（--tag，可�
 
 `build:web:legacy` / `verify:dist:legacy` 保留旧的根目录复制构建，仅用于排查，不是发布路径。
 
+本机已装官方 Android 模拟器（AVD `RP_Hub_Pixel7`，Android 16 / API 36，Pixel 7）。adb 设备名是 `emulator-5554`，`build-and-install.ps1` 会把它当普通 adb 手机直接构建安装，无需真机即可验证。
+
 改了补丁或上游文件，**必须**跑 `npm run test:upstream-sync`。
 
 任何上游合并因冲突、proof、锚点或 EOL guard 失败并经过人工处理后，必须在
